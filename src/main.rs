@@ -2,18 +2,15 @@ use anyhow::Result;
 use btleplug::api::{Central, Characteristic, Manager as _, Peripheral as _};
 use btleplug::platform::{Manager, Peripheral};
 use futures::stream::StreamExt;
-// use hidapi::HidApi;
-use std::time::Duration;
-use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() -> Result<()> {
 
     // This part is for connecting already paired devices
-    /* 
+    /*
     let hid_api = HidApi::new()?;
     // Microsoft Keyboard Surface:
-    let vendor_id = 0x045e;  
+    let vendor_id = 0x045e;
     let product_id = 0x0917;
 
     let hid_device = match hid_api.open(vendor_id, product_id) {
@@ -24,9 +21,6 @@ async fn main() -> Result<()> {
         }
     };
     */
-
-    // TODO show a Terminal UI that lists all devices
-    // TODO let user choose and confirm, once done, pair with that BLE device
 
     // Initialize Bluetooth manager and get the first adapter
     let manager = Manager::new().await?;
@@ -39,31 +33,8 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Scan for devices and wait a few seconds
-    adapter.start_scan(Default::default()).await?;
-    sleep(Duration::from_secs(10)).await;
-
-    // Find a peripheral that looks like a keyboard/mouse by name
-    let mut kb_device: Option<Peripheral> = None;
-    for p in adapter.peripherals().await? {
-        if let Some(props) = p.properties().await? {
-            if let Some(name) = props.local_name {
-                let name_lower = name.to_lowercase();
-                if name_lower.contains("keyboard") || name_lower.contains("mouse") {
-                    kb_device = Some(p);
-                    break;
-                }
-            }
-        }
-    }
-
-    let peripheral: Peripheral = match kb_device {
-        Some(p) => p,
-        None => {
-            eprintln!("No Bluetooth keyboard/mouse device found.");
-            return Ok(());
-        }
-    };
+    // Show Terminal UI to select device
+    let peripheral = select_bluetooth_device(&adapter).await?;
 
     if !peripheral.is_connected().await? {
         peripheral.connect().await?;
@@ -89,10 +60,10 @@ async fn main() -> Result<()> {
 
     while let Some(data) = notification_stream.next().await {
         if data.uuid == hid_input_char.uuid {
-            let report = data.value;
+            let _report = data.value;
             /*
             let translated_report = translate_standard_bt_report_to_usb(&report);
-            
+
             if let Err(e) = hid_device.write(&translated_report) {
                 eprintln!("Failed to write to USB device: {}", e);
             }
@@ -101,6 +72,82 @@ async fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn select_bluetooth_device(adapter: &btleplug::platform::Adapter) -> Result<Peripheral> {
+    use std::io::{self, Write};
+    use std::time::Duration;
+    use tokio::time::sleep;
+
+    println!("Scanning for Bluetooth devices...");
+
+    // Start scanning for devices
+    adapter.start_scan(Default::default()).await?;
+    sleep(Duration::from_secs(5)).await;
+
+    // Get all discovered peripherals
+    let peripherals = adapter.peripherals().await?;
+
+    if peripherals.is_empty() {
+        return Err(anyhow::anyhow!("No Bluetooth devices found"));
+    }
+
+    // Collect device information
+    let mut devices = Vec::new();
+    for peripheral in peripherals {
+        if let Ok(Some(props)) = peripheral.properties().await {
+            let name = props.local_name.unwrap_or_else(|| "Unknown Device".to_string());
+            let address = props.address.to_string();
+            devices.push((peripheral, name, address));
+        }
+    }
+
+    if devices.is_empty() {
+        return Err(anyhow::anyhow!("No devices with readable properties found"));
+    }
+
+    // Display device selection menu
+    loop {
+        println!("\n=== Available Bluetooth Devices ===");
+        for (i, (_, name, address)) in devices.iter().enumerate() {
+            println!("{}. {} ({})", i + 1, name, address);
+        }
+        println!("\nEnter device number (1-{}) or 'q' to quit: ", devices.len());
+
+        io::stdout().flush()?;
+
+        // Read user input
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let input = input.trim();
+
+        if input.eq_ignore_ascii_case("q") {
+            return Err(anyhow::anyhow!("User cancelled device selection"));
+        }
+
+        if let Ok(choice) = input.parse::<usize>() {
+            if choice > 0 && choice <= devices.len() {
+                let (peripheral, name, address) = &devices[choice - 1];
+
+                // Confirm selection
+                println!("\nSelected: {} ({})", name, address);
+                println!("Connect to this device? (y/n): ");
+                io::stdout().flush()?;
+
+                let mut confirm = String::new();
+                io::stdin().read_line(&mut confirm)?;
+
+                if confirm.trim().eq_ignore_ascii_case("y") {
+                    println!("Connecting to {}...", name);
+                    return Ok(peripheral.clone());
+                }
+            } else {
+                println!("Invalid choice. Please enter a number between 1 and {}", devices.len());
+            }
+        } else {
+            println!("Invalid input. Please enter a number or 'q' to quit.");
+        }
+    }
 }
 
 /*
@@ -132,11 +179,15 @@ async fn list_all_bt_devices(peripheral: &Peripheral) -> Result<()> {
 async fn find_hid_input_characteristic(
     peripheral: &impl btleplug::api::Peripheral
 ) -> Result<Option<Characteristic>> {
+    use uuid::Uuid;
+
+    // HID Report characteristic UUID (0x2A4D)
+    let hid_report_uuid = Uuid::parse_str("00002a4d-0000-1000-8000-00805f9b34fb")?;
+
     let services = peripheral.services();
     for service in services {
         for characteristic in &service.characteristics {
-            // Common HID input characteristic UUID: 0x2A4D
-            if characteristic.uuid.to_string().to_lowercase().contains("2a4d") { // TODO Specify the correct value for characteristic (2a4d)
+            if characteristic.uuid == hid_report_uuid {
                 return Ok(Some(characteristic.clone()));
             }
         }

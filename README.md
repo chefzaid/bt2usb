@@ -376,4 +376,4 @@ All tunable constants live in `src/config.rs`.
 
 ## License
 
-MIT
+GPL-3.0 License (see LICENSE file for details)

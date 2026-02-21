@@ -4,7 +4,7 @@ A driverless, bare-metal Rust Bluetooth-to-USB HID bridge that leverages any mon
 
 ```mermaid
 flowchart LR
-    BT["BT Keyboard / Mouse"] -->|BLE HID reports| FW["nRF52840\nbt2usb firmware"]
+    BT["BT Keyboard / Mouse"] -->|BLE HID reports| FW["nRF52840 bt2usb firmware"]
     FW -->|USB HID reports| HOST["Host PC"]
     UI["Buttons + OLED 128x64"] --> FW
 ```

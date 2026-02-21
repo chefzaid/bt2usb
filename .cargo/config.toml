@@ -1,0 +1,14 @@
+[target.'cfg(all(target_arch = "arm", target_os = "none"))']
+runner = "probe-rs run --chip nRF52840_xxAA"
+rustflags = [
+    "-C", "linker=flip-link",       # flip-link for stack overflow protection
+    "-C", "link-arg=-Tlink.x",      # cortex-m-rt linker script
+    "-C", "link-arg=-Tdefmt.x",     # defmt linker section
+    "-C", "link-arg=--nmagic",       # disable page alignment (saves flash)
+]
+
+[build]
+target = "thumbv7em-none-eabihf"     # Cortex-M4F with hardware FPU
+
+[env]
+DEFMT_LOG = "debug"

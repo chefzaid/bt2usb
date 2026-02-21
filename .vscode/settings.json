@@ -1,0 +1,16 @@
+{
+	"rust-analyzer.check.allTargets": false,
+	"rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
+	"rust-analyzer.check.overrideCommand": [
+		"cargo",
+		"check",
+		"--workspace",
+		"--message-format=json",
+		"--features",
+		"embedded",
+		"--target",
+		"thumbv7em-none-eabihf",
+		"--bin",
+		"bt2usb"
+	]
+}

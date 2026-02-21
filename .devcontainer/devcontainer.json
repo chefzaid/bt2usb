@@ -1,0 +1,54 @@
+{
+    "name": "bt2usb Embedded Rust Development",
+    "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+    
+    // Run as non-root to avoid permission issues with USB devices
+    "remoteUser": "vscode",
+    
+    // Privileged container is enough for most WSL2 + usbipd setups.
+    // We intentionally avoid hard /dev/bus/usb bind mounts so container
+    // creation does not fail on first open when no probe is attached yet.
+    "runArgs": [
+        "--privileged"
+    ],
+    
+    // Post-create commands: install embedded Rust tooling
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    
+    // VS Code extensions for embedded Rust development
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "rust-lang.rust-analyzer",
+                "probe-rs.probe-rs-debugger",
+                "vadimcn.vscode-lldb",
+                "marus25.cortex-debug",
+                "ms-vscode-remote.remote-containers",
+                "tamasfe.even-better-toml",
+                "serayuzgur.crates",
+                "usernamehw.errorlens",
+                "fill-labs.dependi"
+            ],
+            "settings": {
+                "rust-analyzer.checkOnSave.allTargets": false,
+                "rust-analyzer.cargo.target": "thumbv7em-none-eabihf",
+                "rust-analyzer.cargo.features": ["embedded"],
+                "rust-analyzer.check.extraArgs": ["--target", "thumbv7em-none-eabihf"],
+                "editor.formatOnSave": true,
+                "editor.defaultFormatter": "rust-lang.rust-analyzer",
+                "files.watcherExclude": {
+                    "**/target/**": true
+                }
+            }
+        }
+    },
+    
+    // Forward ports for any web-based tools (e.g., RTT viewer)
+    "forwardPorts": [],
+    
+    // Features to add
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {},
+        "ghcr.io/devcontainers/features/git:1": {}
+    }
+}

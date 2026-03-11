@@ -30,7 +30,7 @@ embedded = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
             "dep:cortex-m", "dep:cortex-m-rt", "dep:embedded-hal", "dep:embedded-hal-async",
             "dep:sequential-storage", "dep:embedded-storage-async",
             "dep:defmt", "dep:defmt-rtt", "dep:panic-probe", 
-            "dep:static_cell", "dep:heapless", "defmt"]
+            "dep:static_cell", "heapless/defmt-03", "defmt"]
 # Enable defmt formatting (for embedded builds)
 defmt = ["dep:defmt"]
 
@@ -71,10 +71,9 @@ panic-probe       = { version = "0.3", features = ["print-defmt"], optional = tr
 
 # - Utilities (embedded only) ------------------------
 static_cell       = { version = "2", optional = true }
-heapless          = { version = "0.8", features = ["defmt-03"], optional = true }
+heapless          = { version = "0.8" }
 
 [dev-dependencies]
-heapless = { version = "0.8" }
 
 [profile.release]
 codegen-units = 1

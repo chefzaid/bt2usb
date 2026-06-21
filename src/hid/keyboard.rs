@@ -45,6 +45,9 @@ impl KeyboardReport {
         if data.len() < KEYBOARD_REPORT_SIZE {
             return None;
         }
+        if data[1] != 0 {
+            return None;
+        }
         Some(Self {
             modifier: data[0],
             reserved: data[1],

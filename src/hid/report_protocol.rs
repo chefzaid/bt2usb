@@ -221,6 +221,10 @@ impl HidDescriptor {
                         }
                         _ => {}
                     }
+                    // Per HID spec, Local items (Usage, Usage Min/Max, etc.) only
+                    // apply to the next Main item. Reset after each Main item to
+                    // prevent stale usage values from affecting subsequent items.
+                    usage = 0;
                 }
                 // Global items
                 1 => {

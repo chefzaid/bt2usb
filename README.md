@@ -1,11 +1,12 @@
 # bt2usb
 
-A driverless, bare-metal Rust Bluetooth-to-USB HID bridge that leverages any monitor's USB hub into a seamless "Bluetooth-KVM" for sharing peripherals across multiple hosts. Support for two simultaneous Bluetooth connections (one keyboard + one mouse). Switching a monitor's input source automatically switches the active Bluetooth connection, allowing a single Bluetooth keyboard and mouse to control multiple PCs without re-pairing.
+A driverless, bare-metal Rust Bluetooth-to-USB HID bridge for nRF52840. It connects to Bluetooth HID peripherals, exposes them as a USB keyboard/mouse/consumer-control device through a monitor's USB hub, and supports up to two simultaneous BLE HID links, typically one keyboard and one mouse. Paired device metadata and BLE bonding keys are stored in flash so reconnects do not require re-pairing after every reboot.
 
 ```mermaid
 flowchart LR
     BT["BT Keyboard / Mouse"] -->|BLE HID reports| FW["nRF52840 bt2usb firmware"]
-    FW -->|USB HID reports| HOST["Host PC"]
+    FW -->|USB HID reports| MON["PC Monitor USB Hub"]
+    MON -->|USB upstream| PC["PC"]
     UI["Buttons + OLED 128x64"] --> FW
 ```
 
@@ -52,7 +53,7 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 |----------------------|------------|-----------------------------------|
 | SoftDevice S140      | ~152 KB    | BLE stack (fixed)                 |
 | Application code     | ~80-120 KB | Firmware (release build with LTO) |
-| Device storage area  | 16 KB      | Pairing/persistence region        |
+| Device storage area  | 16 KB      | Paired-device and bond-key storage |
 | Remaining flash      | ~700 KB    | Future features / DFU             |
 
 ### RAM Usage (design target)
@@ -78,7 +79,6 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 src/
 |-- main.rs
 |-- config.rs
-|-- error.rs
 |-- power.rs
 |-- power_logic.rs
 |-- storage.rs
@@ -122,10 +122,13 @@ All inter-task communication uses Embassy channels (`Channel<CriticalSectionRawM
 
 | Channel              | Direction     | Type        | Size |
 |----------------------|---------------|-------------|------|
-| HID_REPORT_CHANNEL   | BLE -> USB    | HidReport   | 16   |
-| BLE_CMD_CHANNEL      | UI -> BLE     | BleCommand  | 4    |
-| BLE_EVENT_CHANNEL    | BLE -> UI     | BleEvent    | 8    |
-| BUTTON_CHANNEL       | Buttons -> UI | ButtonEvent | 4    |
+| HID_REPORT_CHANNEL       | BLE -> USB         | HidReport   | 16 |
+| BLE_CMD_CHANNEL          | UI -> BLE          | BleCommand  | 4  |
+| BLE_EVENT_CHANNEL        | BLE -> UI          | BleEvent    | 8  |
+| BLE_SLOT0_CMD_CHANNEL    | BLE coordinator -> slot 0 | SlotCommand | 2  |
+| BLE_SLOT1_CMD_CHANNEL    | BLE coordinator -> slot 1 | SlotCommand | 2  |
+| BLE_SLOT_EVENT_CHANNEL   | BLE slots -> coordinator   | SlotEvent   | 8  |
+| BUTTON_CHANNEL           | Buttons -> UI      | ButtonEvent | 4  |
 
 ### Key Design Decisions
 
@@ -162,7 +165,7 @@ cargo install probe-rs-tools flip-link defmt-print cargo-llvm-cov mask
 
 1. Connect SSD1306 OLED to I2C (SDA -> P0.26, SCL -> P0.27)
 2. Wire 3 buttons to P0.11, P0.12, P0.24 (other leg to GND)
-3. Connect nRF52840 USB to host PC
+3. Connect nRF52840 USB to the PC monitor's USB hub, then connect the monitor's USB upstream port to the PC
 4. Connect a debug probe (J-Link, CMSIS-DAP, or on-board DK debugger)
 
 On nRF52840-DK and Feather nRF52840, USB D+/D- are routed on-board (no external D+/D- wiring required).
@@ -267,6 +270,7 @@ A `.devcontainer/` setup is provided:
 - **Host unit tests:** HID parsing/serialization/classification (`mask test`)
 - **On-target integration:** Requires hardware + RTT/probe workflows
 - **Coverage:** `mask coverage`, HTML/JSON outputs supported
+- **Hardware-free coverage growth:** Extract more pure logic and mock BLE/storage/display boundaries; actual firmware paths still need hardware-in-the-loop tests.
 
 ---
 
@@ -299,12 +303,14 @@ sequenceDiagram
     participant B as bt2usb BLE client
     participant H as HID classifier
     participant U as USB HID writer
-    participant P as Host PC
+    participant M as PC monitor USB hub
+    participant P as PC
 
     K->>B: GATT HID notification
     B->>H: raw report bytes
     H->>U: HidReport enum
-    U->>P: USB HID report
+    U->>M: USB HID report
+    M->>P: USB upstream
 ```
 
 ---
@@ -321,23 +327,27 @@ sequenceDiagram
 - [x] Explicit BLE disconnect command handling in connection lifecycle
 - [x] HID report-map parsing integrated in BLE HID client for capability detection
 - [x] Report-ID fallback classification path for report-protocol devices
-- [x] Flash-backed paired-device load/save in BLE task
+- [x] Flash-backed paired-device and BLE bond-key load/save in BLE task
 - [x] Boot-time auto-reconnect attempt from paired-device store
 - [x] Power manager periodic tick integrated into main UI loop
 - [x] Descriptor-guided Report ID routing for report-protocol notifications
-- [x] Low-power UI redraw throttling in idle state (reduced I2C/display wakeups)
+- [x] OLED hardware power-off after inactivity and wake-on-button redraw
 - [x] Multi-device runtime connection orchestration (`src/ble/multi_conn.rs`)
 - [x] BLE bonding/encryption workflow integration
 - [x] Pairing/encryption handled in normal connect flow (no separate pairing screen required)
+- [x] Consumer release-event forwarding and safer report-protocol classification fallback
+- [x] Reconnect-safe singleton BLE bonder initialization
 - [x] OLED rendering + 3-button input handling
 - [x] Host tests + CI + coverage workflows
 - [x] Devcontainer setup for embedded workflows (WSL-aware)
 
 ### Future Enhancements
 
+- [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets
 - [ ] LED pass-through (Caps/Num Lock)
-- [ ] NKRO support via advanced report protocol handling
+- [ ] NKRO and high-resolution HID report translation beyond boot-compatible reports
+- [ ] Extract more embedded orchestration into pure/testable modules with mocked BLE/storage/display boundaries
 - [ ] System tray companion app (Windows/macOS)
 - [ ] OTA firmware update (DFU via USB or BLE)
 
@@ -353,8 +363,8 @@ All tunable constants live in `src/config.rs`.
 | BLE_CONN_INTERVAL_MIN   | 6 (7.5 ms)    | Min BLE conn interval             |
 | BLE_CONN_INTERVAL_MAX   | 12 (15 ms)    | Max BLE conn interval             |
 | MAX_PAIRED_DEVICES      | 4             | Maximum stored paired devices     |
-| STORAGE_FLASH_PAGE_START| 240           | First flash page for pair storage |
-| STORAGE_FLASH_PAGE_COUNT| 4             | Flash pages reserved for storage  |
+| STORAGE_FLASH_PAGE_START| 240           | First flash page for paired-device/bond storage |
+| STORAGE_FLASH_PAGE_COUNT| 4             | Flash pages reserved for paired-device/bond storage |
 | USB_VID / USB_PID       | 0x1209/0x0001 | USB IDs                           |
 | USB_HID_POLL_MS         | 1             | USB HID polling interval          |
 | BUTTON_DEBOUNCE_MS      | 50            | Button debounce                   |

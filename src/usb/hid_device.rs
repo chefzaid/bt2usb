@@ -1,7 +1,7 @@
-//! USB HID composite device - keyboard + mouse.
+//! USB HID composite device - keyboard + mouse + consumer control.
 //!
 //! Initialises the Embassy USB stack on the nRF52840 hardware USB
-//! peripheral and exposes two HID endpoints.
+//! peripheral and exposes keyboard, mouse, and consumer-control HID endpoints.
 
 use crate::config;
 use crate::hid::consumer::CONSUMER_REPORT_DESCRIPTOR;
@@ -49,7 +49,7 @@ pub fn suspend_signal() -> &'static Signal<CriticalSectionRawMutex, bool> {
     &USB_SUSPEND_SIGNAL
 }
 
-/// Build result containing the USB device runner and the two HID writers.
+/// Build result containing the USB device runner and HID writers.
 pub struct UsbHidDevice {
     pub device: UsbDevice<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>>,
     pub keyboard_writer:
@@ -122,7 +122,7 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
 
     let device = builder.build();
 
-    info!("USB HID composite device initialised (keyboard + mouse)");
+    info!("USB HID composite device initialised (keyboard + mouse + consumer)");
 
     UsbHidDevice {
         device,

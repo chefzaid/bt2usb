@@ -77,7 +77,8 @@ pub mod hid {
             3..=4 => MouseReport::from_ble_bytes(data).map(HidReport::Mouse),
             2 => {
                 let usage = u16::from_le_bytes([data[0], data[1]]);
-                if usage > 0 && usage < 0x1000 {
+                // Allow usage == 0 so consumer release events (key-up) are forwarded.
+                if usage < 0x1000 {
                     ConsumerReport::from_ble_bytes(data).map(HidReport::Consumer)
                 } else {
                     None
@@ -91,13 +92,27 @@ pub mod hid {
     /// - raw boot report bytes, or
     /// - report-protocol bytes prefixed with Report ID.
     pub fn classify_notification(data: &[u8]) -> Option<HidReport> {
-        classify_report(0, data).or_else(|| {
-            if data.len() > 1 {
-                classify_report(data[0], &data[1..])
-            } else {
-                None
+        classify_report_id_prefix(data).or_else(|| classify_report(0, data))
+    }
+
+    fn classify_report_id_prefix(data: &[u8]) -> Option<HidReport> {
+        if data.len() <= 1 {
+            return None;
+        }
+
+        let payload = &data[1..];
+        match data[0] {
+            1 if payload.len() >= keyboard::KEYBOARD_REPORT_SIZE => {
+                KeyboardReport::from_ble_bytes(payload).map(HidReport::Keyboard)
             }
-        })
+            2 if payload.len() == mouse::MOUSE_REPORT_SIZE => {
+                MouseReport::from_ble_bytes(payload).map(HidReport::Mouse)
+            }
+            3 if payload.len() == consumer::CONSUMER_REPORT_SIZE => {
+                ConsumerReport::from_ble_bytes(payload).map(HidReport::Consumer)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -529,6 +544,14 @@ mod tests {
     }
 
     #[test]
+    fn classify_report_rejects_keyboard_with_nonzero_reserved_byte() {
+        // 8-byte report-protocol payloads can otherwise look like boot keyboards.
+        let data = [0x02, 0x01, 0x05, 0xFB, 0x01, 0x00, 0x00, 0x00];
+        let report = classify_report(0, &data);
+        assert!(report.is_none());
+    }
+
+    #[test]
     fn classify_report_by_length_mouse_3_bytes() {
         let data = [0x01, 0x10, 0x20];
         let report = classify_report(0, &data);
@@ -553,8 +576,17 @@ mod tests {
     }
 
     #[test]
+    fn classify_report_2_byte_zero_is_consumer_release() {
+        // 2 bytes [0x00, 0x00] = consumer release event (usage 0)
+        let data = [0x00, 0x00];
+        let report = classify_report(0, &data);
+        assert!(report.is_some());
+        assert!(report.unwrap().is_consumer());
+    }
+
+    #[test]
     fn classify_report_invalid_2_byte_not_consumer() {
-        // 2 bytes but usage code too high (>0x1000)
+        // 2 bytes but usage code too high (>=0x1000)
         let data = [0x00, 0x10]; // 0x1000
         let report = classify_report(0, &data);
         assert!(report.is_none());
@@ -591,6 +623,13 @@ mod tests {
         let data = [2, 0x01, 0x10, 0x20, 0x00];
         let report = classify_notification(&data);
         assert!(matches!(report, Some(HidReport::Mouse(_))));
+    }
+
+    #[test]
+    fn classify_notification_with_report_id_prefix_consumer_release() {
+        let data = [3, 0x00, 0x00];
+        let report = classify_notification(&data);
+        assert!(matches!(report, Some(HidReport::Consumer(_))));
     }
 
     #[test]

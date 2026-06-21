@@ -133,3 +133,15 @@ where
 
     let _ = display.flush();
 }
+
+/// Turn the OLED panel on or off at the hardware level.
+///
+/// When off, the SSD1306 stops driving the OLED pixels, reducing power
+/// consumption to near zero.  The display buffer is preserved so the
+/// screen content reappears immediately when turned back on.
+pub fn set_power<I2C>(display: &mut Display<I2C>, on: bool)
+where
+    I2C: embedded_hal::i2c::I2c,
+{
+    let _ = display.set_display_on(on);
+}

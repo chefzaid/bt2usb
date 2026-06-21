@@ -11,7 +11,7 @@ use crate::ble::{hid_client, scanner, BleCommand, BleErrorTag, BleEvent, Discove
 use crate::config;
 use crate::config::MAX_PAIRED_DEVICES;
 use crate::hid::HidReport;
-use crate::storage::{PairedDevice, DEVICE_STORE};
+use crate::storage::{BondInfo, PairedDevice, DEVICE_STORE};
 use defmt::{info, warn};
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -55,6 +55,7 @@ pub struct ConnectionSlot {
     pub address: Option<Address>,
     pub name: String<32>,
     pub connected: bool,
+    connecting: bool,
 }
 
 impl ConnectionSlot {
@@ -63,7 +64,12 @@ impl ConnectionSlot {
             address: None,
             name: String::new(),
             connected: false,
+            connecting: false,
         }
+    }
+
+    fn is_occupied(&self) -> bool {
+        self.connected || self.connecting
     }
 }
 
@@ -79,17 +85,32 @@ impl MultiConnectionManager {
     }
 
     pub fn find_empty_slot(&self) -> Option<usize> {
-        self.slots.iter().position(|s| !s.connected)
+        self.slots.iter().position(|s| !s.is_occupied())
     }
 
     pub fn active_count(&self) -> usize {
         self.slots.iter().filter(|s| s.connected).count()
     }
 
+    pub fn occupied_count(&self) -> usize {
+        self.slots.iter().filter(|s| s.is_occupied()).count()
+    }
+
     pub fn is_connected_address(&self, address: &Address) -> bool {
         self.slots
             .iter()
-            .any(|slot| slot.connected && slot.address.as_ref() == Some(address))
+            .any(|slot| slot.is_occupied() && slot.address.as_ref() == Some(address))
+    }
+
+    pub fn reserve_slot(&mut self, slot: usize, device: &DiscoveredDevice) {
+        if slot < MAX_CONNECTIONS {
+            self.slots[slot] = ConnectionSlot {
+                address: Some(device.address),
+                name: device.name.clone(),
+                connected: false,
+                connecting: true,
+            };
+        }
     }
 
     pub fn connect_slot(&mut self, slot: usize, device: &DiscoveredDevice) {
@@ -98,6 +119,7 @@ impl MultiConnectionManager {
                 address: Some(device.address),
                 name: device.name.clone(),
                 connected: true,
+                connecting: false,
             };
         }
     }
@@ -107,6 +129,7 @@ impl MultiConnectionManager {
             self.slots[slot].address = None;
             self.slots[slot].name.clear();
             self.slots[slot].connected = false;
+            self.slots[slot].connecting = false;
         }
     }
 
@@ -121,14 +144,8 @@ impl MultiConnectionManager {
     }
 }
 
-struct PeerBond {
-    master_id: MasterId,
-    key: EncryptionInfo,
-    peer_id: IdentityKey,
-}
-
 struct Bonder {
-    peers: RefCell<Vec<PeerBond, MAX_PAIRED_DEVICES>>,
+    peers: RefCell<Vec<BondInfo, MAX_PAIRED_DEVICES>>,
 }
 
 impl Bonder {
@@ -136,6 +153,23 @@ impl Bonder {
         Self {
             peers: RefCell::new(Vec::new()),
         }
+    }
+
+    fn load_bonds(&self, bonds: &Vec<BondInfo, MAX_PAIRED_DEVICES>) {
+        let mut peers = self.peers.borrow_mut();
+        peers.clear();
+        for bond in bonds {
+            let _ = peers.push(*bond);
+        }
+        info!("Loaded {} BLE bonds into security handler", peers.len());
+    }
+
+    fn bond_for_address(&self, address: Address) -> Option<BondInfo> {
+        self.peers
+            .borrow()
+            .iter()
+            .find(|p| p.peer_id.is_match(address))
+            .copied()
     }
 }
 
@@ -166,7 +200,7 @@ impl SecurityHandler for Bonder {
             peers.remove(0);
         }
 
-        let _ = peers.push(PeerBond {
+        let _ = peers.push(BondInfo {
             master_id,
             key,
             peer_id,
@@ -194,8 +228,30 @@ impl SecurityHandler for Bonder {
 }
 
 fn bonder() -> &'static Bonder {
+    use core::sync::atomic::{AtomicPtr, Ordering};
+
     static BONDER: StaticCell<Bonder> = StaticCell::new();
-    BONDER.init(Bonder::new())
+    // Cache the reference so subsequent calls don't panic on StaticCell::init().
+    static BONDER_REF: AtomicPtr<Bonder> = AtomicPtr::new(core::ptr::null_mut());
+
+    let ptr = BONDER_REF.load(Ordering::Acquire);
+    if !ptr.is_null() {
+        // Already initialised — return the existing reference.
+        // SAFETY: The pointer was obtained from StaticCell::try_init which returns
+        // a valid &'static mut Bonder. The Bonder is never deallocated.
+        unsafe { &*ptr }
+    } else if let Some(b) = BONDER.try_init(Bonder::new()) {
+        BONDER_REF.store(b as *mut Bonder, Ordering::Release);
+        b
+    } else {
+        loop {
+            let ptr = BONDER_REF.load(Ordering::Acquire);
+            if !ptr.is_null() {
+                // SAFETY: The pointer was obtained from StaticCell::try_init.
+                break unsafe { &*ptr };
+            }
+        }
+    }
 }
 
 pub async fn ble_task(
@@ -210,6 +266,7 @@ pub async fn ble_task(
     {
         let mut store = DEVICE_STORE.lock().await;
         store.load_from_flash(&mut flash).await;
+        bonder().load_bonds(&store.bonds());
     }
 
     let mut manager = MultiConnectionManager::new();
@@ -224,7 +281,7 @@ pub async fn ble_task(
             name: paired.name,
             rssi: paired.last_rssi,
         };
-        manager.connect_slot(0, &auto);
+        manager.reserve_slot(0, &auto);
         slot0_tx.send(SlotCommand::Connect(auto)).await;
     }
 
@@ -232,9 +289,9 @@ pub async fn ble_task(
         match select(cmd_rx.receive(), slot_event_rx.receive()).await {
             Either::First(cmd) => match cmd {
                 BleCommand::StartScan => {
-                    if manager.active_count() >= MAX_CONNECTIONS {
+                    if manager.occupied_count() >= MAX_CONNECTIONS {
                         for slot in 0..MAX_CONNECTIONS {
-                            if manager.slots[slot].connected {
+                            if manager.slots[slot].is_occupied() {
                                 send_slot_cmd(slot, SlotCommand::Disconnect, slot0_tx, slot1_tx)
                                     .await;
                             }
@@ -278,7 +335,7 @@ pub async fn ble_task(
                         continue;
                     };
 
-                    manager.connect_slot(slot, device);
+                    manager.reserve_slot(slot, device);
                     send_slot_cmd(
                         slot,
                         SlotCommand::Connect(device.clone()),
@@ -289,7 +346,7 @@ pub async fn ble_task(
                 }
                 BleCommand::Disconnect => {
                     for slot in 0..MAX_CONNECTIONS {
-                        if manager.slots[slot].connected {
+                        if manager.slots[slot].is_occupied() {
                             send_slot_cmd(slot, SlotCommand::Disconnect, slot0_tx, slot1_tx).await;
                         }
                     }
@@ -305,6 +362,9 @@ pub async fn ble_task(
                             device.name.as_str(),
                             device.rssi,
                         ));
+                        if let Some(bond) = bonder().bond_for_address(device.address) {
+                            store.set_bond_for_address(device.address, bond);
+                        }
                         store.save_to_flash(&mut flash).await;
                     }
 

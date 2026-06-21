@@ -2,14 +2,20 @@
 //!
 //! Firmware for the **nRF52840** that acts as a BLE Central, connecting to
 //! Bluetooth HID peripherals (keyboards, mice) and re-transmitting their
-//! reports over USB so the host PC sees a standard wired HID device.
+//! reports over USB through a PC monitor hub so the PC sees a standard wired HID device.
 //!
 //! ## Architecture
 //!
 //! ```text
-//! +-------------------+   BLE HID reports   +---------------------+   USB HID reports   +-----------+
-//! | BT Keyboard/Mouse | ------------------> | nRF52840 (firmware) | ------------------> | Host PC   |
-//! +-------------------+                     +---------------------+                     +-----------+
+//! +-------------------+   BLE HID reports   +---------------------+   USB HID reports   +----------------+
+//! | BT Keyboard/Mouse | ------------------> | nRF52840 (firmware) | ------------------> | PC Monitor Hub |
+//! +-------------------+                     +---------------------+                     +----------------+
+//!                                                                                              |
+//!                                                                                              | USB upstream
+//!                                                                                              v
+//!                                                                                        +-----------+
+//!                                                                                        |    PC     |
+//!                                                                                        +-----------+
 //!                                                   ^
 //!                                                   |
 //!                                         SSD1306 OLED + 3 buttons
@@ -256,7 +262,7 @@ async fn main(spawner: Spawner) {
     let mut devices: Vec<heapless::String<32>, 8> = Vec::new();
     let mut connected_name: heapless::String<32> = heapless::String::new();
     let mut power = PowerManager::new();
-    let mut sleep_banner_drawn = false;
+    let mut display_powered_off = false;
 
     loop {
         let action = embassy_futures::select::select4(
@@ -271,11 +277,19 @@ async fn main(spawner: Spawner) {
             embassy_futures::select::Either4::First(btn) => {
                 let was_display_off = !power.display_on();
                 power.activity();
-                sleep_banner_drawn = false;
 
                 if was_display_off {
+                    // Wake the OLED panel before redrawing.
+                    if display_powered_off {
+                        ui::display::set_power(&mut display, true);
+                        display_powered_off = false;
+                    }
                     match screen {
-                        Screen::Home => ui::display::draw_home(&mut display, !connected_name.is_empty(), connected_name.as_str()),
+                        Screen::Home => ui::display::draw_home(
+                            &mut display,
+                            !connected_name.is_empty(),
+                            connected_name.as_str(),
+                        ),
                         Screen::Scanning => ui::display::draw_scanning(&mut display, 0),
                         Screen::DeviceList => {
                             ui::display::draw_device_list(&mut display, &devices, selected)
@@ -338,7 +352,10 @@ async fn main(spawner: Spawner) {
 
             embassy_futures::select::Either4::Second(event) => match event {
                 BleEvent::ScanStarted => {
-                    sleep_banner_drawn = false;
+                    if display_powered_off {
+                        ui::display::set_power(&mut display, true);
+                        display_powered_off = false;
+                    }
                     screen = Screen::Scanning;
                     selected = 0;
                     device_count = 0;
@@ -347,7 +364,6 @@ async fn main(spawner: Spawner) {
                 }
 
                 BleEvent::DeviceFound(dev) => {
-                    sleep_banner_drawn = false;
                     if !devices.is_full() {
                         let _ = devices.push(dev.name.clone());
                     }
@@ -361,7 +377,6 @@ async fn main(spawner: Spawner) {
                 }
 
                 BleEvent::ScanComplete => {
-                    sleep_banner_drawn = false;
                     if device_count > 0 {
                         screen = Screen::DeviceList;
                         selected = selected.min(device_count.saturating_sub(1));
@@ -373,7 +388,6 @@ async fn main(spawner: Spawner) {
                 }
 
                 BleEvent::Connected(name) => {
-                    sleep_banner_drawn = false;
                     screen = Screen::Connected;
                     devices.clear();
                     connected_name = name.clone();
@@ -383,7 +397,6 @@ async fn main(spawner: Spawner) {
                 }
 
                 BleEvent::Disconnected => {
-                    sleep_banner_drawn = false;
                     screen = Screen::Home;
                     devices.clear();
                     selected = 0;
@@ -395,7 +408,6 @@ async fn main(spawner: Spawner) {
                 }
 
                 BleEvent::Error(tag) => {
-                    sleep_banner_drawn = false;
                     screen = Screen::Error;
                     let msg = match tag {
                         ble::BleErrorTag::ScanFailed => "Scan failed",
@@ -412,20 +424,20 @@ async fn main(spawner: Spawner) {
                 let _ = power.state();
                 let _ = power.ble_low_power();
                 if !power.display_on() && screen == Screen::Home {
-                    if !sleep_banner_drawn {
-                        ui::display::draw_home(&mut display, false, "Sleeping");
-                        sleep_banner_drawn = true;
+                    if !display_powered_off {
+                        // Turn off the OLED panel at the hardware level to save power.
+                        ui::display::set_power(&mut display, false);
+                        display_powered_off = true;
                     }
-                } else {
-                    sleep_banner_drawn = false;
+                } else if display_powered_off {
+                    // Power state changed (e.g. BLE event woke us) — turn display back on.
+                    ui::display::set_power(&mut display, true);
+                    display_powered_off = false;
                 }
             }
 
             embassy_futures::select::Either4::Fourth(suspended) => {
                 power.set_usb_suspended(suspended);
-                if !suspended {
-                    sleep_banner_drawn = false;
-                }
             }
         }
     }

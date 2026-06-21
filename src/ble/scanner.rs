@@ -10,7 +10,7 @@ use crate::config::{BLE_MAX_DISCOVERED, BLE_SCAN_DURATION_SECS};
 use defmt::info;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Sender;
-use embassy_time::Duration;
+use embassy_time::{with_timeout, Duration};
 use heapless::Vec;
 use nrf_softdevice::ble::central;
 use nrf_softdevice::Softdevice;
@@ -22,8 +22,10 @@ pub struct ScanResult {
 
 /// Run a BLE scan for `BLE_SCAN_DURATION_SECS` seconds.
 ///
-/// Discovered HID peripherals are sent to `event_tx` as `BleEvent::DeviceFound`
-/// in real time.  Once the scan window closes, `BleEvent::ScanComplete` is sent.
+/// Discovered HID peripherals are buffered during the scan (the SoftDevice scan
+/// callback cannot `.await`), then emitted to `event_tx` as a burst of
+/// `BleEvent::DeviceFound` followed by `BleEvent::ScanComplete` once the scan
+/// window closes.
 ///
 /// Returns the accumulated list so the connection manager can index into it.
 pub async fn scan(
@@ -46,7 +48,7 @@ pub async fn scan(
 
     // The SoftDevice scan callback receives each advertisement.
     // We use a closure that captures our state.
-    let scan_result = central::scan(sd, &config, |params| {
+    let scan_fut = central::scan(sd, &config, |params| {
         let data =
             unsafe { core::slice::from_raw_parts(params.data.p_data, params.data.len as usize) };
 
@@ -84,15 +86,28 @@ pub async fn scan(
         } else {
             None
         }
-    })
-    .await;
+    });
 
-    if let Err(_e) = scan_result {
-        defmt::warn!("BLE scan ended with error");
-        event_tx
-            .send(BleEvent::Error(BleErrorTag::ScanFailed))
-            .await;
-        return Err(BleErrorTag::ScanFailed);
+    // Hard backstop: the deadline above is only evaluated when an advertisement
+    // arrives, so in a quiet RF environment the scan callback might never fire
+    // and `central::scan` would otherwise run forever. Cap the whole scan with a
+    // wall-clock timeout (slightly beyond the window) so the UI can never hang.
+    let timeout = Duration::from_secs(BLE_SCAN_DURATION_SECS) + Duration::from_secs(2);
+    match with_timeout(timeout, scan_fut).await {
+        // Scan stopped itself (deadline reached or buffer full).
+        Ok(Ok(())) => {}
+        // SoftDevice reported a scan error.
+        Ok(Err(_e)) => {
+            defmt::warn!("BLE scan ended with error");
+            event_tx
+                .send(BleEvent::Error(BleErrorTag::ScanFailed))
+                .await;
+            return Err(BleErrorTag::ScanFailed);
+        }
+        // Backstop fired — proceed with whatever was discovered so far.
+        Err(_timeout) => {
+            info!("BLE scan hit hard timeout backstop");
+        }
     }
 
     // Now send all found devices to the UI.

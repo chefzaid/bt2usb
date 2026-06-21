@@ -3,7 +3,9 @@
 //! This module re-exports the pure logic modules that can be tested
 //! on the host (no embedded hardware required).
 //!
-//! Usage: `mask test` or `cargo test --lib`
+//! Usage: `mask test` (or `cargo test --lib --tests --target <host-triple>`;
+//! an explicit host target is required because `.cargo/config.toml` defaults
+//! the build target to the embedded `thumbv7em-none-eabihf` triple).
 //!
 //! For coverage: `mask coverage`
 //!
@@ -147,7 +149,7 @@ pub mod ui {
     }
 
     pub mod input_logic {
-        pub use crate::ui_input_logic_impl::{select_next, select_prev};
+        pub use crate::ui_input_logic_impl::{next_scan_dots, select_next, select_prev};
     }
 }
 
@@ -735,6 +737,15 @@ mod tests {
         assert_eq!(crate::ui::input_logic::select_next(0, 1), 0);
         assert_eq!(crate::ui::input_logic::select_next(0, 3), 1);
         assert_eq!(crate::ui::input_logic::select_next(2, 3), 2);
+    }
+
+    #[test]
+    fn ui_input_logic_scan_dots_cycle() {
+        use crate::ui::input_logic::next_scan_dots;
+        assert_eq!(next_scan_dots(0), 1);
+        assert_eq!(next_scan_dots(1), 2);
+        assert_eq!(next_scan_dots(2), 3);
+        assert_eq!(next_scan_dots(3), 0); // wraps
     }
 
     #[test]

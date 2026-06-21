@@ -50,9 +50,12 @@ use panic_probe as _; // panic handler → defmt
 
 use embassy_executor::Spawner;
 use embassy_nrf::gpio::AnyPin;
-use embassy_nrf::{self, bind_interrupts, peripherals, twim};
+use embassy_nrf::interrupt::{InterruptExt, Priority};
+use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
+use embassy_nrf::{self, bind_interrupts, interrupt, peripherals, twim};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use nrf_softdevice::SocEvent;
 
 use crate::ble::multi_conn::{self, SlotCommand, SlotEvent};
 use crate::ble::{BleCommand, BleEvent};
@@ -98,7 +101,7 @@ fn softdevice_config() -> nrf_softdevice::Config {
         }),
         conn_gap: Some(nrf_softdevice::raw::ble_gap_conn_cfg_t {
             conn_count: 2,
-            event_length: 24,
+            event_length: config::BLE_CONN_EVENT_LENGTH,
         }),
         conn_gatt: Some(nrf_softdevice::raw::ble_gatt_conn_cfg_t { att_mtu: 64 }),
         gap_role_count: Some(nrf_softdevice::raw::ble_gap_cfg_role_count_t {
@@ -113,8 +116,20 @@ fn softdevice_config() -> nrf_softdevice::Config {
 }
 
 #[embassy_executor::task]
-async fn softdevice_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
-    sd.run().await
+async fn softdevice_task(
+    sd: &'static nrf_softdevice::Softdevice,
+    vbus: &'static SoftwareVbusDetect,
+) -> ! {
+    // Drive the software VBUS detector from SoftDevice SoC power events, since
+    // the SoftDevice owns the POWER peripheral and the application cannot read
+    // those events directly.
+    sd.run_with_callback(|event| match event {
+        SocEvent::PowerUsbDetected => vbus.detected(true),
+        SocEvent::PowerUsbRemoved => vbus.detected(false),
+        SocEvent::PowerUsbPowerReady => vbus.ready(),
+        _ => {}
+    })
+    .await
 }
 
 #[embassy_executor::task]
@@ -156,47 +171,16 @@ async fn ble_slot1_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
 
 #[embassy_executor::task]
 async fn usb_device_task(
-    device: embassy_usb::UsbDevice<
-        'static,
-        embassy_nrf::usb::Driver<
-            'static,
-            peripherals::USBD,
-            embassy_nrf::usb::vbus_detect::HardwareVbusDetect,
-        >,
-    >,
+    device: embassy_usb::UsbDevice<'static, hid_device::UsbDriver>,
 ) -> ! {
     hid_device::run_usb_device(device).await
 }
 
 #[embassy_executor::task]
 async fn hid_writer_task(
-    keyboard: embassy_usb::class::hid::HidWriter<
-        'static,
-        embassy_nrf::usb::Driver<
-            'static,
-            peripherals::USBD,
-            embassy_nrf::usb::vbus_detect::HardwareVbusDetect,
-        >,
-        8,
-    >,
-    mouse: embassy_usb::class::hid::HidWriter<
-        'static,
-        embassy_nrf::usb::Driver<
-            'static,
-            peripherals::USBD,
-            embassy_nrf::usb::vbus_detect::HardwareVbusDetect,
-        >,
-        8,
-    >,
-    consumer: embassy_usb::class::hid::HidWriter<
-        'static,
-        embassy_nrf::usb::Driver<
-            'static,
-            peripherals::USBD,
-            embassy_nrf::usb::vbus_detect::HardwareVbusDetect,
-        >,
-        8,
-    >,
+    keyboard: embassy_usb::class::hid::HidWriter<'static, hid_device::UsbDriver, 8>,
+    mouse: embassy_usb::class::hid::HidWriter<'static, hid_device::UsbDriver, 8>,
+    consumer: embassy_usb::class::hid::HidWriter<'static, hid_device::UsbDriver, 8>,
 ) -> ! {
     hid_device::hid_writer_task(keyboard, mouse, consumer, &HID_REPORT_CHANNEL.receiver()).await
 }
@@ -221,15 +205,24 @@ async fn main(spawner: Spawner) {
     info!("bt2usb firmware starting");
 
     let mut nrf_config = embassy_nrf::config::Config::default();
-    nrf_config.gpiote_interrupt_priority = embassy_nrf::interrupt::Priority::P2;
-    nrf_config.time_interrupt_priority = embassy_nrf::interrupt::Priority::P2;
+    nrf_config.gpiote_interrupt_priority = Priority::P2;
+    nrf_config.time_interrupt_priority = Priority::P2;
     let p = embassy_nrf::init(nrf_config);
 
+    // The SoftDevice reserves interrupt priorities 0, 1, and 4. Every
+    // application peripheral interrupt must run at 2, 3, 5, 6, or 7 or it will
+    // preempt SoftDevice critical sections and fault. embassy-nrf only lowers
+    // the GPIOTE and time-driver interrupts for us, so set the rest explicitly.
+    interrupt::USBD.set_priority(Priority::P2);
+    interrupt::TWISPI0.set_priority(Priority::P2);
+
     let sd = nrf_softdevice::Softdevice::enable(&softdevice_config());
-    unwrap!(spawner.spawn(softdevice_task(sd)));
-    info!("SoftDevice started");
 
     let usb = hid_device::init(p.USBD);
+    // Spawn the SoftDevice task with the VBUS detector so it can forward USB
+    // power SoC events to the USB stack.
+    unwrap!(spawner.spawn(softdevice_task(sd, usb.vbus)));
+    info!("SoftDevice started");
     unwrap!(spawner.spawn(usb_device_task(usb.device)));
     unwrap!(spawner.spawn(hid_writer_task(
         usb.keyboard_writer,
@@ -263,6 +256,7 @@ async fn main(spawner: Spawner) {
     let mut connected_name: heapless::String<32> = heapless::String::new();
     let mut power = PowerManager::new();
     let mut display_powered_off = false;
+    let mut scan_dots: u8 = 0;
 
     loop {
         let action = embassy_futures::select::select4(
@@ -360,7 +354,8 @@ async fn main(spawner: Spawner) {
                     selected = 0;
                     device_count = 0;
                     devices.clear();
-                    ui::display::draw_scanning(&mut display, 1);
+                    scan_dots = 0;
+                    ui::display::draw_scanning(&mut display, scan_dots);
                 }
 
                 BleEvent::DeviceFound(dev) => {
@@ -423,7 +418,10 @@ async fn main(spawner: Spawner) {
                 power.tick();
                 let _ = power.state();
                 let _ = power.ble_low_power();
-                if !power.display_on() && screen == Screen::Home {
+                // Auto-off applies on every screen (the inactivity policy lives
+                // in `PowerManager::display_on`), not just Home — otherwise the
+                // panel would stay lit forever while connected.
+                if !power.display_on() {
                     if !display_powered_off {
                         // Turn off the OLED panel at the hardware level to save power.
                         ui::display::set_power(&mut display, false);
@@ -433,6 +431,12 @@ async fn main(spawner: Spawner) {
                     // Power state changed (e.g. BLE event woke us) — turn display back on.
                     ui::display::set_power(&mut display, true);
                     display_powered_off = false;
+                }
+
+                // Animate the scanning spinner once per tick while scanning.
+                if screen == Screen::Scanning && !display_powered_off {
+                    scan_dots = ui::input_logic::next_scan_dots(scan_dots);
+                    ui::display::draw_scanning(&mut display, scan_dots);
                 }
             }
 

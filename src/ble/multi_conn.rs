@@ -272,17 +272,24 @@ pub async fn ble_task(
     let mut manager = MultiConnectionManager::new();
     let mut last_scan: Option<ScanResult> = None;
 
-    if let Some(paired) = {
+    // Auto-reconnect the most-recently-used devices (up to the number of
+    // connection slots) so a keyboard + mouse pair both come back after a
+    // reboot without manual re-selection.
+    let autos: Vec<DiscoveredDevice, MAX_CONNECTIONS> = {
         let store = DEVICE_STORE.lock().await;
-        store.first().cloned()
-    } {
-        let auto = DiscoveredDevice {
-            address: paired.address,
-            name: paired.name,
-            rssi: paired.last_rssi,
-        };
-        manager.reserve_slot(0, &auto);
-        slot0_tx.send(SlotCommand::Connect(auto)).await;
+        let mut v = Vec::new();
+        for paired in store.iter_recent().take(MAX_CONNECTIONS) {
+            let _ = v.push(DiscoveredDevice {
+                address: paired.address,
+                name: paired.name.clone(),
+                rssi: paired.last_rssi,
+            });
+        }
+        v
+    };
+    for (slot, auto) in autos.into_iter().enumerate() {
+        manager.reserve_slot(slot, &auto);
+        send_slot_cmd(slot, SlotCommand::Connect(auto), slot0_tx, slot1_tx).await;
     }
 
     loop {
@@ -395,6 +402,17 @@ pub async fn ble_task(
     }
 }
 
+/// Outcome of a single slot connection attempt + run.
+enum SlotOutcome {
+    /// The peer closed the link (or it ended normally).
+    Closed,
+    /// The connection attempt failed before the link was usable.
+    Failed(BleErrorTag),
+    /// A new command arrived and superseded the active link, which has already
+    /// been explicitly disconnected. The command is returned to be processed next.
+    Superseded(SlotCommand),
+}
+
 pub async fn connection_slot_task(
     slot: usize,
     sd: &'static Softdevice,
@@ -412,26 +430,23 @@ pub async fn connection_slot_task(
 
         match cmd {
             SlotCommand::Connect(device) => {
-                let connect_fut =
-                    connect_and_run_secure(sd, &device, report_tx, slot_event_tx, slot);
-                match select(cmd_rx.receive(), connect_fut).await {
-                    Either::First(next_cmd) => match next_cmd {
-                        SlotCommand::Disconnect => {
-                            slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                match connect_and_run_secure(sd, &device, report_tx, slot_event_tx, slot, cmd_rx)
+                    .await
+                {
+                    SlotOutcome::Closed => {
+                        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                    }
+                    SlotOutcome::Failed(tag) => {
+                        slot_event_tx.send(SlotEvent::Error { slot, tag }).await;
+                    }
+                    SlotOutcome::Superseded(next_cmd) => {
+                        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                        // Re-process the superseding command (Disconnect is a no-op
+                        // here since the link is already torn down).
+                        if let SlotCommand::Connect(_) = next_cmd {
+                            pending_cmd = Some(next_cmd);
                         }
-                        SlotCommand::Connect(next_device) => {
-                            slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-                            pending_cmd = Some(SlotCommand::Connect(next_device));
-                        }
-                    },
-                    Either::Second(result) => match result {
-                        Ok(()) => {
-                            slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-                        }
-                        Err(tag) => {
-                            slot_event_tx.send(SlotEvent::Error { slot, tag }).await;
-                        }
-                    },
+                    }
                 }
             }
             SlotCommand::Disconnect => {}
@@ -487,7 +502,8 @@ async fn connect_and_run_secure(
     report_tx: &Sender<'_, CriticalSectionRawMutex, HidReport, 16>,
     slot_event_tx: &Sender<'_, CriticalSectionRawMutex, SlotEvent, 8>,
     slot: usize,
-) -> Result<(), BleErrorTag> {
+    cmd_rx: &Receiver<'_, CriticalSectionRawMutex, SlotCommand, 2>,
+) -> SlotOutcome {
     info!("slot {} connecting to {}", slot, device.name.as_str());
 
     let whitelist = [&device.address];
@@ -505,9 +521,14 @@ async fn connect_and_run_secure(
         ..Default::default()
     };
 
-    let conn = central::connect_with_security(sd, &conn_cfg, bonder())
-        .await
-        .map_err(|_| BleErrorTag::ConnectFailed)?;
+    // Establishment phase. This is intentionally not raced against incoming
+    // commands: until `connect_with_security` returns there is no live
+    // `Connection` to disconnect, so cancelling the future here is leak-free,
+    // and once a link exists we must own it so we can explicitly disconnect it.
+    let conn = match central::connect_with_security(sd, &conn_cfg, bonder()).await {
+        Ok(conn) => conn,
+        Err(_) => return SlotOutcome::Failed(BleErrorTag::ConnectFailed),
+    };
 
     let secure_ok = match conn.encrypt() {
         Ok(()) => wait_for_secure_link(&conn).await,
@@ -524,10 +545,16 @@ async fn connect_and_run_secure(
     if !secure_ok {
         warn!("slot {} failed to secure BLE link", slot);
         let _ = conn.disconnect();
-        return Err(BleErrorTag::ConnectFailed);
+        return SlotOutcome::Failed(BleErrorTag::ConnectFailed);
     }
 
-    let (client, descriptor) = hid_client::discover_and_subscribe(&conn).await?;
+    let (client, descriptor) = match hid_client::discover_and_subscribe(&conn).await {
+        Ok(v) => v,
+        Err(tag) => {
+            let _ = conn.disconnect();
+            return SlotOutcome::Failed(tag);
+        }
+    };
 
     slot_event_tx
         .send(SlotEvent::Connected {
@@ -536,7 +563,16 @@ async fn connect_and_run_secure(
         })
         .await;
 
-    hid_client::run_notification_loop(&conn, &client, descriptor, report_tx).await;
-
-    Ok(())
+    // Run phase. A live `Connection` now exists, so race the notification loop
+    // against incoming commands. If a command supersedes us, explicitly tear
+    // the link down (dropping the future alone does NOT disconnect the radio
+    // link in the SoftDevice, which would leak a central connection slot).
+    let run_fut = hid_client::run_notification_loop(&conn, &client, descriptor, report_tx);
+    match select(cmd_rx.receive(), run_fut).await {
+        Either::First(next_cmd) => {
+            let _ = conn.disconnect();
+            SlotOutcome::Superseded(next_cmd)
+        }
+        Either::Second(()) => SlotOutcome::Closed,
+    }
 }

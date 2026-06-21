@@ -429,19 +429,29 @@ impl DeviceStore {
 
     /// Add a newly paired device.
     pub fn add(&mut self, device: PairedDevice) {
-        // If already stored (same address), update the record.
+        // If already stored (same address), update the record. Only persist
+        // (mark dirty) when something we care about for reconnect actually
+        // changed — RSSI churns on every reconnect and is just a UI hint, so
+        // updating it alone must not cause a flash write (avoidable wear).
         if let Some(existing) = self
             .devices
             .iter_mut()
             .find(|d| d.address == device.address)
         {
-            existing.name = device.name.clone();
+            let name_changed = existing.name != device.name;
+            let bond_changed = device.bond.is_some() && existing.bond != device.bond;
+
             existing.last_rssi = device.last_rssi;
-            if device.bond.is_some() {
+            if name_changed {
+                existing.name = device.name.clone();
+            }
+            if bond_changed {
                 existing.bond = device.bond;
             }
-            self.dirty = true;
-            info!("Updated existing paired device");
+            if name_changed || bond_changed {
+                self.dirty = true;
+                info!("Updated existing paired device");
+            }
             return;
         }
 
@@ -459,6 +469,12 @@ impl DeviceStore {
     /// Get the first (most recently used) paired device for auto-reconnect.
     pub fn first(&self) -> Option<&PairedDevice> {
         self.devices.last() // Last added = most recent
+    }
+
+    /// Iterate paired devices most-recently-added first, for auto-reconnect of
+    /// multiple links (e.g. keyboard + mouse) on boot.
+    pub fn iter_recent(&self) -> impl Iterator<Item = &PairedDevice> {
+        self.devices.iter().rev()
     }
 
     /// Return all stored BLE bonds.

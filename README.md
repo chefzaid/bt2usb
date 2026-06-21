@@ -51,7 +51,7 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 
 | Region               | Size       | Usage                             |
 |----------------------|------------|-----------------------------------|
-| SoftDevice S140      | ~152 KB    | BLE stack (fixed)                 |
+| SoftDevice S140      | 156 KB     | BLE stack (fixed, flash 0x0–0x27000) |
 | Application code     | ~80-120 KB | Firmware (release build with LTO) |
 | Device storage area  | 16 KB      | Paired-device and bond-key storage |
 | Remaining flash      | ~700 KB    | Future features / DFU             |
@@ -62,7 +62,7 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 |----------------|----------|-------------------------------------------------|
 | SoftDevice RAM | ~24 KB   | Reserved in linker script (actual use ~8-12 KB) |
 | Static buffers | ~4 KB    | HID reports, display buffer, channels           |
-| Task stacks    | ~16 KB   | Embassy tasks                                   |
+| Task state     | ~16 KB   | Embassy task arenas (futures). The thread-mode executor runs all tasks cooperatively on a single call stack — there are no per-task stacks |
 | Remaining RAM  | ~212 KB  | Headroom for future features                    |
 
 ### Why No External Memory?

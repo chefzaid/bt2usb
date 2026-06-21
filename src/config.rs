@@ -19,6 +19,11 @@ pub const BLE_CONN_INTERVAL_MAX: u16 = 12;
 /// BLE slave latency (number of connection events the peripheral can skip).
 pub const BLE_SLAVE_LATENCY: u16 = 0;
 
+/// SoftDevice connection event length (in 1.25 ms units).
+/// Must not exceed the connection interval; with two simultaneous links a
+/// short event length lets the scheduler interleave both. 6 = 7.5 ms.
+pub const BLE_CONN_EVENT_LENGTH: u16 = 6;
+
 /// BLE supervision timeout (in 10 ms units). 400 = 4 s.
 pub const BLE_SUP_TIMEOUT: u16 = 400;
 

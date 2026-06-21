@@ -64,18 +64,23 @@ fi
 
 ## test
 
-> Run unit tests on host (Windows/Linux/macOS)
+> Run unit + integration tests on host (Windows/Linux/macOS)
+
+Runs the library unit tests AND the `tests/` integration tests. The embedded
+binary target is skipped automatically (it is gated behind `required-features =
+["embedded"]`). An explicit host `--target` is required because
+`.cargo/config.toml` defaults the build target to the embedded triple.
 
 ```bash
-./scripts/run-tool.sh cargo test --lib --target x86_64-pc-windows-msvc
+./scripts/run-tool.sh cargo test --lib --tests --target x86_64-pc-windows-msvc
 ```
 
 ## test-verbose
 
-> Run unit tests with output shown
+> Run unit + integration tests with output shown
 
 ```bash
-./scripts/run-tool.sh cargo test --lib --target x86_64-pc-windows-msvc -- --nocapture
+./scripts/run-tool.sh cargo test --lib --tests --target x86_64-pc-windows-msvc -- --nocapture
 ```
 
 ## coverage
@@ -302,7 +307,7 @@ echo "=== Checking format ==="
 echo "=== Running clippy ==="
 ./scripts/run-tool.sh cargo clippy --features embedded --target thumbv7em-none-eabihf -- -D warnings
 echo "=== Running tests ==="
-./scripts/run-tool.sh cargo test --lib --target x86_64-pc-windows-msvc
+./scripts/run-tool.sh cargo test --lib --tests --target x86_64-pc-windows-msvc
 echo "=== Building release ==="
 ./scripts/run-tool.sh cargo build --features embedded --target thumbv7em-none-eabihf --release
 echo "=== All checks passed! ==="

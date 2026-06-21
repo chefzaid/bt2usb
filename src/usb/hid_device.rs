@@ -9,7 +9,7 @@ use crate::hid::keyboard::KEYBOARD_REPORT_DESCRIPTOR;
 use crate::hid::mouse::MOUSE_REPORT_DESCRIPTOR;
 use crate::hid::HidReport;
 use defmt::{info, warn};
-use embassy_nrf::usb::vbus_detect::HardwareVbusDetect;
+use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
 use embassy_nrf::{self, bind_interrupts, peripherals};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -21,8 +21,20 @@ use static_cell::StaticCell;
 
 bind_interrupts!(struct Irqs {
     USBD => embassy_nrf::usb::InterruptHandler<peripherals::USBD>;
-    CLOCK_POWER => embassy_nrf::usb::vbus_detect::InterruptHandler;
 });
+
+/// VBUS detection source.
+///
+/// The Nordic SoftDevice owns the POWER peripheral and its `POWER_CLOCK`
+/// interrupt, so the application may **not** use `HardwareVbusDetect` (which
+/// would register a conflicting `CLOCK_POWER` handler and touch POWER
+/// registers reserved by the SoftDevice). Instead we use a software detector
+/// fed by SoftDevice SoC power events (see `software_vbus()` and the
+/// `softdevice_task` callback in `main.rs`).
+pub type Vbus = &'static SoftwareVbusDetect;
+
+/// Concrete USB driver type used throughout the firmware.
+pub type UsbDriver = Driver<'static, peripherals::USBD, Vbus>;
 
 static KB_STATE: StaticCell<State> = StaticCell::new();
 static MOUSE_STATE: StaticCell<State> = StaticCell::new();
@@ -33,6 +45,7 @@ static USB_MSOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CTRL_BUF: StaticCell<[u8; 128]> = StaticCell::new();
 static USB_POWER_HANDLER: StaticCell<UsbPowerHandler> = StaticCell::new();
 static USB_SUSPEND_SIGNAL: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+static SOFTWARE_VBUS: StaticCell<SoftwareVbusDetect> = StaticCell::new();
 
 struct UsbPowerHandler;
 
@@ -49,22 +62,31 @@ pub fn suspend_signal() -> &'static Signal<CriticalSectionRawMutex, bool> {
     &USB_SUSPEND_SIGNAL
 }
 
-/// Build result containing the USB device runner and HID writers.
+/// Build result containing the USB device runner, HID writers, and the
+/// software VBUS detector that the SoftDevice task must feed with SoC events.
 pub struct UsbHidDevice {
-    pub device: UsbDevice<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>>,
-    pub keyboard_writer:
-        HidWriter<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>, 8>,
-    pub mouse_writer: HidWriter<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>, 8>,
-    pub consumer_writer:
-        HidWriter<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>, 8>,
+    pub device: UsbDevice<'static, UsbDriver>,
+    pub keyboard_writer: HidWriter<'static, UsbDriver, 8>,
+    pub mouse_writer: HidWriter<'static, UsbDriver, 8>,
+    pub consumer_writer: HidWriter<'static, UsbDriver, 8>,
+    /// Software VBUS detector — route SoftDevice `SocEvent` power events here.
+    pub vbus: Vbus,
 }
 
 /// Initialise the USB stack and create the composite HID device.
 ///
 /// Must be called exactly once.  All static buffers are consumed here.
 pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
-    // Create the low-level USB driver with hardware VBUS detection.
-    let driver = Driver::new(usbd, Irqs, HardwareVbusDetect::new(Irqs));
+    // The device is bus-powered through the monitor hub, so VBUS is present at
+    // boot. Initialise as detected+ready so enumeration can proceed even if the
+    // first SoC events were emitted before `softdevice_task` started draining
+    // them; subsequent PowerUsbDetected/Removed/PowerReady events keep it
+    // accurate across unplug/replug.
+    let vbus: Vbus = SOFTWARE_VBUS.init(SoftwareVbusDetect::new(true, true));
+
+    // Create the low-level USB driver with software VBUS detection (SoftDevice
+    // owns the POWER peripheral, so HardwareVbusDetect cannot be used).
+    let driver = Driver::new(usbd, Irqs, vbus);
 
     // USB device-level configuration.
     let mut usb_config = Config::new(config::USB_VID, config::USB_PID);
@@ -73,6 +95,11 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
     usb_config.serial_number = Some(config::USB_SERIAL_NUMBER);
     usb_config.max_power = 100; // mA
     usb_config.max_packet_size_0 = 64;
+    // Advertise remote-wakeup capability so a host that has suspended the bus
+    // (e.g. PC asleep) permits the device to request wake. Actual wake-up
+    // signalling on incoming HID activity is a follow-up (needs UsbDevice
+    // access from the writer path); this at least exposes the capability.
+    usb_config.supports_remote_wakeup = true;
 
     // Allocate static descriptor buffers.
     let config_desc = USB_CONFIG_DESC.init([0u8; 256]);
@@ -129,6 +156,7 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
         keyboard_writer,
         mouse_writer,
         consumer_writer,
+        vbus,
     }
 }
 
@@ -136,9 +164,7 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
 ///
 /// This handles USB enumeration, suspend/resume, and endpoint servicing.
 /// It runs forever (or until the USB cable is disconnected).
-pub async fn run_usb_device(
-    mut device: UsbDevice<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>>,
-) -> ! {
+pub async fn run_usb_device(mut device: UsbDevice<'static, UsbDriver>) -> ! {
     info!("USB device task started");
     device.run().await
 }
@@ -146,9 +172,9 @@ pub async fn run_usb_device(
 /// HID report forwarding task - reads from the BLE→USB channel and
 /// writes to the appropriate USB HID endpoint.
 pub async fn hid_writer_task(
-    mut keyboard: HidWriter<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>, 8>,
-    mut mouse: HidWriter<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>, 8>,
-    mut consumer: HidWriter<'static, Driver<'static, peripherals::USBD, HardwareVbusDetect>, 8>,
+    mut keyboard: HidWriter<'static, UsbDriver, 8>,
+    mut mouse: HidWriter<'static, UsbDriver, 8>,
+    mut consumer: HidWriter<'static, UsbDriver, 8>,
     report_rx: &Receiver<'static, CriticalSectionRawMutex, HidReport, 16>,
 ) -> ! {
     info!("HID writer task started - waiting for reports");

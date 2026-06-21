@@ -54,12 +54,14 @@ pub async fn discover_and_subscribe(
 
     info!("HID service discovered");
 
-    // Optionally switch to Boot Protocol mode for simpler reports.
-    // Many devices default to Report Protocol; boot mode gives us
-    // a fixed 8-byte keyboard / 4-byte mouse layout.
-    match client.protocol_mode_write(&0u8).await {
-        Ok(_) => info!("Set HID protocol to Boot mode"),
-        Err(_) => warn!("Could not set boot protocol (device may not support it)"),
+    // Ensure Report Protocol mode (1). We only subscribe to the HID Report
+    // characteristic (0x2A4D); a device switched to Boot Protocol routes input
+    // to the *Boot* Keyboard/Mouse Input Report characteristics (0x2A22/0x2A33)
+    // which we do not subscribe to — forcing boot mode would silence reports.
+    // Report Protocol is also the GATT default, so this is mostly defensive.
+    match client.protocol_mode_write(&1u8).await {
+        Ok(_) => info!("Set HID protocol to Report mode"),
+        Err(_) => warn!("Could not set report protocol (using device default)"),
     }
 
     let mut descriptor_info: Option<HidDescriptor> = None;

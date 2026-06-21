@@ -137,15 +137,18 @@ impl ConsumerReport {
 
 /// USB HID Report Descriptor for Consumer Control.
 ///
-/// This is a minimal descriptor for a single 16-bit usage.
+/// Single 16-bit usage selector. The logical/usage maximum (0x0FFF) matches the
+/// upper bound enforced by the BLE classifier (`usage < 0x1000`), so every
+/// consumer usage the bridge forwards falls within the range declared to the
+/// host — otherwise the host would reject out-of-range usages.
 pub const CONSUMER_REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x0C, // Usage Page (Consumer)
     0x09, 0x01, // Usage (Consumer Control)
     0xA1, 0x01, // Collection (Application)
     0x15, 0x00, //   Logical Minimum (0)
-    0x26, 0xFF, 0x03, //   Logical Maximum (1023)
+    0x26, 0xFF, 0x0F, //   Logical Maximum (4095)
     0x19, 0x00, //   Usage Minimum (0)
-    0x2A, 0xFF, 0x03, //   Usage Maximum (1023)
+    0x2A, 0xFF, 0x0F, //   Usage Maximum (4095)
     0x75, 0x10, //   Report Size (16)
     0x95, 0x01, //   Report Count (1)
     0x81, 0x00, //   Input (Data, Array, Absolute)

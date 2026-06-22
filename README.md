@@ -24,37 +24,57 @@ flowchart LR
 
 ### Bill of Materials (BOM)
 
-| Component            | Example Part                   | Purpose                          |
-|----------------------|--------------------------------|----------------------------------|
-| MCU                  | **nRF52840-DK**                | BLE 5.0 + USB 2.0 FS on-chip     |
-| OLED Display         | SSD1306 128x64 I2C module      | Device list & status display     |
-| Buttons x3           | 6mm tactile switches           | UP, DOWN, SELECT                 |
-| Wiring               | Dupont jumpers or custom PCB   | Interconnect                     |
-| Enclosure            | 3D-printed case                | Protection & mounting            |
+| Component    | Example Part                 | Purpose                      |
+| ------------ | ---------------------------- | ---------------------------- |
+| MCU          | **nRF52840-DK**              | BLE 5.0 + USB 2.0 FS on-chip |
+| OLED Display | SSD1306 128x64 I2C module    | Device list & status display |
+| Buttons x3   | 6mm tactile switches         | UP, DOWN, SELECT             |
+| Wiring       | Dupont jumpers or custom PCB | Interconnect                 |
+| Enclosure    | 3D-printed case              | Protection & mounting        |
 
 > The DK (Development Kit) provides easy access to the nRF52840's USB and I/O pins, making it ideal for development. For a more compact final product, consider a custom PCB with an nRF52840 SoC or module.
 > A USB cable extension may be needed to be able to manage pairing process while the device is plugged into a monitor with a USB port that is not easily accessible. A USB-C to USB-A adapter may also be needed depending on the monitor's USB port type.
 
 ### Default Pin Mapping (nRF52840-DK)
 
-| Signal         | Pin     | Notes                        |
-|----------------|---------|------------------------------|
-| Button UP      | P0.11   | Active-low, internal pull-up |
-| Button DOWN    | P0.12   | Active-low, internal pull-up |
-| Button SELECT  | P0.24   | Active-low, internal pull-up |
-| I2C SDA        | P0.26   | SSD1306 data                 |
-| I2C SCL        | P0.27   | SSD1306 clock                |
-| Status LED     | P0.06   | On-board LED (unused)        |
-| USB D+/D-      | On-chip | nRF52840 native USB          |
+| Signal        | Pin     | Notes                        |
+| ------------- | ------- | ---------------------------- |
+| Button UP     | P0.11   | Active-low, internal pull-up |
+| Button DOWN   | P0.12   | Active-low, internal pull-up |
+| Button SELECT | P0.24   | Active-low, internal pull-up |
+| I2C SDA       | P0.26   | SSD1306 data                 |
+| I2C SCL       | P0.27   | SSD1306 clock                |
+| Status LED    | P0.06   | On-board LED (unused)        |
+| USB D+/D-     | On-chip | nRF52840 native USB          |
 
 > Pin assignments are configured in `src/config.rs` and instantiated in `src/main.rs`.
 
 ---
 
-### Alternative MCU Targets
+## Configuration
+
+All tunable constants live in `src/config.rs`.
+
+| Constant                     | Default       | Description                                         |
+| ---------------------------- | ------------- | --------------------------------------------------- |
+| BLE_SCAN_DURATION_SECS       | 8             | BLE scan window (seconds)                           |
+| BLE_CONN_INTERVAL_MIN        | 6 (7.5 ms)    | Min BLE conn interval                               |
+| BLE_CONN_INTERVAL_MAX        | 12 (15 ms)    | Max BLE conn interval                               |
+| MAX_PAIRED_DEVICES           | 4             | Maximum stored paired devices                       |
+| STORAGE_FLASH_PAGE_START     | 240           | First flash page for paired-device/bond storage     |
+| STORAGE_FLASH_PAGE_COUNT     | 4             | Flash pages reserved for paired-device/bond storage |
+| USB_VID / USB_PID            | 0x1209/0x0001 | USB IDs                                             |
+| USB_HID_POLL_MS              | 1             | USB HID polling interval                            |
+| BUTTON_DEBOUNCE_MS           | 50            | Button debounce                                     |
+| SCREEN_AUTO_OFF_ENABLED      | true          | Enable/disable OLED auto power-off                  |
+| SCREEN_AUTO_OFF_TIMEOUT_SECS | 120           | OLED auto-off timeout (seconds)                     |
+
+---
+
+## Alternative MCU Targets
 
 | MCU                    | BLE             | USB Device         | Rust Support             | Notes                               |
-|------------------------|-----------------|--------------------|--------------------------|-------------------------------------|
+| ---------------------- | --------------- | ------------------ | ------------------------ | ----------------------------------- |
 | **nRF52840** (primary) | On-chip BLE 5.0 | On-chip USB 2.0 FS | Embassy + nrf-softdevice | Best fit for this architecture      |
 | ESP32-S3               | On-chip BLE 5.0 | On-chip USB OTG    | esp-hal / esp-idf        | Strong alternative                  |
 | RP2040 + BT module     | External BT     | On-chip USB        | Embassy-rp               | Lower-cost, higher integration work |
@@ -68,25 +88,25 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 
 ### Memory Map (design target)
 
-| Region               | Size       | Usage                             |
-|----------------------|------------|-----------------------------------|
-| SoftDevice S140      | 156 KB     | BLE stack (fixed, flash 0x0–0x27000) |
-| Application code     | ~80-120 KB | Firmware (release build with LTO) |
-| Device storage area  | 16 KB      | Paired-device and bond-key storage |
-| Remaining flash      | ~700 KB    | Future features / DFU             |
+| Region              | Size       | Usage                                |
+| ------------------- | ---------- | ------------------------------------ |
+| SoftDevice S140     | 156 KB     | BLE stack (fixed, flash 0x0–0x27000) |
+| Application code    | ~80-120 KB | Firmware (release build with LTO)    |
+| Device storage area | 16 KB      | Paired-device and bond-key storage   |
+| Remaining flash     | ~700 KB    | Future features / DFU                |
 
 ### RAM Usage (design target)
 
-| Component      | Size     | Notes                                           
-|----------------|----------|-------------------------------------------------|
-| SoftDevice RAM | ~24 KB   | Reserved in linker script (actual use ~8-12 KB) |
-| Static buffers | ~4 KB    | HID reports, display buffer, channels           |
-| Task state     | ~16 KB   | Embassy task arenas (futures). The thread-mode executor runs all tasks cooperatively on a single call stack — there are no per-task stacks |
-| Remaining RAM  | ~212 KB  | Headroom for future features                    |
+| Component      | Size    | Notes                                                                                                                                      |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| SoftDevice RAM | ~24 KB  | Reserved in linker script (actual use ~8-12 KB)                                                                                            |
+| Static buffers | ~4 KB   | HID reports, display buffer, channels                                                                                                      |
+| Task state     | ~16 KB  | Embassy task arenas (futures). The thread-mode executor runs all tasks cooperatively on a single call stack — there are no per-task stacks |
+| Remaining RAM  | ~212 KB | Headroom for future features                                                                                                               |
 
 ---
 
-## Software Architecture
+## Firmware Architecture
 
 ```
 src/
@@ -122,35 +142,35 @@ flowchart TD
 
 All inter-task communication uses Embassy channels (`Channel<CriticalSectionRawMutex, T, N>`).
 
-| Channel              | Direction     | Type        | Size |
-|----------------------|---------------|-------------|------|
-| HID_REPORT_CHANNEL       | BLE -> USB         | HidReport   | 16 |
-| BLE_CMD_CHANNEL          | UI -> BLE          | BleCommand  | 4  |
-| BLE_EVENT_CHANNEL        | BLE -> UI          | BleEvent    | 8  |
-| BLE_SLOT0_CMD_CHANNEL    | BLE coordinator -> slot 0 | SlotCommand | 2  |
-| BLE_SLOT1_CMD_CHANNEL    | BLE coordinator -> slot 1 | SlotCommand | 2  |
-| BLE_SLOT_EVENT_CHANNEL   | BLE slots -> coordinator   | SlotEvent   | 8  |
-| BUTTON_CHANNEL           | Buttons -> UI      | ButtonEvent | 4  |
+| Channel                | Direction                 | Type        | Size |
+| ---------------------- | ------------------------- | ----------- | ---- |
+| HID_REPORT_CHANNEL     | BLE -> USB                | HidReport   | 16   |
+| BLE_CMD_CHANNEL        | UI -> BLE                 | BleCommand  | 4    |
+| BLE_EVENT_CHANNEL      | BLE -> UI                 | BleEvent    | 8    |
+| BLE_SLOT0_CMD_CHANNEL  | BLE coordinator -> slot 0 | SlotCommand | 2    |
+| BLE_SLOT1_CMD_CHANNEL  | BLE coordinator -> slot 1 | SlotCommand | 2    |
+| BLE_SLOT_EVENT_CHANNEL | BLE slots -> coordinator  | SlotEvent   | 8    |
+| BUTTON_CHANNEL         | Buttons -> UI             | ButtonEvent | 4    |
 
 ### Key Design Decisions
 
-| Decision                      | Rationale                                         |
-|-------------------------------|---------------------------------------------------|
-| `#![no_std]` + `#![no_main]`  | Deterministic bare-metal runtime                  |
-| Embassy async executor        | Efficient I/O-bound concurrency for BLE + USB     |
-| Nordic SoftDevice S140        | Production-grade BLE stack                        |
-| Static allocation             | No allocator/fragmentation issues                 |
-| `defmt` logging               | Compact embedded logging                          |
-| `probe-rs` toolchain          | Unified flashing/debug/log workflow               |
+| Decision                     | Rationale                                     |
+| ---------------------------- | --------------------------------------------- |
+| `#![no_std]` + `#![no_main]` | Deterministic bare-metal runtime              |
+| Embassy async executor       | Efficient I/O-bound concurrency for BLE + USB |
+| Nordic SoftDevice S140       | Production-grade BLE stack                    |
+| Static allocation            | No allocator/fragmentation issues             |
+| `defmt` logging              | Compact embedded logging                      |
+| `probe-rs` toolchain         | Unified flashing/debug/log workflow           |
 
 ### Why Embassy Instead of an RTOS?
 
-| Aspect           | Embassy (this project)       | Typical RTOS                        |
-|------------------|------------------------------|-------------------------------------|
-| Scheduling       | Cooperative (`.await`)       | Preemptive                          |
-| Context overhead | Lower                        | Higher                              |
-| Memory model     | Static/no heap by default    | Kernel/task overhead                |
-| BLE integration  | Native with `nrf-softdevice` | Often additional integration layer  |
+| Aspect           | Embassy (this project)       | Typical RTOS                       |
+| ---------------- | ---------------------------- | ---------------------------------- |
+| Scheduling       | Cooperative (`.await`)       | Preemptive                         |
+| Context overhead | Lower                        | Higher                             |
+| Memory model     | Static/no heap by default    | Kernel/task overhead               |
+| BLE integration  | Native with `nrf-softdevice` | Often additional integration layer |
 
 ---
 
@@ -331,8 +351,8 @@ mask sim-test             # → renode-test renode/bt2usb-sim.robot
 ```
 
 Buttons are driven by a synthetic stimulus task because injected GPIO edges
-don't reach embassy-nrf's GPIOTE wait under Renode (see Known Limitations); on
-real hardware the buttons drive `ui_logic` directly.
+don't reach embassy-nrf's GPIOTE wait under Renode; on real hardware the buttons
+drive `ui_logic` directly.
 
 ---
 
@@ -392,43 +412,24 @@ sequenceDiagram
 
 ### Future Enhancements
 
-- [ ] Build, test, and deployment pipelines for firmware release (CI/CD)
+Ordered by priority (most impactful first).
+
+- [ ] Never drop HID **release** reports under backpressure (coalesce, or apply backpressure) — a dropped key-up can otherwise leave a key stuck on the host (`ble/hid_client.rs`)
+- [ ] Resolve bonded peers by IRK so devices using rotating Resolvable Private Addresses auto-reconnect, instead of matching the now-stale stored address (`ble/multi_conn.rs`, `storage`)
+- [ ] Discover and subscribe to **all** HID Report characteristics, not just the first `0x2A4D`, so multi-report devices (e.g. keyboard + consumer keys) aren't truncated (`ble/hid_client.rs`)
+- [ ] Expose a USB HID **Boot-subclass** interface so the device works in BIOS / pre-OS, not only once an OS HID driver loads (`usb/hid_device.rs`)
+- [ ] Real low-power modes: relax BLE connection parameters and enter System-OFF on inactivity, and route actual HID activity (not just button/connect events) into the power manager (`power.rs`, `main.rs`)
+- [ ] NKRO, high-resolution, and multi-button (>3) HID translation beyond boot-compatible reports
+- [ ] LED pass-through (Caps / Num / Scroll Lock) from the host back to the BLE keyboard
+- [ ] Non-blocking async-I2C OLED flush (once `ssd1306` async compiles) so a redraw never stalls the cooperative executor (`ui/display.rs`)
+- [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
+- [ ] Make the async I/O shells testable by mocking the GATT source / USB sink / flash behind traits — Layer 2 tests the decisions; this would cover the glue that executes them
+- [ ] Resolve Renode GPIO→GPIOTE injection so the simulation can exercise real button presses (it currently uses a synthetic stimulus task)
+- [ ] CI/CD pipeline for build, test, and firmware release
 - [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets
-- [ ] LED pass-through (Caps/Num Lock)
-- [ ] NKRO and high-resolution HID report translation beyond boot-compatible reports
-- [ ] Wrap the remaining async I/O boundaries (GATT source, USB sink, flash) in mock-able traits so the async shells are testable too (builds on the functional-core split)
 - [ ] System tray companion app (Windows/macOS)
 - [ ] OTA firmware update (DFU via USB or BLE)
-
-### Known Limitations
-
-Current behavioural caveats worth knowing (each notes its eventual fix):
-
-- **BIOS / pre-OS use:** the USB interfaces are Report Protocol, not the HID Boot
-  subclass (embassy-usb doesn't expose it), so the device isn't guaranteed to work
-  before an OS HID driver loads. Fix: a custom Boot-subclass interface descriptor.
-- **Privacy-address reconnect:** auto-reconnect matches the stored device address;
-  peripherals that rotate a Resolvable Private Address aren't yet resolved via their
-  bond IRK, so they may need a manual reconnect.
-- **Single HID report characteristic:** the GATT client subscribes to one `0x2A4D`
-  characteristic; devices that split reports across several characteristics expose
-  only one. Fix: enumerate all report characteristics during discovery.
-- **HID backpressure:** the BLE→USB report channel drops on overflow (the GATT
-  notification callback can't `.await`), so a dropped key-release could briefly stick
-  a key. Rare in practice given USB FS throughput.
-- **Power management:** only the OLED auto-off is active; BLE connection-parameter
-  relaxation and System-OFF sleep aren't implemented, and inactivity tracks button /
-  connect events rather than keystrokes (which bypass the UI task).
-- **Blocking display I/O:** the SSD1306 flush is blocking I2C (ssd1306 0.9's async
-  mode doesn't compile in this configuration). It's off the keystroke hot path, so
-  the impact is limited to brief stalls during UI redraws.
-- **Advanced HID features** (5-button / hi-res mouse, NKRO) are translated down to
-  boot-style reports — see NKRO/hi-res above.
-- **SoftDevice RAM reservation** (24 KB in `memory_sd.x`) is a design estimate;
-  confirm it against the value the SoftDevice reports at `enable` on real hardware.
-- **Renode buttons:** injected GPIO edges don't reach embassy-nrf's GPIOTE edge-wait,
-  so the simulation drives the UI via a synthetic stimulus task (see the Renode guide).
 
 ---
 

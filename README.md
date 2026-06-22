@@ -8,7 +8,12 @@
 [![Renode](https://img.shields.io/badge/Renode-simulated-7B42BC)](https://renode.io/)
 [![License](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
 
-A driverless, bare-metal Rust Bluetooth-to-USB HID bridge for nRF52840. It connects to Bluetooth HID peripherals, exposes them as a USB keyboard/mouse/consumer-control device through a monitor's USB hub, and supports up to two simultaneous BLE HID links, typically one keyboard and one mouse. Paired device metadata and BLE bonding keys are stored in flash so reconnects do not require re-pairing after every reboot.
+**Use your Bluetooth keyboard and mouse with your PC Monitor's USB hub.**
+
+bt2usb is firmware for a small board that lives in your monitor's USB hub. It
+pairs with a Bluetooth keyboard and mouse and presents them to the PC as an
+ordinary wired USB keyboard and mouse, with no drivers to install.
+It remembers its devices across reboots and pairs a keyboard and a mouse at once.
 
 ```mermaid
 flowchart LR

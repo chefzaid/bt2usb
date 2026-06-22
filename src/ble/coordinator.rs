@@ -369,6 +369,36 @@ mod tests {
     }
 
     #[test]
+    fn out_of_range_slot_ops_are_ignored() {
+        let mut m = mgr();
+        // Indices >= MAX_CONNECTIONS must be no-ops, not panics.
+        m.reserve_slot(MAX_CONNECTIONS, &dev(1, "x"));
+        m.connect_slot(99, &dev(2, "y"));
+        m.disconnect_slot(MAX_CONNECTIONS);
+        assert_eq!(m.occupied_count(), 0);
+        assert!(!m.is_slot_occupied(MAX_CONNECTIONS));
+        assert!(!m.is_slot_occupied(99));
+    }
+
+    #[test]
+    fn default_matches_new() {
+        let m: ConnManager<Addr> = ConnManager::default();
+        assert_eq!(m.occupied_count(), 0);
+        assert_eq!(m.find_empty_slot(), Some(0));
+    }
+
+    #[test]
+    fn reserve_uses_second_slot_when_first_busy() {
+        let mut m = mgr();
+        m.connect_slot(0, &dev(1, "kb"));
+        let acts = plan_connect(&mut m, &[dev(2, "mouse")], 0);
+        match &acts[0] {
+            Action::ConnectSlot { slot, .. } => assert_eq!(*slot, 1),
+            other => panic!("expected ConnectSlot to slot 1, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn find_empty_slot_fills_then_returns_none() {
         let mut m = mgr();
         m.reserve_slot(0, &dev(1, "a"));

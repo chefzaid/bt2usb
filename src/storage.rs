@@ -466,11 +466,6 @@ impl DeviceStore {
         info!("Added paired device - now storing {}", self.devices.len());
     }
 
-    /// Get the first (most recently used) paired device for auto-reconnect.
-    pub fn first(&self) -> Option<&PairedDevice> {
-        self.devices.last() // Last added = most recent
-    }
-
     /// Iterate paired devices most-recently-added first, for auto-reconnect of
     /// multiple links (e.g. keyboard + mouse) on boot.
     pub fn iter_recent(&self) -> impl Iterator<Item = &PairedDevice> {

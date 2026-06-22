@@ -243,11 +243,9 @@ impl HidDescriptor {
                         _ => {}
                     }
                 }
-                // Local items
-                2 => {
-                    if tag == 0x00 {
-                        usage = value as u16;
-                    }
+                // Local items: Usage (tag 0x00).
+                2 if tag == 0x00 => {
+                    usage = value as u16;
                 }
                 _ => {}
             }

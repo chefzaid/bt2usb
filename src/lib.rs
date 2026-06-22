@@ -154,7 +154,7 @@ pub mod ui {
     pub use crate::ui_ui_logic_impl::{ButtonEvent, Screen};
 
     pub mod input_logic {
-        pub use crate::ui_input_logic_impl::{next_scan_dots, select_next, select_prev};
+        pub use crate::ui_input_logic_impl::next_scan_dots;
     }
 
     /// Pure UI state-machine logic (screen transitions).
@@ -738,15 +738,6 @@ mod tests {
             crate::ble::adv_parser::extract_device_name(&unnamed).as_str(),
             "Unknown"
         );
-    }
-
-    #[test]
-    fn ui_input_logic_selection_boundaries() {
-        assert_eq!(crate::ui::input_logic::select_prev(0), 0);
-        assert_eq!(crate::ui::input_logic::select_prev(3), 2);
-        assert_eq!(crate::ui::input_logic::select_next(0, 1), 0);
-        assert_eq!(crate::ui::input_logic::select_next(0, 3), 1);
-        assert_eq!(crate::ui::input_logic::select_next(2, 3), 2);
     }
 
     #[test]

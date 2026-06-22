@@ -13,10 +13,12 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
-# Renode robot-test artifacts (renode-test writes these to the CWD)
+# Renode / Robot Framework test artifacts (written to the CWD on some setups)
 log.html
 report.html
+output.xml
 robot_output.xml
+*.robot.log
 snapshots/
 
 # Coverage reports (mask coverage)

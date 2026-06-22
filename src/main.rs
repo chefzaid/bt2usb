@@ -170,9 +170,7 @@ async fn ble_slot1_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
 }
 
 #[embassy_executor::task]
-async fn usb_device_task(
-    device: embassy_usb::UsbDevice<'static, hid_device::UsbDriver>,
-) -> ! {
+async fn usb_device_task(device: embassy_usb::UsbDevice<'static, hid_device::UsbDriver>) -> ! {
     hid_device::run_usb_device(device).await
 }
 
@@ -296,51 +294,35 @@ async fn main(spawner: Spawner) {
                     continue;
                 }
 
-                match (screen, btn) {
-                    (Screen::Home, ButtonEvent::Select) | (Screen::Error, ButtonEvent::Select) => {
-                        screen = Screen::Scanning;
-                        selected = 0;
-                        device_count = 0;
-                        devices.clear();
-                        ui::display::draw_scanning(&mut display, 0);
-                        BLE_CMD_CHANNEL.send(BleCommand::StartScan).await;
+                // Decide the transition with the pure UI reducer, then apply
+                // its outcome (state + redraw + BLE command).
+                let outcome = ui::ui_logic::on_button(screen, btn, selected, device_count);
+                screen = outcome.screen;
+                selected = outcome.selected;
+                if outcome.reset_devices {
+                    device_count = 0;
+                    devices.clear();
+                }
+                match outcome.redraw {
+                    ui::ui_logic::Redraw::Scanning => {
+                        scan_dots = 0;
+                        ui::display::draw_scanning(&mut display, scan_dots);
                     }
-
-                    (Screen::DeviceList, ButtonEvent::Up) => {
-                        selected = ui::input_logic::select_prev(selected);
+                    ui::ui_logic::Redraw::DeviceList => {
                         ui::display::draw_device_list(&mut display, &devices, selected);
                     }
-
-                    (Screen::DeviceList, ButtonEvent::Down) => {
-                        let next = ui::input_logic::select_next(selected, device_count);
-                        if next != selected {
-                            selected = next;
-                            ui::display::draw_device_list(&mut display, &devices, selected);
-                        }
-                    }
-
-                    (Screen::DeviceList, ButtonEvent::Select) => {
-                        screen = Screen::Scanning;
-                        ui::display::draw_scanning(&mut display, 0);
-                        BLE_CMD_CHANNEL.send(BleCommand::Connect(selected)).await;
-                    }
-
-                    (Screen::Connected, ButtonEvent::Select) => {
-                        screen = Screen::Scanning;
-                        selected = 0;
-                        device_count = 0;
-                        devices.clear();
-                        ui::display::draw_scanning(&mut display, 0);
-                        BLE_CMD_CHANNEL.send(BleCommand::StartScan).await;
-                    }
-
-                    (Screen::Connected, ButtonEvent::Down) => {
-                        BLE_CMD_CHANNEL.send(BleCommand::Disconnect).await;
-                        screen = Screen::Home;
+                    ui::ui_logic::Redraw::Home => {
                         ui::display::draw_home(&mut display, false, "");
                     }
-
-                    _ => {}
+                    ui::ui_logic::Redraw::None => {}
+                }
+                if let Some(cmd) = outcome.command {
+                    let ble_cmd = match cmd {
+                        ui::ui_logic::UiCommand::StartScan => BleCommand::StartScan,
+                        ui::ui_logic::UiCommand::Connect(index) => BleCommand::Connect(index),
+                        ui::ui_logic::UiCommand::Disconnect => BleCommand::Disconnect,
+                    };
+                    BLE_CMD_CHANNEL.send(ble_cmd).await;
                 }
             }
 
@@ -372,12 +354,11 @@ async fn main(spawner: Spawner) {
                 }
 
                 BleEvent::ScanComplete => {
-                    if device_count > 0 {
-                        screen = Screen::DeviceList;
+                    screen = ui::ui_logic::on_scan_complete(device_count);
+                    if screen == Screen::DeviceList {
                         selected = selected.min(device_count.saturating_sub(1));
                         ui::display::draw_device_list(&mut display, &devices, selected);
                     } else {
-                        screen = Screen::Error;
                         ui::display::draw_error(&mut display, "No devices found");
                     }
                 }

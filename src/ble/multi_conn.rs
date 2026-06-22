@@ -4,8 +4,8 @@
 //! keyboard + mouse) with secure pairing and bonding.
 
 use core::cell::RefCell;
-use core::fmt::Write;
 
+use crate::ble::coordinator::{self, Action, ConnManager, UiEvent, MAX_CONNECTIONS};
 use crate::ble::scanner::ScanResult;
 use crate::ble::{hid_client, scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config;
@@ -17,7 +17,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 use embassy_time::{Duration, Timer};
-use heapless::{String, Vec};
+use heapless::Vec;
 use nrf_softdevice::ble::security::{IoCapabilities, SecurityHandler};
 use nrf_softdevice::ble::{
     central, Address, Connection, EncryptError, EncryptionInfo, IdentityKey, MasterId, SecurityMode,
@@ -26,8 +26,10 @@ use nrf_softdevice::raw;
 use nrf_softdevice::Softdevice;
 use static_cell::StaticCell;
 
-/// Maximum simultaneous BLE connections.
-pub const MAX_CONNECTIONS: usize = 2;
+/// The connection-slot state machine, specialised to the SoftDevice address
+/// type. The logic lives in (and is host-tested via)
+/// [`crate::ble::coordinator`]; here it is just instantiated.
+type MultiConnectionManager = ConnManager<Address>;
 
 #[derive(Clone)]
 pub enum SlotCommand {
@@ -48,100 +50,6 @@ pub enum SlotEvent {
         slot: usize,
         tag: BleErrorTag,
     },
-}
-
-#[derive(Clone)]
-pub struct ConnectionSlot {
-    pub address: Option<Address>,
-    pub name: String<32>,
-    pub connected: bool,
-    connecting: bool,
-}
-
-impl ConnectionSlot {
-    pub const fn empty() -> Self {
-        Self {
-            address: None,
-            name: String::new(),
-            connected: false,
-            connecting: false,
-        }
-    }
-
-    fn is_occupied(&self) -> bool {
-        self.connected || self.connecting
-    }
-}
-
-pub struct MultiConnectionManager {
-    slots: [ConnectionSlot; MAX_CONNECTIONS],
-}
-
-impl MultiConnectionManager {
-    pub const fn new() -> Self {
-        Self {
-            slots: [ConnectionSlot::empty(), ConnectionSlot::empty()],
-        }
-    }
-
-    pub fn find_empty_slot(&self) -> Option<usize> {
-        self.slots.iter().position(|s| !s.is_occupied())
-    }
-
-    pub fn active_count(&self) -> usize {
-        self.slots.iter().filter(|s| s.connected).count()
-    }
-
-    pub fn occupied_count(&self) -> usize {
-        self.slots.iter().filter(|s| s.is_occupied()).count()
-    }
-
-    pub fn is_connected_address(&self, address: &Address) -> bool {
-        self.slots
-            .iter()
-            .any(|slot| slot.is_occupied() && slot.address.as_ref() == Some(address))
-    }
-
-    pub fn reserve_slot(&mut self, slot: usize, device: &DiscoveredDevice) {
-        if slot < MAX_CONNECTIONS {
-            self.slots[slot] = ConnectionSlot {
-                address: Some(device.address),
-                name: device.name.clone(),
-                connected: false,
-                connecting: true,
-            };
-        }
-    }
-
-    pub fn connect_slot(&mut self, slot: usize, device: &DiscoveredDevice) {
-        if slot < MAX_CONNECTIONS {
-            self.slots[slot] = ConnectionSlot {
-                address: Some(device.address),
-                name: device.name.clone(),
-                connected: true,
-                connecting: false,
-            };
-        }
-    }
-
-    pub fn disconnect_slot(&mut self, slot: usize) {
-        if slot < MAX_CONNECTIONS {
-            self.slots[slot].address = None;
-            self.slots[slot].name.clear();
-            self.slots[slot].connected = false;
-            self.slots[slot].connecting = false;
-        }
-    }
-
-    pub fn get_connected_names(&self) -> heapless::Vec<String<32>, MAX_CONNECTIONS> {
-        let mut names = heapless::Vec::new();
-        for slot in &self.slots {
-            if slot.connected {
-                let _ = names.push(slot.name.clone());
-            }
-        }
-        names
-    }
 }
 
 struct Bonder {
@@ -292,112 +200,93 @@ pub async fn ble_task(
         send_slot_cmd(slot, SlotCommand::Connect(auto), slot0_tx, slot1_tx).await;
     }
 
+    // The coordinator below is a thin interpreter: it asks the pure
+    // `coordinator` reducers (host-tested) what to do for each command/event,
+    // then performs the resulting I/O via `execute_action`.
     loop {
         match select(cmd_rx.receive(), slot_event_rx.receive()).await {
             Either::First(cmd) => match cmd {
                 BleCommand::StartScan => {
-                    if manager.occupied_count() >= MAX_CONNECTIONS {
-                        for slot in 0..MAX_CONNECTIONS {
-                            if manager.slots[slot].is_occupied() {
-                                send_slot_cmd(slot, SlotCommand::Disconnect, slot0_tx, slot1_tx)
-                                    .await;
-                            }
-                        }
+                    for action in coordinator::plan_start_scan(&manager) {
+                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
-
                     match scanner::scan(sd, event_tx).await {
-                        Ok(result) => {
-                            last_scan = Some(result);
-                        }
-                        Err(_) => {
-                            last_scan = None;
-                        }
+                        Ok(result) => last_scan = Some(result),
+                        Err(_) => last_scan = None,
                     }
                 }
                 BleCommand::Connect(index) => {
-                    let Some(scan) = &last_scan else {
-                        event_tx
-                            .send(BleEvent::Error(BleErrorTag::ConnectFailed))
-                            .await;
-                        continue;
+                    let devices: &[DiscoveredDevice] = match &last_scan {
+                        Some(scan) => scan.devices.as_slice(),
+                        None => &[],
                     };
-
-                    let Some(device) = scan.devices.get(index) else {
-                        event_tx
-                            .send(BleEvent::Error(BleErrorTag::ConnectFailed))
-                            .await;
-                        continue;
-                    };
-
-                    if manager.is_connected_address(&device.address) {
-                        warn!("Device already connected");
-                        continue;
+                    for action in coordinator::plan_connect(&mut manager, devices, index) {
+                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
-
-                    let Some(slot) = manager.find_empty_slot() else {
-                        warn!("No free connection slots");
-                        event_tx
-                            .send(BleEvent::Error(BleErrorTag::ConnectFailed))
-                            .await;
-                        continue;
-                    };
-
-                    manager.reserve_slot(slot, device);
-                    send_slot_cmd(
-                        slot,
-                        SlotCommand::Connect(device.clone()),
-                        slot0_tx,
-                        slot1_tx,
-                    )
-                    .await;
                 }
                 BleCommand::Disconnect => {
-                    for slot in 0..MAX_CONNECTIONS {
-                        if manager.slots[slot].is_occupied() {
-                            send_slot_cmd(slot, SlotCommand::Disconnect, slot0_tx, slot1_tx).await;
-                        }
+                    for action in coordinator::plan_disconnect(&manager) {
+                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
                 }
             },
             Either::Second(event) => match event {
                 SlotEvent::Connected { slot, device } => {
-                    manager.connect_slot(slot, &device);
-                    {
-                        let mut store = DEVICE_STORE.lock().await;
-                        store.add(PairedDevice::new(
-                            device.address,
-                            device.name.as_str(),
-                            device.rssi,
-                        ));
-                        if let Some(bond) = bonder().bond_for_address(device.address) {
-                            store.set_bond_for_address(device.address, bond);
-                        }
-                        store.save_to_flash(&mut flash).await;
+                    for action in coordinator::on_slot_connected(&mut manager, slot, &device) {
+                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
-
-                    let summary = connection_summary(&manager);
-                    event_tx.send(BleEvent::Connected(summary)).await;
                 }
                 SlotEvent::Disconnected { slot } => {
-                    manager.disconnect_slot(slot);
-                    if manager.active_count() == 0 {
-                        event_tx.send(BleEvent::Disconnected).await;
-                    } else {
-                        let summary = connection_summary(&manager);
-                        event_tx.send(BleEvent::Connected(summary)).await;
+                    for action in coordinator::on_slot_disconnected(&mut manager, slot) {
+                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
                 }
                 SlotEvent::Error { slot, tag } => {
-                    manager.disconnect_slot(slot);
-                    event_tx.send(BleEvent::Error(tag)).await;
-                    if manager.active_count() == 0 {
-                        event_tx.send(BleEvent::Disconnected).await;
-                    } else {
-                        let summary = connection_summary(&manager);
-                        event_tx.send(BleEvent::Connected(summary)).await;
+                    for action in coordinator::on_slot_error(&mut manager, slot, tag) {
+                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
                 }
             },
+        }
+    }
+}
+
+/// Perform the I/O for one coordinator [`Action`]: drive slot workers, persist
+/// to flash, or emit UI events. This is the only place the pure decisions touch
+/// hardware/channels.
+async fn execute_action(
+    action: Action<Address>,
+    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
+    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    flash: &mut nrf_softdevice::Flash,
+) {
+    match action {
+        Action::DisconnectSlot(slot) => {
+            send_slot_cmd(slot, SlotCommand::Disconnect, slot0_tx, slot1_tx).await;
+        }
+        Action::ConnectSlot { slot, device } => {
+            send_slot_cmd(slot, SlotCommand::Connect(device), slot0_tx, slot1_tx).await;
+        }
+        Action::PersistDevice(device) => {
+            let mut store = DEVICE_STORE.lock().await;
+            store.add(PairedDevice::new(
+                device.address,
+                device.name.as_str(),
+                device.rssi,
+            ));
+            if let Some(bond) = bonder().bond_for_address(device.address) {
+                store.set_bond_for_address(device.address, bond);
+            }
+            store.save_to_flash(flash).await;
+        }
+        Action::Emit(ui) => {
+            let event = match ui {
+                UiEvent::Connected(summary) => BleEvent::Connected(summary),
+                UiEvent::Disconnected => BleEvent::Disconnected,
+                UiEvent::Error(tag) => BleEvent::Error(tag),
+            };
+            event_tx.send(event).await;
         }
     }
 }
@@ -464,23 +353,6 @@ async fn send_slot_cmd(
         0 => slot0_tx.send(cmd).await,
         1 => slot1_tx.send(cmd).await,
         _ => {}
-    }
-}
-
-fn connection_summary(manager: &MultiConnectionManager) -> String<32> {
-    let names = manager.get_connected_names();
-    match names.len() {
-        0 => {
-            let mut s = String::new();
-            let _ = s.push_str("Connected");
-            s
-        }
-        1 => names[0].clone(),
-        n => {
-            let mut s = String::new();
-            let _ = write!(&mut s, "{} devices", n);
-            s
-        }
     }
 }
 

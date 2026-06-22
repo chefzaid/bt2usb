@@ -1,3 +1,11 @@
+# NOTE: We intentionally do NOT set a global `build.target` here. Doing so would
+# force `cargo test` to target the embedded triple (which has no std/test) and
+# break host testing. Instead, the embedded mask tasks pass
+# `--target thumbv7em-none-eabihf` explicitly, while host tests
+# (`cargo test` / `mask test`) build for the native host by default. The runner
+# and rustflags below are scoped to the ARM/no-os cfg, so they only apply to
+# embedded builds regardless.
+
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 runner = "probe-rs run --chip nRF52840_xxAA"
 rustflags = [
@@ -6,9 +14,6 @@ rustflags = [
     "-C", "link-arg=-Tdefmt.x",     # defmt linker section
     "-C", "link-arg=--nmagic",       # disable page alignment (saves flash)
 ]
-
-[build]
-target = "thumbv7em-none-eabihf"     # Cortex-M4F with hardware FPU
 
 [env]
 DEFMT_LOG = "debug"

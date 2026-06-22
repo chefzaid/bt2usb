@@ -11,32 +11,8 @@
 pub mod buttons;
 pub mod display;
 pub mod input_logic;
+pub mod ui_logic;
 
-use defmt::Format;
-
-/// Screens (views) the UI can be in.
-#[derive(Clone, Copy, PartialEq, Eq, Format)]
-pub enum Screen {
-    /// Idle / home - shows connection status.
-    Home,
-    /// Scanning for BLE devices - shows spinner/progress.
-    Scanning,
-    /// Device list - user picks one to connect.
-    DeviceList,
-    /// Connected - shows active device info.
-    Connected,
-    /// Error - shows a transient message.
-    Error,
-}
-
-/// Physical button events (after debouncing).
-///
-/// Simplified to 3 buttons for a dongle use case:
-///   - UP/DOWN: Navigate device list
-///   - SELECT: Context-dependent action (scan, connect, disconnect)
-#[derive(Clone, Copy, PartialEq, Eq, Format)]
-pub enum ButtonEvent {
-    Up,
-    Down,
-    Select,
-}
+/// `Screen` and `ButtonEvent` live in the pure `ui_logic` core (shared with the
+/// host-tested logic) and are re-exported here for the embedded tasks.
+pub use ui_logic::{ButtonEvent, Screen};

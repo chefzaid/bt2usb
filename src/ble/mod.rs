@@ -13,6 +13,7 @@
 //! in the crate root.
 
 pub mod adv_parser;
+pub mod coordinator;
 pub mod hid_client;
 pub mod multi_conn;
 pub mod scanner;
@@ -22,15 +23,11 @@ use heapless::String;
 use nrf_softdevice::ble::Address;
 
 /// Information about a discovered BLE peripheral.
-#[derive(Clone, Format)]
-pub struct DiscoveredDevice {
-    /// BLE address.
-    pub address: Address,
-    /// Human-readable name (truncated to 32 bytes for `heapless::String`).
-    pub name: String<32>,
-    /// Received Signal Strength Indicator (dBm).
-    pub rssi: i8,
-}
+///
+/// This is the embedded instantiation of the address-generic
+/// [`coordinator::DeviceInfo`], so the same value type flows through both the
+/// pure coordination core (host-tested) and the live BLE tasks.
+pub type DiscoveredDevice = coordinator::DeviceInfo<Address>;
 
 /// Commands that the UI task can send to the BLE task.
 #[derive(Clone, Format)]
@@ -61,10 +58,7 @@ pub enum BleEvent {
 }
 
 /// Lightweight error tag for UI display (no dynamic alloc).
-#[derive(Clone, Copy, Format)]
-pub enum BleErrorTag {
-    ScanFailed,
-    ConnectFailed,
-    HidNotFound,
-    NotifyFailed,
-}
+///
+/// Re-exported from the pure coordination core so the same tag type is shared
+/// between host-tested logic and the embedded tasks.
+pub use coordinator::ErrorTag as BleErrorTag;

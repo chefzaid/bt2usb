@@ -66,13 +66,14 @@ fi
 
 > Run unit + integration tests on host (Windows/Linux/macOS)
 
-Runs the library unit tests AND the `tests/` integration tests. The embedded
-binary target is skipped automatically (it is gated behind `required-features =
-["embedded"]`). An explicit host `--target` is required because
-`.cargo/config.toml` defaults the build target to the embedded triple.
+Runs the library unit tests AND the `tests/` integration tests, building for the
+native host. The embedded binary target is skipped automatically (it is gated
+behind `required-features = ["embedded"]`). This works on Windows, Linux, macOS,
+and inside the WSL2 devcontainer because `.cargo/config.toml` no longer pins a
+global `build.target` (embedded tasks pass `--target` explicitly instead).
 
 ```bash
-./scripts/run-tool.sh cargo test --lib --tests --target x86_64-pc-windows-msvc
+./scripts/run-tool.sh cargo test --lib --tests
 ```
 
 ## test-verbose
@@ -80,7 +81,7 @@ binary target is skipped automatically (it is gated behind `required-features =
 > Run unit + integration tests with output shown
 
 ```bash
-./scripts/run-tool.sh cargo test --lib --tests --target x86_64-pc-windows-msvc -- --nocapture
+./scripts/run-tool.sh cargo test --lib --tests -- --nocapture
 ```
 
 ## coverage
@@ -103,23 +104,23 @@ binary target is skipped automatically (it is gated behind `required-features =
 # Try cargo-llvm-cov first (cross-platform), fallback to tarpaulin
 if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
     if [[ "${html:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo llvm-cov --lib --target x86_64-pc-windows-msvc --html --output-dir coverage-html
+        ./scripts/run-tool.sh cargo llvm-cov --lib --tests --html --output-dir coverage-html
         echo "Coverage report: coverage-html/html/index.html"
     elif [[ "${json:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo llvm-cov --lib --target x86_64-pc-windows-msvc --json --output-path coverage.json
+        ./scripts/run-tool.sh cargo llvm-cov --lib --tests --json --output-path coverage.json
         echo "Coverage report: coverage.json"
     else
-        ./scripts/run-tool.sh cargo llvm-cov --lib --target x86_64-pc-windows-msvc
+        ./scripts/run-tool.sh cargo llvm-cov --lib --tests
     fi
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
     if [[ "${html:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo tarpaulin --lib --target x86_64-pc-windows-msvc --out Html --output-dir coverage
+        ./scripts/run-tool.sh cargo tarpaulin --lib --out Html --output-dir coverage
         echo "Coverage report: coverage/tarpaulin-report.html"
     elif [[ "${json:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo tarpaulin --lib --target x86_64-pc-windows-msvc --out Json --output-dir coverage
+        ./scripts/run-tool.sh cargo tarpaulin --lib --out Json --output-dir coverage
         echo "Coverage report: coverage/coverage.json"
     else
-        ./scripts/run-tool.sh cargo tarpaulin --lib --target x86_64-pc-windows-msvc --out Stdout
+        ./scripts/run-tool.sh cargo tarpaulin --lib --out Stdout
     fi
 else
     echo "No coverage tool found. Install one of:"
@@ -135,10 +136,10 @@ fi
 
 ```bash
 if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo llvm-cov --lib --target x86_64-pc-windows-msvc --html --output-dir coverage-html
+    ./scripts/run-tool.sh cargo llvm-cov --lib --tests --html --output-dir coverage-html
     echo "Coverage report: coverage-html/html/index.html"
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo tarpaulin --lib --target x86_64-pc-windows-msvc --out Html --output-dir coverage
+    ./scripts/run-tool.sh cargo tarpaulin --lib --out Html --output-dir coverage
     echo "Coverage report: coverage/tarpaulin-report.html"
 else
     echo "No coverage tool found. Install one of:"
@@ -154,10 +155,10 @@ fi
 
 ```bash
 if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo llvm-cov --lib --target x86_64-pc-windows-msvc --json --output-path coverage.json
+    ./scripts/run-tool.sh cargo llvm-cov --lib --tests --json --output-path coverage.json
     echo "Coverage report: coverage.json"
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo tarpaulin --lib --target x86_64-pc-windows-msvc --out Json --output-dir coverage
+    ./scripts/run-tool.sh cargo tarpaulin --lib --out Json --output-dir coverage
     echo "Coverage report: coverage/coverage.json"
 else
     echo "No coverage tool found. Install one of:"
@@ -307,7 +308,7 @@ echo "=== Checking format ==="
 echo "=== Running clippy ==="
 ./scripts/run-tool.sh cargo clippy --features embedded --target thumbv7em-none-eabihf -- -D warnings
 echo "=== Running tests ==="
-./scripts/run-tool.sh cargo test --lib --tests --target x86_64-pc-windows-msvc
+./scripts/run-tool.sh cargo test --lib --tests
 echo "=== Building release ==="
 ./scripts/run-tool.sh cargo build --features embedded --target thumbv7em-none-eabihf --release
 echo "=== All checks passed! ==="

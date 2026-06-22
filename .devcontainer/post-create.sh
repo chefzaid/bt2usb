@@ -62,20 +62,38 @@ echo ""
 echo "- Verification -----------------------------"
 echo "Rust version:     $(rustc --version)"
 echo "Cargo version:    $(cargo --version)"
+echo "Host target:      $(rustc -vV | sed -n 's/^host: //p')   (host tests build for this)"
 echo "Target installed: $(rustup target list --installed | grep thumb | head -1)"
 echo "flip-link:        $(flip-link --version 2>/dev/null || echo 'not found')"
 echo "probe-rs:         $(probe-rs --version 2>/dev/null || echo 'not found')"
 echo "mask:             $(mask --version 2>/dev/null || echo 'not found')"
 echo "cargo-llvm-cov:   $(cargo llvm-cov --version 2>/dev/null || echo 'not found')"
 
+# - Smoke-test the host test pipeline (no hardware required) -----------
+# This is the layer of testing that runs fully in the container/WSL without a
+# probe. If this fails, the dev environment is broken regardless of hardware.
+# `cargo test` builds for the host by default (no global build.target is set).
+echo ""
+echo "- Host test smoke check (no hardware needed) -----------------------------"
+if cargo test --lib --tests >/dev/null 2>&1; then
+    echo "   ✓ host unit + integration tests pass"
+else
+    echo "   ⚠ host tests did not pass (run 'mask test' to see details)"
+fi
+
 echo ""
 echo "══════════════════════════════════════════════════════════════════════════"
-echo "  Setup complete! You can now build with:"
+echo "  Setup complete!"
+echo ""
+echo "  Software testing (NO hardware required, runs here in the container/WSL):"
+echo "    mask test         # host unit + integration tests"
+echo "    mask coverage     # coverage report (cargo-llvm-cov)"
+echo "    mask check        # type-check the embedded build"
+echo "    mask clippy       # lints on the embedded build"
 echo "    mask build --release"
 echo ""
-echo "  Run tests with:"
-echo "    mask test"
+echo "  Full end-to-end (BLE SoftDevice + USB) requires a real nRF52840-DK:"
+echo "    mask run --release   # flash + RTT logs over a probe (WSL: usbipd-win)"
 echo ""
-echo "  Flash to device with:"
-echo "    mask run --release"
+echo "  See TESTING.md for the layered strategy and why full E2E can't be emulated."
 echo "══════════════════════════════════════════════════════════════════════════"

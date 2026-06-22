@@ -1,0 +1,19 @@
+# Normalize line endings. This project builds and tests in WSL2 / Linux
+# devcontainers, where CRLF line endings break shell scripts: a trailing `\r`
+# in a `#!/usr/bin/env bash` shebang makes the loader look for `bash\r`, and
+# `mask` extracts and runs the bash blocks from maskfile.md the same way.
+#
+# Keep scripts and the maskfile LF regardless of host OS or git autocrlf.
+
+* text=auto
+
+*.sh    text eol=lf
+*.bash  text eol=lf
+maskfile.md text eol=lf
+
+# Rust sources and configs: LF for consistency across Windows/WSL/CI.
+*.rs    text eol=lf
+*.toml  text eol=lf
+*.x     text eol=lf
+*.md    text eol=lf
+*.json  text eol=lf

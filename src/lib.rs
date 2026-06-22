@@ -3,9 +3,10 @@
 //! This module re-exports the pure logic modules that can be tested
 //! on the host (no embedded hardware required).
 //!
-//! Usage: `mask test` (or `cargo test --lib --tests --target <host-triple>`;
-//! an explicit host target is required because `.cargo/config.toml` defaults
-//! the build target to the embedded `thumbv7em-none-eabihf` triple).
+//! Usage: `mask test` (or simply `cargo test --lib --tests`). Host tests build
+//! for the native target; `.cargo/config.toml` deliberately does not pin a
+//! global `build.target`, and the embedded build passes `--target
+//! thumbv7em-none-eabihf` explicitly instead.
 //!
 //! For coverage: `mask coverage`
 //!
@@ -129,27 +130,36 @@ mod hid_mouse_impl;
 #[path = "ble/adv_parser.rs"]
 mod ble_adv_parser_impl;
 
+#[path = "ble/coordinator.rs"]
+mod ble_coordinator_impl;
+
 #[path = "power_logic.rs"]
 mod power_logic_impl;
 #[path = "ui/input_logic.rs"]
 mod ui_input_logic_impl;
+#[path = "ui/ui_logic.rs"]
+mod ui_ui_logic_impl;
 
 pub mod ble {
     pub mod adv_parser {
         pub use crate::ble_adv_parser_impl::{contains_hid_service_uuid, extract_device_name};
     }
+    /// Pure BLE coordination core (connection-slot state machine + reducers).
+    pub mod coordinator {
+        pub use crate::ble_coordinator_impl::*;
+    }
 }
 
 pub mod ui {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum ButtonEvent {
-        Up,
-        Down,
-        Select,
-    }
+    pub use crate::ui_ui_logic_impl::{ButtonEvent, Screen};
 
     pub mod input_logic {
         pub use crate::ui_input_logic_impl::{next_scan_dots, select_next, select_prev};
+    }
+
+    /// Pure UI state-machine logic (screen transitions).
+    pub mod ui_logic {
+        pub use crate::ui_ui_logic_impl::*;
     }
 }
 

@@ -13,6 +13,17 @@ Cargo.lock
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
+# Renode robot-test artifacts (renode-test writes these to the CWD)
+log.html
+report.html
+robot_output.xml
+snapshots/
+
+# Coverage reports (mask coverage)
+coverage-html/
+coverage/
+coverage.json
+
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

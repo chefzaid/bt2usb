@@ -11,6 +11,11 @@
 *.bash  text eol=lf
 maskfile.md text eol=lf
 
+# Renode scripts are consumed on Linux/WSL — keep them LF.
+*.resc   text eol=lf
+*.robot  text eol=lf
+*.repl   text eol=lf
+
 # Rust sources and configs: LF for consistency across Windows/WSL/CI.
 *.rs    text eol=lf
 *.toml  text eol=lf

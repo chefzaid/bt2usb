@@ -1,4 +1,12 @@
 //! SSD1306 OLED display wrapper.
+//!
+//! NOTE: rendering uses the *blocking* embedded-hal I2C. A full 128×64 flush is
+//! a ~1 KB transfer that briefly blocks the cooperative executor. This is
+//! acceptable because redraws happen only on UI events (connect/scan/button),
+//! never on the keystroke→USB hot path (that runs in a separate task and is not
+//! routed through here). An async-I2C flush would remove even that occasional
+//! stall, but `ssd1306` 0.9's `async` feature does not compile in this
+//! configuration; revisit when upgrading the driver.
 
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;

@@ -183,26 +183,18 @@ pub async fn hid_writer_task(
 
     loop {
         let report = report_rx.receive().await;
+        let n = report.serialize(&mut buf);
+        let bytes = &buf[..n];
 
-        match &report {
-            HidReport::Keyboard(kb) => {
-                let n = kb.serialize(&mut buf);
-                if let Err(_e) = keyboard.write(&buf[..n]).await {
-                    warn!("USB keyboard write failed");
-                }
-            }
-            HidReport::Mouse(m) => {
-                let n = m.serialize(&mut buf);
-                if let Err(_e) = mouse.write(&buf[..n]).await {
-                    warn!("USB mouse write failed");
-                }
-            }
-            HidReport::Consumer(c) => {
-                let n = c.serialize(&mut buf);
-                if let Err(_e) = consumer.write(&buf[..n]).await {
-                    warn!("USB consumer write failed");
-                }
-            }
+        // The variant only selects which USB endpoint receives the report; the
+        // wire bytes are produced once by `HidReport::serialize` above.
+        let result = match &report {
+            HidReport::Keyboard(_) => keyboard.write(bytes).await,
+            HidReport::Mouse(_) => mouse.write(bytes).await,
+            HidReport::Consumer(_) => consumer.write(bytes).await,
+        };
+        if result.is_err() {
+            warn!("USB HID write failed");
         }
     }
 }

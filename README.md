@@ -1,5 +1,13 @@
 # bt2usb
 
+[![Rust](https://img.shields.io/badge/Rust-no__std-000000?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Embassy](https://img.shields.io/badge/Embassy-async-0E7FC0)](https://embassy.dev/)
+[![nRF52840](https://img.shields.io/badge/MCU-nRF52840-00A9CE?logo=nordicsemiconductor&logoColor=white)](https://www.nordicsemi.com/Products/nRF52840)
+[![Bluetooth LE](https://img.shields.io/badge/Bluetooth-LE_HOGP-0082FC?logo=bluetooth&logoColor=white)](https://www.bluetooth.com/)
+[![USB HID](https://img.shields.io/badge/USB-HID_device-394EFF?logo=usb&logoColor=white)](https://www.usb.org/hid)
+[![Renode](https://img.shields.io/badge/Renode-simulated-7B42BC)](https://renode.io/)
+[![License](https://img.shields.io/badge/License-GPLv3-blue)](LICENSE)
+
 A driverless, bare-metal Rust Bluetooth-to-USB HID bridge for nRF52840. It connects to Bluetooth HID peripherals, exposes them as a USB keyboard/mouse/consumer-control device through a monitor's USB hub, and supports up to two simultaneous BLE HID links, typically one keyboard and one mouse. Paired device metadata and BLE bonding keys are stored in flash so reconnects do not require re-pairing after every reboot.
 
 ```mermaid
@@ -14,7 +22,7 @@ flowchart LR
 
 ## Hardware
 
-### Bill of Materials
+### Bill of Materials (BOM)
 
 | Component            | Example Part                   | Purpose                          |
 |----------------------|--------------------------------|----------------------------------|
@@ -43,6 +51,17 @@ flowchart LR
 
 ---
 
+### Alternative MCU Targets
+
+| MCU                    | BLE             | USB Device         | Rust Support             | Notes                               |
+|------------------------|-----------------|--------------------|--------------------------|-------------------------------------|
+| **nRF52840** (primary) | On-chip BLE 5.0 | On-chip USB 2.0 FS | Embassy + nrf-softdevice | Best fit for this architecture      |
+| ESP32-S3               | On-chip BLE 5.0 | On-chip USB OTG    | esp-hal / esp-idf        | Strong alternative                  |
+| RP2040 + BT module     | External BT     | On-chip USB        | Embassy-rp               | Lower-cost, higher integration work |
+| STM32 + BT module      | External BT     | On-chip USB OTG    | Embassy-stm32            | Flexible but more complex           |
+
+---
+
 ## Memory Requirements
 
 The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory is required.
@@ -65,44 +84,27 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 | Task state     | ~16 KB   | Embassy task arenas (futures). The thread-mode executor runs all tasks cooperatively on a single call stack — there are no per-task stacks |
 | Remaining RAM  | ~212 KB  | Headroom for future features                    |
 
-### Why No External Memory?
-
-- Internal flash endurance is sufficient for pairing metadata.
-- SSD1306 framebuffer is only 1 KB.
-- No heap is required in current architecture.
-
 ---
 
 ## Software Architecture
 
 ```
 src/
-|-- main.rs
+|-- main.rs            # firmware entry point + UI loop (imperative shell)
+|-- sim.rs             # SoftDevice-free entry point for Renode
+|-- lib.rs             # host-test entry point (re-exposes the pure modules)
 |-- config.rs
-|-- power.rs
-|-- power_logic.rs
-|-- storage.rs
-|-- hid/
-|   |-- mod.rs
-|   |-- keyboard.rs
-|   |-- mouse.rs
-|   |-- consumer.rs
-|   |-- report_protocol.rs
-|   `-- tests.rs
+|-- power.rs           power_logic.rs   storage.rs
+|-- hid/               # report types + classification (host-tested, no_std)
+|   |-- mod.rs  keyboard.rs  mouse.rs  consumer.rs  report_protocol.rs
 |-- ble/
-|   |-- mod.rs
-|   |-- adv_parser.rs
-|   |-- scanner.rs
-|   |-- hid_client.rs
-|   `-- multi_conn.rs
+|   |-- mod.rs  adv_parser.rs  scanner.rs  hid_client.rs  multi_conn.rs
+|   `-- coordinator.rs # connection-slot state machine + reducers (pure core)
 |-- usb/
-|   |-- mod.rs
-|   `-- hid_device.rs
+|   |-- mod.rs  hid_device.rs
 |-- ui/
-|   |-- mod.rs
-|   |-- display.rs
-|   |-- buttons.rs
-|   `-- input_logic.rs
+|   |-- mod.rs  display.rs  buttons.rs  input_logic.rs
+|   `-- ui_logic.rs    # screen-transition reducer (pure core)
 ```
 
 ### Async Task Model (Embassy)
@@ -172,38 +174,15 @@ On nRF52840-DK and Feather nRF52840, USB D+/D- are routed on-board (no external 
 
 ### Build & Flash
 
-Follow these steps in order (simplest path):
+With the hardware connected (above) and the SoftDevice flashed once (below):
 
-1. **Connect hardware**
-    - Plug in the nRF52840 board over USB.
-    - Attach a debug probe (J-Link / CMSIS-DAP, or on-board debugger on nRF52840-DK).
+```bash
+mask probe-list      # confirm the probe is visible
+mask run             # build + flash + run with RTT logs (debug)
+mask run --release   # smaller/faster release build
+```
 
-2. **Confirm probe is visible**
-
-    ```bash
-    mask probe-list
-    ```
-
-3. **Build firmware (debug)**
-
-    ```bash
-    mask build
-    ```
-
-4. **Flash + run firmware (debug)**
-
-    ```bash
-    mask run
-    ```
-
-5. **For release firmware (smaller/faster)**
-
-    ```bash
-    mask build --release
-    mask run --release
-    ```
-
-If flashing fails, re-check cabling/probe permissions and run `mask probe-list` again.
+If flashing fails, re-check cabling/probe permissions and re-run `mask probe-list`.
 
 ### SoftDevice
 
@@ -233,11 +212,7 @@ mask run --release
 
 ## Development
 
-This project uses [mask](https://github.com/jacobdeichert/mask) as task runner.
-
-```bash
-cargo install mask
-```
+Task running uses [mask](https://github.com/jacobdeichert/mask) (installed in Prerequisites).
 
 ### Common Commands
 
@@ -267,10 +242,97 @@ A `.devcontainer/` setup is provided:
 
 ### Testing Strategy
 
-- **Host unit tests:** HID parsing/serialization/classification (`mask test`)
-- **On-target integration:** Requires hardware + RTT/probe workflows
-- **Coverage:** `mask coverage`, HTML/JSON outputs supported
-- **Hardware-free coverage growth:** Extract more pure logic and mock BLE/storage/display boundaries; actual firmware paths still need hardware-in-the-loop tests.
+A layered approach, because the two ends of the data path — the BLE link (the
+closed-source Nordic SoftDevice + radio) and the USB device peripheral — can't be
+emulated. Everything *between* them can, on the host or in a simulator:
+
+- **Host unit + integration tests:** HID parsing/serialization/classification,
+  UI/power policy, advert parsing — runs in the container/WSL with no hardware.
+- **Orchestration tests:** the connection-slot state machine + command/event
+  reducers (`ble/coordinator.rs`) and the UI screen transitions (`ui/ui_logic.rs`)
+  are pure modules driven by host unit tests (≈99% covered). The async tasks are
+  thin interpreters over them.
+- **On-target simulation:** Renode runs a SoftDevice-free `sim` build to exercise
+  boot, the memory map, GPIO buttons, timers and the real UI/coordinator logic on
+  a simulated nRF52840. See the [Renode simulation](#on-target-simulation-renode)
+  guide below.
+- **Full end-to-end:** SoftDevice BLE + USB enumeration require a real
+  nRF52840-DK (RTT/probe workflows; WSL via `usbipd-win`).
+
+#### Running the tests
+
+The host unit + integration tests (covering Layers 1–2 above) are just:
+
+```bash
+mask test          # all lib + integration tests (auto-detects host target)
+mask coverage      # same, with an llvm-cov coverage report
+```
+
+`mask test` builds for the host automatically. To run a single core in
+isolation: `cargo test --lib coordinator` or `cargo test --lib ui_logic`.
+
+#### On-target simulation (Renode)
+
+The SoftDevice-free `sim` build boots on a simulated nRF52840 in
+[Renode](https://renode.io) and runs the **real** host-tested logic
+(`ble::coordinator`, `ui::ui_logic`) plus the GPIO/timer drivers and boot path —
+no hardware. It excludes the SoftDevice, USB, and flash stacks (those need real
+silicon) and logs to UART0, which Renode prints directly (no probe or decoder).
+
+**1. Build the sim firmware** (just needs the ARM target; no probe/board):
+
+```bash
+mask sim-build
+# → target/thumbv7em-none-eabihf/debug/bt2usb-sim   (a real nRF52840 ELF)
+```
+
+**2. Install Renode** (Linux/WSL2, no root). One command installs portable
+Renode plus the `renode-test` Python deps into `~/.local`:
+
+```bash
+mask sim-setup            # → bash scripts/install-renode.sh  (idempotent)
+```
+
+It puts `renode` and `renode-test` on your PATH (`~/.local/bin`); if that dir
+isn't already on PATH the script tells you the line to add. Verify with
+`renode --version`. On **Windows**, run it inside WSL:
+
+```bash
+wsl -d Ubuntu -- bash -lc 'cd /mnt/c/dev/workspace/bt2usb && bash scripts/install-renode.sh'
+```
+
+(Prefer a system package? Grab one from <https://renode.io/#downloads> instead;
+the script just automates the portable build + test deps.)
+
+**3a. Run it (GUI):**
+
+```bash
+mask sim                  # builds + launches Renode with renode/bt2usb-sim.resc
+# …or directly:  renode renode/bt2usb-sim.resc
+```
+
+A UART0 terminal streams the firmware log — the coordinator and UI reducer
+running on the simulated MCU:
+
+```
+entering sim UI loop (screen=Home)
+scenario: connect device 0 (Keyboard)
+  action: ConnectSlot slot=0 addr=0xa1
+  action: UI Connected 'Keyboard'
+button Select -> screen Scanning (selected 0)
+  cmd: StartScan
+```
+
+**3b. Run it headless (CI):** the robot test boots the sim and asserts the
+expected UART output, exiting non-zero on failure:
+
+```bash
+mask sim-test             # → renode-test renode/bt2usb-sim.robot
+```
+
+Buttons are driven by a synthetic stimulus task because injected GPIO edges
+don't reach embassy-nrf's GPIOTE wait under Renode (see Known Limitations); on
+real hardware the buttons drive `ui_logic` directly.
 
 ---
 
@@ -319,68 +381,54 @@ sequenceDiagram
 
 ### Implemented
 
-- [x] BLE scan + connect + HID notification pipeline
-- [x] USB composite HID (keyboard + mouse + consumer)
-- [x] Consumer HID parsing in core logic
-- [x] Consumer HID forwarding to USB endpoint
-- [x] Device list caching in UI loop (selection state)
-- [x] Explicit BLE disconnect command handling in connection lifecycle
-- [x] HID report-map parsing integrated in BLE HID client for capability detection
-- [x] Report-ID fallback classification path for report-protocol devices
-- [x] Flash-backed paired-device and BLE bond-key load/save in BLE task
-- [x] Boot-time auto-reconnect attempt from paired-device store
-- [x] Power manager periodic tick integrated into main UI loop
-- [x] Descriptor-guided Report ID routing for report-protocol notifications
-- [x] OLED hardware power-off after inactivity and wake-on-button redraw
-- [x] Multi-device runtime connection orchestration (`src/ble/multi_conn.rs`)
-- [x] BLE bonding/encryption workflow integration
-- [x] Pairing/encryption handled in normal connect flow (no separate pairing screen required)
-- [x] Consumer release-event forwarding and safer report-protocol classification fallback
-- [x] Reconnect-safe singleton BLE bonder initialization
-- [x] OLED rendering + 3-button input handling
-- [x] Host tests + CI + coverage workflows
-- [x] Devcontainer setup for embedded workflows (WSL-aware)
+- [x] BLE Central: scan, connect, bonding/encryption, and up to two simultaneous HID links
+- [x] HID-over-GATT client with report-map / report-ID classification (keyboard, mouse, consumer)
+- [x] USB composite HID device (keyboard + mouse + consumer)
+- [x] Flash-backed pairing store with boot-time auto-reconnect
+- [x] OLED + 3-button UI with inactivity power-off
+- [x] Pure, host-tested logic cores (functional core / imperative shell): `ble/coordinator.rs` and `ui/ui_logic.rs`
+- [x] Host tests, coverage, and CI; Renode SoftDevice-free simulation
+- [x] WSL-aware devcontainer
 
 ### Future Enhancements
 
+- [ ] Build, test, and deployment pipelines for firmware release (CI/CD)
 - [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets
 - [ ] LED pass-through (Caps/Num Lock)
 - [ ] NKRO and high-resolution HID report translation beyond boot-compatible reports
-- [ ] Extract more embedded orchestration into pure/testable modules with mocked BLE/storage/display boundaries
+- [ ] Wrap the remaining async I/O boundaries (GATT source, USB sink, flash) in mock-able traits so the async shells are testable too (builds on the functional-core split)
 - [ ] System tray companion app (Windows/macOS)
 - [ ] OTA firmware update (DFU via USB or BLE)
 
----
+### Known Limitations
 
-## Configuration
+Current behavioural caveats worth knowing (each notes its eventual fix):
 
-All tunable constants live in `src/config.rs`.
-
-| Constant                | Default       | Description                       |
-|-------------------------|---------------|-----------------------------------|
-| BLE_SCAN_DURATION_SECS  | 8             | BLE scan window (seconds)         |
-| BLE_CONN_INTERVAL_MIN   | 6 (7.5 ms)    | Min BLE conn interval             |
-| BLE_CONN_INTERVAL_MAX   | 12 (15 ms)    | Max BLE conn interval             |
-| MAX_PAIRED_DEVICES      | 4             | Maximum stored paired devices     |
-| STORAGE_FLASH_PAGE_START| 240           | First flash page for paired-device/bond storage |
-| STORAGE_FLASH_PAGE_COUNT| 4             | Flash pages reserved for paired-device/bond storage |
-| USB_VID / USB_PID       | 0x1209/0x0001 | USB IDs                           |
-| USB_HID_POLL_MS         | 1             | USB HID polling interval          |
-| BUTTON_DEBOUNCE_MS      | 50            | Button debounce                   |
-| SCREEN_AUTO_OFF_ENABLED | true          | Enable/disable OLED auto power-off |
-| SCREEN_AUTO_OFF_TIMEOUT_SECS | 120      | OLED auto-off timeout (seconds)   |
-
----
-
-## Alternative MCU Targets
-
-| MCU                    | BLE             | USB Device         | Rust Support             | Notes                               |
-|------------------------|-----------------|--------------------|--------------------------|-------------------------------------|
-| **nRF52840** (primary) | On-chip BLE 5.0 | On-chip USB 2.0 FS | Embassy + nrf-softdevice | Best fit for this architecture      |
-| ESP32-S3               | On-chip BLE 5.0 | On-chip USB OTG    | esp-hal / esp-idf        | Strong alternative                  |
-| RP2040 + BT module     | External BT     | On-chip USB        | Embassy-rp               | Lower-cost, higher integration work |
-| STM32 + BT module      | External BT     | On-chip USB OTG    | Embassy-stm32            | Flexible but more complex           |
+- **BIOS / pre-OS use:** the USB interfaces are Report Protocol, not the HID Boot
+  subclass (embassy-usb doesn't expose it), so the device isn't guaranteed to work
+  before an OS HID driver loads. Fix: a custom Boot-subclass interface descriptor.
+- **Privacy-address reconnect:** auto-reconnect matches the stored device address;
+  peripherals that rotate a Resolvable Private Address aren't yet resolved via their
+  bond IRK, so they may need a manual reconnect.
+- **Single HID report characteristic:** the GATT client subscribes to one `0x2A4D`
+  characteristic; devices that split reports across several characteristics expose
+  only one. Fix: enumerate all report characteristics during discovery.
+- **HID backpressure:** the BLE→USB report channel drops on overflow (the GATT
+  notification callback can't `.await`), so a dropped key-release could briefly stick
+  a key. Rare in practice given USB FS throughput.
+- **Power management:** only the OLED auto-off is active; BLE connection-parameter
+  relaxation and System-OFF sleep aren't implemented, and inactivity tracks button /
+  connect events rather than keystrokes (which bypass the UI task).
+- **Blocking display I/O:** the SSD1306 flush is blocking I2C (ssd1306 0.9's async
+  mode doesn't compile in this configuration). It's off the keystroke hot path, so
+  the impact is limited to brief stalls during UI redraws.
+- **Advanced HID features** (5-button / hi-res mouse, NKRO) are translated down to
+  boot-style reports — see NKRO/hi-res above.
+- **SoftDevice RAM reservation** (24 KB in `memory_sd.x`) is a design estimate;
+  confirm it against the value the SoftDevice reports at `enable` on real hardware.
+- **Renode buttons:** injected GPIO edges don't reach embassy-nrf's GPIOTE edge-wait,
+  so the simulation drives the UI via a synthetic stimulus task (see the Renode guide).
 
 ---
 

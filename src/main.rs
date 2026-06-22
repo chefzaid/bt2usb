@@ -397,8 +397,6 @@ async fn main(spawner: Spawner) {
 
             embassy_futures::select::Either4::Third(_) => {
                 power.tick();
-                let _ = power.state();
-                let _ = power.ble_low_power();
                 // Auto-off applies on every screen (the inactivity policy lives
                 // in `PowerManager::display_on`), not just Home — otherwise the
                 // panel would stay lit forever while connected.

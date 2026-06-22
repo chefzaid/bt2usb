@@ -9,13 +9,20 @@
 //!   - Records are appended sequentially; the flash pages are managed
 //!     by `sequential-storage` which handles wear levelling and GC.
 
+mod codec;
+
+use codec::{
+    deserialize_address, deserialize_bond, serialize_address, serialize_bond, ADDRESS_RECORD_SIZE,
+    BOND_RECORD_SIZE,
+};
+
 use crate::config::{MAX_PAIRED_DEVICES, STORAGE_FLASH_PAGE_COUNT, STORAGE_FLASH_PAGE_START};
 use defmt::{debug, error, info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
+use embassy_time::{Duration, Timer};
 use heapless::Vec;
-use nrf_softdevice::ble::{Address, AddressType, EncryptionInfo, IdentityKey, MasterId};
-use nrf_softdevice::raw;
+use nrf_softdevice::ble::{Address, EncryptionInfo, IdentityKey, MasterId};
 
 /// Flash page size for nRF52840 (4 KB).
 const FLASH_PAGE_SIZE: u32 = 4096;
@@ -31,7 +38,11 @@ const KEY_PAIRED_DEVICES: u8 = 0x01;
 
 const STORAGE_MAGIC: u8 = 0xB2;
 const STORAGE_VERSION: u8 = 0x01;
-const BOND_RECORD_SIZE: usize = 50;
+// Record wire sizes (ADDRESS_RECORD_SIZE, BOND_RECORD_SIZE) live in `codec`.
+
+/// Retry budget for a flash write that races BLE radio timeslots.
+const FLASH_WRITE_ATTEMPTS: u8 = 3;
+const FLASH_RETRY_BACKOFF_MS: u64 = 20;
 
 /// Maximum serialized size for paired device records.
 /// 4 devices × (address/name metadata + BLE bond keys) plus versioning overhead.
@@ -75,21 +86,17 @@ impl PairedDevice {
     }
 
     fn serialize_base(&self, buf: &mut [u8]) -> usize {
-        let addr_bytes = self.address.bytes();
-        let addr_type = address_type_to_byte(self.address.address_type());
         let name_bytes = self.name.as_bytes();
-        let name_len = name_bytes.len() as u8;
 
-        // Format: [6 addr][1 type][1 rssi][1 name_len][name_bytes...]
-        let total = 6 + 1 + 1 + 1 + name_bytes.len();
+        // Format: [7 addr+type][1 rssi][1 name_len][name_bytes...]
+        let total = ADDRESS_RECORD_SIZE + 1 + 1 + name_bytes.len();
         if buf.len() < total {
             return 0;
         }
 
-        buf[0..6].copy_from_slice(&addr_bytes);
-        buf[6] = addr_type;
+        serialize_address(self.address, &mut buf[..ADDRESS_RECORD_SIZE]);
         buf[7] = self.last_rssi as u8;
-        buf[8] = name_len;
+        buf[8] = name_bytes.len() as u8;
         buf[9..9 + name_bytes.len()].copy_from_slice(name_bytes);
         total
     }
@@ -125,9 +132,7 @@ impl PairedDevice {
             return None;
         }
 
-        let mut addr_bytes = [0u8; 6];
-        addr_bytes.copy_from_slice(&data[0..6]);
-        let addr_type = byte_to_address_type(data[6]);
+        let address = deserialize_address(&data[..ADDRESS_RECORD_SIZE]);
         let rssi = data[7] as i8;
         let name_len = data[8] as usize;
 
@@ -145,7 +150,7 @@ impl PairedDevice {
 
         Some((
             Self {
-                address: Address::new(addr_type, addr_bytes),
+                address,
                 name,
                 last_rssi: rssi,
                 bond: None,
@@ -166,76 +171,6 @@ impl PairedDevice {
         }
         Some(device)
     }
-}
-
-fn address_type_to_byte(address_type: AddressType) -> u8 {
-    match address_type {
-        AddressType::Public => 0,
-        AddressType::RandomStatic => 1,
-        AddressType::RandomPrivateResolvable => 2,
-        AddressType::RandomPrivateNonResolvable => 3,
-        AddressType::Anonymous => 4,
-    }
-}
-
-fn byte_to_address_type(value: u8) -> AddressType {
-    match value {
-        0 => AddressType::Public,
-        1 => AddressType::RandomStatic,
-        2 => AddressType::RandomPrivateResolvable,
-        3 => AddressType::RandomPrivateNonResolvable,
-        4 => AddressType::Anonymous,
-        _ => AddressType::RandomStatic,
-    }
-}
-
-fn serialize_address(address: Address, buf: &mut [u8]) {
-    buf[0..6].copy_from_slice(&address.bytes());
-    buf[6] = address_type_to_byte(address.address_type());
-}
-
-fn deserialize_address(data: &[u8]) -> Address {
-    let mut bytes = [0u8; 6];
-    bytes.copy_from_slice(&data[0..6]);
-    Address::new(byte_to_address_type(data[6]), bytes)
-}
-
-fn serialize_bond(bond: &BondInfo, buf: &mut [u8]) {
-    buf[0..2].copy_from_slice(&bond.master_id.ediv.to_le_bytes());
-    buf[2..10].copy_from_slice(&bond.master_id.rand);
-    buf[10..26].copy_from_slice(&bond.key.ltk);
-    buf[26] = bond.key.flags;
-    buf[27..43].copy_from_slice(&bond.peer_id.as_raw().id_info.irk);
-    serialize_address(bond.peer_id.addr, &mut buf[43..50]);
-}
-
-fn deserialize_bond(data: &[u8]) -> Option<BondInfo> {
-    if data.len() < BOND_RECORD_SIZE {
-        return None;
-    }
-
-    let mut rand = [0u8; 8];
-    rand.copy_from_slice(&data[2..10]);
-    let mut ltk = [0u8; 16];
-    ltk.copy_from_slice(&data[10..26]);
-    let mut irk = [0u8; 16];
-    irk.copy_from_slice(&data[27..43]);
-    let addr = deserialize_address(&data[43..50]);
-
-    Some(BondInfo {
-        master_id: MasterId {
-            ediv: u16::from_le_bytes([data[0], data[1]]),
-            rand,
-        },
-        key: EncryptionInfo {
-            ltk,
-            flags: data[26],
-        },
-        peer_id: IdentityKey::from_raw(raw::ble_gap_id_key_t {
-            id_info: raw::ble_gap_irk_t { irk },
-            id_addr_info: *addr.as_raw(),
-        }),
-    })
 }
 
 /// In-memory cache of paired devices, synced with flash.
@@ -306,22 +241,37 @@ impl DeviceStore {
         let len = self.serialize_all(&mut data_buf);
         let item = &data_buf[..len];
 
-        match sequential_storage::map::store_item::<u8, &[u8], _>(
-            flash,
-            flash_range,
-            &mut sequential_storage::cache::NoCache::new(),
-            &mut buf,
-            &KEY_PAIRED_DEVICES,
-            &item,
-        )
-        .await
-        {
-            Ok(_) => {
-                info!("Saved {} devices to flash", self.devices.len());
-                self.dirty = false;
-            }
-            Err(e) => {
-                error!("Flash write error: {:?}", defmt::Debug2Format(&e));
+        // SoftDevice flash operations need radio-idle timeslots and can fail with
+        // a transient busy/timeout error while BLE links are active (this save
+        // runs right at connect time). Retry a few times with a short backoff.
+        for attempt in 1..=FLASH_WRITE_ATTEMPTS {
+            match sequential_storage::map::store_item::<u8, &[u8], _>(
+                flash,
+                flash_range.clone(),
+                &mut sequential_storage::cache::NoCache::new(),
+                &mut buf,
+                &KEY_PAIRED_DEVICES,
+                &item,
+            )
+            .await
+            {
+                Ok(_) => {
+                    info!("Saved {} devices to flash", self.devices.len());
+                    self.dirty = false;
+                    return;
+                }
+                Err(e) => {
+                    if attempt < FLASH_WRITE_ATTEMPTS {
+                        warn!("Flash write busy (attempt {}), retrying", attempt);
+                        Timer::after(Duration::from_millis(FLASH_RETRY_BACKOFF_MS)).await;
+                    } else {
+                        error!(
+                            "Flash write failed after {} attempts: {:?}",
+                            FLASH_WRITE_ATTEMPTS,
+                            defmt::Debug2Format(&e)
+                        );
+                    }
+                }
             }
         }
     }

@@ -243,6 +243,65 @@ echo "Done! Run 'mask coverage' to generate reports."
 ./scripts/run-tool.sh probe-rs attach --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/bt2usb
 ```
 
+## sim-setup
+
+> Install Renode + renode-test deps for Layer-3 simulation (Linux/WSL2, no root)
+
+Downloads portable Renode and the Python deps for `renode-test` into your home
+(`~/.local`). Idempotent. Run this once inside WSL/Linux, then use `mask sim` /
+`mask sim-test`. (On Windows, run it from inside WSL — see README.)
+
+```bash
+bash scripts/install-renode.sh
+```
+
+## sim-build
+
+> Build the SoftDevice-free simulation firmware for Renode (Layer 3, no hardware)
+
+```bash
+./scripts/run-tool.sh cargo build --features sim --target thumbv7em-none-eabihf
+echo "Sim ELF: target/thumbv7em-none-eabihf/debug/bt2usb-sim"
+```
+
+## sim
+
+> Build + run the simulation firmware in Renode, GUI (requires `renode` on PATH)
+
+Boots the SoftDevice-free firmware on a simulated nRF52840; UART0 output (the
+coordinator + UI logic running on the target) appears in the Renode terminal
+window. No probe or board needed. See README "Renode simulation".
+
+```bash
+./scripts/run-tool.sh cargo build --features sim --target thumbv7em-none-eabihf
+if command -v renode >/dev/null 2>&1; then
+    renode renode/bt2usb-sim.resc
+else
+    echo "Renode not found on PATH. Install it from https://renode.io"
+    echo "then run:  renode renode/bt2usb-sim.resc"
+    exit 127
+fi
+```
+
+## sim-test
+
+> Build + run the headless Renode robot test (asserts the sim's UART output)
+
+Boots the sim in Renode (no GUI) and asserts that both pure cores
+(`ble::coordinator` and `ui::ui_logic`) run on the simulated MCU. Suitable for
+CI. Requires `renode-test` on PATH (ships with Renode).
+
+```bash
+./scripts/run-tool.sh cargo build --features sim --target thumbv7em-none-eabihf
+if command -v renode-test >/dev/null 2>&1; then
+    renode-test renode/bt2usb-sim.robot
+else
+    echo "renode-test not found on PATH. Install Renode from https://renode.io"
+    echo "then run:  renode-test renode/bt2usb-sim.robot"
+    exit 127
+fi
+```
+
 ## softdevice
 
 > Flash the Nordic SoftDevice S140 (required once per board)

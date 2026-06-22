@@ -135,18 +135,23 @@ impl SecurityHandler for Bonder {
     }
 }
 
+/// The single BLE bonder/security handler, shared by every connection slot.
+///
+/// `Bonder` holds a `RefCell` so it is `!Sync` and can't live in a `static`
+/// directly (nor in `LazyLock`, which requires `Sync`). `StaticCell` only
+/// requires `Send`, so it backs the storage; the first caller initialises it and
+/// caches the `&'static` in an `AtomicPtr` so later calls don't re-`init` (which
+/// would panic). On the single-threaded cooperative executor the init can't
+/// race, so the spin fallback is just defensive.
 fn bonder() -> &'static Bonder {
     use core::sync::atomic::{AtomicPtr, Ordering};
 
     static BONDER: StaticCell<Bonder> = StaticCell::new();
-    // Cache the reference so subsequent calls don't panic on StaticCell::init().
     static BONDER_REF: AtomicPtr<Bonder> = AtomicPtr::new(core::ptr::null_mut());
 
     let ptr = BONDER_REF.load(Ordering::Acquire);
     if !ptr.is_null() {
-        // Already initialised — return the existing reference.
-        // SAFETY: The pointer was obtained from StaticCell::try_init which returns
-        // a valid &'static mut Bonder. The Bonder is never deallocated.
+        // SAFETY: pointer came from StaticCell::try_init; the Bonder is 'static.
         unsafe { &*ptr }
     } else if let Some(b) = BONDER.try_init(Bonder::new()) {
         BONDER_REF.store(b as *mut Bonder, Ordering::Release);
@@ -155,7 +160,7 @@ fn bonder() -> &'static Bonder {
         loop {
             let ptr = BONDER_REF.load(Ordering::Acquire);
             if !ptr.is_null() {
-                // SAFETY: The pointer was obtained from StaticCell::try_init.
+                // SAFETY: as above.
                 break unsafe { &*ptr };
             }
         }

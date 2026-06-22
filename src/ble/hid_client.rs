@@ -25,8 +25,10 @@ use nrf_softdevice::ble::{gatt_client, Connection};
 #[nrf_softdevice::gatt_client(uuid = "1812")]
 pub struct HidServiceClient {
     /// HID Report (Input) - notifications carry live keystrokes / mouse data.
+    /// 32 bytes covers boot reports (≤8 B) with headroom for larger
+    /// report-protocol notifications (capped by `att_mtu`).
     #[characteristic(uuid = "2a4d", read, notify)]
-    pub hid_report: [u8; 20],
+    pub hid_report: [u8; 32],
 
     /// HID Report Map - describes the report descriptor (for advanced parsing).
     #[characteristic(uuid = "2a4b", read)]

@@ -24,9 +24,8 @@
 //! - Push/Pop state is not supported
 //! - Delimiter tags are ignored
 
-use defmt::{debug, Format};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Format)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum ReportKind {
     Keyboard,
     Mouse,
@@ -34,7 +33,8 @@ pub enum ReportKind {
 }
 
 /// Usage page codes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Format)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum UsagePage {
     /// Generic Desktop (mouse, keyboard, joystick).
     GenericDesktop,
@@ -64,7 +64,8 @@ impl From<u16> for UsagePage {
 }
 
 /// Generic Desktop usage codes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Format)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum DesktopUsage {
     Pointer,
     Mouse,
@@ -256,7 +257,8 @@ impl HidDescriptor {
         if desc.has_keyboard || desc.has_mouse || desc.has_consumer {
             Some(desc)
         } else {
-            debug!("HID descriptor: no recognized usages found");
+            #[cfg(feature = "defmt")]
+            defmt::debug!("HID descriptor: no recognized usages found");
             None
         }
     }

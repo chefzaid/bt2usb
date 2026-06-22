@@ -93,16 +93,6 @@ impl PowerManager {
         )
     }
 
-    /// Check if we should reduce BLE activity.
-    pub fn ble_low_power(&self) -> bool {
-        matches!(self.state, PowerState::LowPower)
-    }
-
-    /// Get current power state.
-    pub fn state(&self) -> PowerState {
-        self.state
-    }
-
     /// Periodic tick - call every ~1 second.
     pub fn tick(&mut self) {
         let elapsed = self.last_activity.elapsed().as_secs();

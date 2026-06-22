@@ -1,21 +1,49 @@
-//! HID report types and BLE→USB translation layer.
+//! HID report types and the BLE→USB classification/translation layer.
+//!
+//! This module is `no_std` and free of hardware dependencies, so it is shared
+//! verbatim between the firmware and the host test suite (`cargo test`) — there
+//! is no separate host reimplementation. `defmt::Format` is derived only when
+//! the `defmt` feature is on (firmware builds).
 
 pub mod consumer;
 pub mod keyboard;
 pub mod mouse;
 pub mod report_protocol;
 
-#[cfg(test)]
-mod tests;
-
-use defmt::Format;
 use report_protocol::{HidDescriptor, ReportKind};
 
-#[derive(Clone, Format)]
+#[derive(Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum HidReport {
     Keyboard(keyboard::KeyboardReport),
     Mouse(mouse::MouseReport),
     Consumer(consumer::ConsumerReport),
+}
+
+impl HidReport {
+    /// Serialize into the USB HID report wire format, returning the byte count.
+    pub fn serialize(&self, buf: &mut [u8]) -> usize {
+        match self {
+            HidReport::Keyboard(k) => k.serialize(buf),
+            HidReport::Mouse(m) => m.serialize(buf),
+            HidReport::Consumer(c) => c.serialize(buf),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn is_keyboard(&self) -> bool {
+        matches!(self, HidReport::Keyboard(_))
+    }
+
+    #[cfg(test)]
+    pub fn is_mouse(&self) -> bool {
+        matches!(self, HidReport::Mouse(_))
+    }
+
+    #[cfg(test)]
+    pub fn is_consumer(&self) -> bool {
+        matches!(self, HidReport::Consumer(_))
+    }
 }
 
 pub fn classify_report(report_id: u8, data: &[u8]) -> Option<HidReport> {
@@ -108,6 +136,7 @@ fn infer_from_length(data: &[u8]) -> Option<HidReport> {
             }
         }
         _ => {
+            #[cfg(feature = "defmt")]
             defmt::warn!("Unknown HID report length: {}", data.len());
             None
         }

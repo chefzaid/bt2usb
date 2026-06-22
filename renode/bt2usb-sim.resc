@@ -1,0 +1,43 @@
+:name: bt2usb-sim
+:description: SoftDevice-free bt2usb firmware running on a simulated nRF52840.
+
+# ── What this does ───────────────────────────────────────────────────────────
+# Boots the `bt2usb-sim` binary (built with `--features sim`) on Renode's
+# bundled nRF52840 model. The firmware reuses the real GPIO button driver and
+# the host-tested UI/coordinator logic, driven by a synthetic BLE scenario plus
+# a synthetic button-stimulus task. Human-readable output goes to UART0.
+#
+# Build the ELF first:
+#   mask sim-build   (cargo build --features sim --target thumbv7em-none-eabihf)
+#
+# Interactive run (opens a UART terminal window in the Renode GUI):
+#   renode renode/bt2usb-sim.resc
+#
+# Headless / CI run (asserts the output, no GUI):
+#   renode-test renode/bt2usb-sim.robot
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ELF path; override with:  renode -e "$bin=@/abs/path" renode/bt2usb-sim.resc
+$bin ?= @target/thumbv7em-none-eabihf/debug/bt2usb-sim
+
+using sysbus
+
+mach create "bt2usb-sim"
+machine LoadPlatformDescription @platforms/cpus/nrf52840.repl
+
+# Show UART0 output (the firmware's log) in a terminal window.
+showAnalyzer sysbus.uart0
+
+macro reset
+"""
+    sysbus LoadELF $bin
+"""
+runMacro $reset
+
+echo ""
+echo "bt2usb-sim loaded. UART0 output (coordinator + UI logic) appears in the"
+echo "analyzer window once started. The firmware drives its own button/BLE"
+echo "stimulus, so transitions appear automatically — no input needed."
+echo ""
+
+start

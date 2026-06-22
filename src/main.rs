@@ -23,14 +23,17 @@
 //!
 //! ## Async tasks (Embassy)
 //!
-//! | Task              | Responsibility                                 |
-//! |-------------------|------------------------------------------------|
-//! | `softdevice_task` | Runs the Nordic SoftDevice event loop          |
-//! | `ble_task`        | Scan / connect / receive BLE HID reports       |
-//! | `usb_device_task` | USB enumeration and endpoint servicing          |
-//! | `hid_writer_task` | Forwards BLE reports → USB HID endpoints       |
-//! | `ui_task`         | Drives display + reacts to button presses      |
-//! | `button_*_task`   | Per-button debounced GPIO watcher (×3)         |
+//! | Task                | Responsibility                                       |
+//! |---------------------|------------------------------------------------------|
+//! | `softdevice_task`   | Runs the SoftDevice event loop; forwards USB power events |
+//! | `ble_task`          | BLE coordinator: scan, slot orchestration, flash persist |
+//! | `ble_slot{0,1}_task`| Per-slot connect/secure + HID notification loop      |
+//! | `usb_device_task`   | USB enumeration and endpoint servicing               |
+//! | `hid_writer_task`   | Forwards BLE reports → USB HID endpoints              |
+//! | `button_*_task`     | Per-button debounced GPIO watcher (×3)               |
+//!
+//! The UI state machine runs in `main` itself (reacting to button and BLE events
+//! and driving the OLED), not a separate task.
 
 #![no_std]
 #![no_main]

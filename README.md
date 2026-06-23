@@ -418,7 +418,7 @@ sequenceDiagram
 - [x] Works in BIOS / pre-OS, not just after the OS HID driver loads (keyboard + mouse advertise the USB HID Boot subclass)
 - [ ] Real low-power modes: relax BLE connection parameters and enter System-OFF on inactivity, and route actual HID activity (not just button/connect events) into the power manager (`power.rs`, `main.rs`)
 - [ ] NKRO, high-resolution, and multi-button (>3) HID translation beyond boot-compatible reports
-- [ ] LED pass-through (Caps / Num / Scroll Lock) from the host back to the BLE keyboard
+- [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
 - [ ] Non-blocking async-I2C OLED flush (once `ssd1306` async compiles) so a redraw never stalls the cooperative executor (`ui/display.rs`)
 - [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
 - [ ] Make the async I/O shells testable by mocking the GATT source / USB sink / flash behind traits — Layer 2 tests the decisions; this would cover the glue that executes them

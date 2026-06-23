@@ -352,6 +352,9 @@ pub async fn connection_slot_task(
     report_tx: &Sender<'static, CriticalSectionRawMutex, HidReport, 16>,
 ) -> ! {
     let mut pending_cmd: Option<SlotCommand> = None;
+    // One host-LED receiver per slot (taken once; reused across reconnects). The
+    // slot that holds the keyboard writes LED state through; others ignore it.
+    let mut led_rx = crate::usb::hid_device::keyboard_led_receiver();
 
     loop {
         let cmd = match pending_cmd.take() {
@@ -361,8 +364,16 @@ pub async fn connection_slot_task(
 
         match cmd {
             SlotCommand::Connect(device) => {
-                match connect_and_run_secure(sd, &device, report_tx, slot_event_tx, slot, cmd_rx)
-                    .await
+                match connect_and_run_secure(
+                    sd,
+                    &device,
+                    report_tx,
+                    slot_event_tx,
+                    slot,
+                    cmd_rx,
+                    led_rx.as_mut(),
+                )
+                .await
                 {
                     SlotOutcome::Closed => {
                         slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
@@ -417,6 +428,7 @@ async fn connect_and_run_secure(
     slot_event_tx: &Sender<'_, CriticalSectionRawMutex, SlotEvent, 8>,
     slot: usize,
     cmd_rx: &Receiver<'_, CriticalSectionRawMutex, SlotCommand, 2>,
+    led_rx: Option<&mut crate::usb::hid_device::LedReceiver>,
 ) -> SlotOutcome {
     info!("slot {} connecting to {}", slot, device.name.as_str());
 
@@ -481,7 +493,7 @@ async fn connect_and_run_secure(
     // against incoming commands. If a command supersedes us, explicitly tear
     // the link down (dropping the future alone does NOT disconnect the radio
     // link in the SoftDevice, which would leak a central connection slot).
-    let run_fut = hid_client::run_notification_loop(&conn, &client, descriptor, report_tx);
+    let run_fut = hid_client::run_notification_loop(&conn, &client, descriptor, report_tx, led_rx);
     match select(cmd_rx.receive(), run_fut).await {
         Either::First(next_cmd) => {
             let _ = conn.disconnect();

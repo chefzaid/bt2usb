@@ -5,7 +5,7 @@
 
 use crate::config;
 use crate::hid::consumer::CONSUMER_REPORT_DESCRIPTOR;
-use crate::hid::keyboard::KEYBOARD_REPORT_DESCRIPTOR;
+use crate::hid::keyboard::{KeyboardLeds, KEYBOARD_REPORT_DESCRIPTOR};
 use crate::hid::mouse::MOUSE_REPORT_DESCRIPTOR;
 use crate::hid::HidReport;
 use defmt::{info, warn};
@@ -15,11 +15,56 @@ use embassy_nrf::{self, bind_interrupts, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Receiver;
 use embassy_sync::signal::Signal;
+use embassy_sync::watch::{Receiver as WatchReceiver, Watch};
 use embassy_usb::class::hid::{
-    Config as HidConfig, HidBootProtocol, HidSubclass, HidWriter, State,
+    Config as HidConfig, HidBootProtocol, HidSubclass, HidWriter, ReportId, RequestHandler, State,
 };
+use embassy_usb::control::OutResponse;
 use embassy_usb::{Builder, Config, UsbDevice};
 use static_cell::StaticCell;
+
+/// Number of BLE connection slots that may consume host LED updates. Must be ≥
+/// the BLE `MAX_CONNECTIONS` (a keyboard occupies one slot; mice/consumer slots
+/// simply ignore the updates).
+pub const LED_CONSUMERS: usize = 2;
+
+/// Latest host keyboard-LED (Caps/Num/Scroll) state, published by the USB
+/// control handler and consumed by the BLE slot tasks to drive the BLE
+/// keyboard's LEDs. `Watch` keeps only the newest value and wakes every slot.
+static KEYBOARD_LEDS: Watch<CriticalSectionRawMutex, KeyboardLeds, LED_CONSUMERS> = Watch::new();
+
+/// Receiver handle a BLE slot task uses to observe host LED changes.
+pub type LedReceiver = WatchReceiver<'static, CriticalSectionRawMutex, KeyboardLeds, LED_CONSUMERS>;
+
+/// Take one of the [`LED_CONSUMERS`] LED receivers (one per BLE slot).
+pub fn keyboard_led_receiver() -> Option<LedReceiver> {
+    KEYBOARD_LEDS.receiver()
+}
+
+/// USB control handler that captures the host's keyboard LED **output** report
+/// (sent via SET_REPORT on the control pipe) and republishes it for the BLE
+/// side. Installed only on the keyboard interface.
+struct LedRequestHandler;
+
+impl RequestHandler for LedRequestHandler {
+    fn set_report(&mut self, _id: ReportId, data: &[u8]) -> OutResponse {
+        // Our keyboard descriptor declares no report IDs, so the output report
+        // payload is the single LED bitfield byte.
+        if let Some(&byte) = data.first() {
+            let leds = KeyboardLeds::from_byte(byte);
+            info!(
+                "Host LEDs: num={} caps={} scroll={}",
+                leds.num_lock(),
+                leds.caps_lock(),
+                leds.scroll_lock()
+            );
+            KEYBOARD_LEDS.sender().send(leds);
+        }
+        OutResponse::Accepted
+    }
+}
+
+static LED_HANDLER: StaticCell<LedRequestHandler> = StaticCell::new();
 
 bind_interrupts!(struct Irqs {
     USBD => embassy_nrf::usb::InterruptHandler<peripherals::USBD>;
@@ -126,7 +171,9 @@ pub fn init(usbd: Peri<'static, peripherals::USBD>) -> UsbHidDevice {
     let kb_state = KB_STATE.init(State::new());
     let kb_config = HidConfig {
         report_descriptor: KEYBOARD_REPORT_DESCRIPTOR,
-        request_handler: None,
+        // Capture the host's LED (Caps/Num/Scroll) output report so we can mirror
+        // it onto the BLE keyboard.
+        request_handler: Some(LED_HANDLER.init(LedRequestHandler)),
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
         // Advertise the Boot Interface subclass so the keyboard works in BIOS /

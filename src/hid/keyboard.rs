@@ -74,6 +74,51 @@ impl KeyboardReport {
     }
 }
 
+/// Host keyboard LED state — the 1-byte HID LED **output** report the host
+/// sends (USB) and which we forward to the BLE keyboard (USB→BLE pass-through).
+///
+/// Bit layout per HID Usage Page 0x08 (LEDs); the USB and BLE boot-protocol
+/// keyboard output reports share this byte, so the pass-through is the identity
+/// on the byte (we only mask off the undefined upper bits).
+///
+/// ```text
+/// bit 0 = Num Lock,  bit 1 = Caps Lock, bit 2 = Scroll Lock,
+/// bit 3 = Compose,   bit 4 = Kana
+/// ```
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct KeyboardLeds(u8);
+
+impl KeyboardLeds {
+    /// Mask of defined LED bits (Num/Caps/Scroll/Compose/Kana).
+    const DEFINED: u8 = 0x1F;
+
+    /// Build from a raw HID LED report byte, masking undefined bits.
+    pub const fn from_byte(byte: u8) -> Self {
+        Self(byte & Self::DEFINED)
+    }
+
+    /// The wire byte to forward to the BLE keyboard's output report.
+    pub const fn byte(self) -> u8 {
+        self.0
+    }
+
+    /// `true` when Num Lock is on.
+    pub const fn num_lock(self) -> bool {
+        self.0 & 0x01 != 0
+    }
+
+    /// `true` when Caps Lock is on.
+    pub const fn caps_lock(self) -> bool {
+        self.0 & 0x02 != 0
+    }
+
+    /// `true` when Scroll Lock is on.
+    pub const fn scroll_lock(self) -> bool {
+        self.0 & 0x04 != 0
+    }
+}
+
 // USB HID report descriptor for a boot-protocol keyboard
 
 /// USB HID Report Descriptor for a standard keyboard.
@@ -126,3 +171,38 @@ pub const KEYBOARD_REPORT_DESCRIPTOR: &[u8] = &[
     //
     0xC0, // End Collection
 ];
+
+#[cfg(test)]
+mod led_tests {
+    use super::KeyboardLeds;
+
+    #[test]
+    fn decodes_individual_leds() {
+        assert!(KeyboardLeds::from_byte(0x01).num_lock());
+        assert!(KeyboardLeds::from_byte(0x02).caps_lock());
+        assert!(KeyboardLeds::from_byte(0x04).scroll_lock());
+
+        let none = KeyboardLeds::from_byte(0x00);
+        assert!(!none.num_lock() && !none.caps_lock() && !none.scroll_lock());
+    }
+
+    #[test]
+    fn caps_and_num_together() {
+        let leds = KeyboardLeds::from_byte(0x03);
+        assert!(leds.num_lock() && leds.caps_lock());
+        assert!(!leds.scroll_lock());
+    }
+
+    #[test]
+    fn masks_undefined_upper_bits_and_round_trips() {
+        // Bits 5-7 are undefined and must be stripped so the byte we forward
+        // to the BLE keyboard is well-formed.
+        assert_eq!(KeyboardLeds::from_byte(0xE5).byte(), 0x05);
+        assert_eq!(KeyboardLeds::from_byte(0x07).byte(), 0x07);
+    }
+
+    #[test]
+    fn default_is_all_off() {
+        assert_eq!(KeyboardLeds::default().byte(), 0);
+    }
+}

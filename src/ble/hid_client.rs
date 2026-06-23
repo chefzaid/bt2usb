@@ -17,11 +17,13 @@
 use crate::ble::BleErrorTag;
 use crate::hid;
 use crate::hid::coalesce::ReportCoalescer;
-use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference};
+use crate::hid::keyboard::KeyboardLeds;
+use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, ReportType};
 use crate::hid::HidReport;
+use crate::usb::hid_device::LedReceiver;
 use core::cell::RefCell;
 use defmt::{info, warn};
-use embassy_futures::select::select;
+use embassy_futures::select::{select, select3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Sender;
 use embassy_sync::signal::Signal;
@@ -80,6 +82,9 @@ pub struct HidServiceClient {
     protocol_mode_handle: Option<u16>,
     reports: Vec<ReportCharacteristic, MAX_REPORTS>,
     subscriptions: Vec<Subscription, MAX_REPORTS>,
+    /// Handle of the keyboard's LED **output** report characteristic, if any —
+    /// where host LED (Caps/Num/Scroll) state is written back to the BLE keyboard.
+    keyboard_led_handle: Option<u16>,
 }
 
 fn descriptor_handle(descriptors: &[Descriptor], uuid_16: u16) -> Option<u16> {
@@ -103,6 +108,7 @@ impl Client for HidServiceClient {
             protocol_mode_handle: None,
             reports: Vec::new(),
             subscriptions: Vec::new(),
+            keyboard_led_handle: None,
         }
     }
 
@@ -176,27 +182,38 @@ impl HidServiceClient {
         let reports = self.reports.clone();
 
         for report in reports.iter() {
-            // An input report has a CCCD; without one there's nothing to enable.
-            let Some(cccd) = report.cccd_handle else {
-                continue;
-            };
-
-            // Resolve the report kind from its Report Reference (0x2908) value,
-            // mapped through the Report Map's report-ID table. Anything we can't
-            // resolve is subscribed with `kind = None` and classified by the
-            // heuristic fallback at notification time.
-            let kind = match (report.report_ref_handle, descriptor) {
-                (Some(ref_handle), Some(desc)) => {
+            // Read this characteristic's Report Reference (0x2908) once: it gives
+            // the report ID + direction (Input/Output/Feature).
+            let report_ref = match report.report_ref_handle {
+                Some(ref_handle) => {
                     let mut buf = [0u8; 2];
                     match gatt_client::read(conn, ref_handle, &mut buf).await {
-                        Ok(n) => ReportReference::parse(&buf[..n])
-                            .filter(ReportReference::is_input)
-                            .and_then(|r| desc.report_kind_for_id(r.report_id)),
+                        Ok(n) => ReportReference::parse(&buf[..n]),
                         Err(_) => None,
                     }
                 }
-                _ => None,
+                None => None,
             };
+
+            // No CCCD → not a notifiable input. If it's an Output report, it's the
+            // keyboard LED sink we write host Caps/Num/Scroll state to.
+            let Some(cccd) = report.cccd_handle else {
+                let is_output =
+                    matches!(report_ref, Some(r) if r.report_type == ReportType::Output);
+                if is_output && self.keyboard_led_handle.is_none() {
+                    self.keyboard_led_handle = Some(report.value_handle);
+                    info!("Found keyboard LED output report");
+                }
+                continue;
+            };
+
+            // Input report: resolve its kind from the Report Reference mapped
+            // through the Report Map's report-ID table. Anything we can't resolve
+            // is subscribed with `kind = None` and classified by the heuristic
+            // fallback at notification time.
+            let kind = report_ref
+                .filter(ReportReference::is_input)
+                .and_then(|r| descriptor.and_then(|d| d.report_kind_for_id(r.report_id)));
 
             // Enable notifications (write 0x0001 to the CCCD).
             match gatt_client::write(conn, cccd, &[0x01, 0x00]).await {
@@ -221,6 +238,19 @@ impl HidServiceClient {
             self.reports.len()
         );
         Ok(())
+    }
+
+    /// Write host LED (Caps/Num/Scroll) state to the BLE keyboard's output
+    /// report, if this device exposes one. No-op for non-keyboard peers.
+    async fn write_leds(&self, conn: &Connection, leds: KeyboardLeds) {
+        if let Some(handle) = self.keyboard_led_handle {
+            if gatt_client::write(conn, handle, &[leds.byte()])
+                .await
+                .is_err()
+            {
+                warn!("Failed to write LED state to BLE keyboard");
+            }
+        }
     }
 }
 
@@ -299,6 +329,7 @@ pub async fn run_notification_loop(
     client: &HidServiceClient,
     descriptor: Option<HidDescriptor>,
     report_tx: &Sender<'_, CriticalSectionRawMutex, HidReport, 16>,
+    led_rx: Option<&mut LedReceiver>,
 ) {
     info!("HID notification loop started");
 
@@ -336,7 +367,22 @@ pub async fn run_notification_loop(
         }
     };
 
-    let _ = select(gatt_fut, drain_fut).await;
+    // If this peer has a keyboard LED output report and we hold an LED receiver,
+    // also forward host LED changes to it; otherwise just run producer+consumer.
+    match led_rx {
+        Some(rx) => {
+            let led_fut = async {
+                loop {
+                    let leds = rx.changed().await;
+                    client.write_leds(conn, leds).await;
+                }
+            };
+            let _ = select3(gatt_fut, drain_fut, led_fut).await;
+        }
+        None => {
+            let _ = select(gatt_fut, drain_fut).await;
+        }
+    }
 
     info!("HID notification loop ended (connection closed)");
 }

@@ -10,6 +10,7 @@
 //!     by `sequential-storage` which handles wear levelling and GC.
 
 mod codec;
+mod framing;
 
 use codec::{
     deserialize_address, deserialize_bond, serialize_address, serialize_bond, ADDRESS_RECORD_SIZE,
@@ -37,9 +38,8 @@ const STORAGE_END: u32 = (STORAGE_FLASH_PAGE_START + STORAGE_FLASH_PAGE_COUNT) *
 /// Key for the paired devices list in the map storage.
 const KEY_PAIRED_DEVICES: u8 = 0x01;
 
-const STORAGE_MAGIC: u8 = 0xB2;
-const STORAGE_VERSION: u8 = 0x01;
-// Record wire sizes (ADDRESS_RECORD_SIZE, BOND_RECORD_SIZE) live in `codec`.
+// Versioned multi-record framing (magic/version/length prefixes) lives in
+// `framing`; per-record wire sizes (ADDRESS_RECORD_SIZE, BOND_RECORD_SIZE) in `codec`.
 
 /// Retry budget for a flash write that races BLE radio timeslots.
 const FLASH_WRITE_ATTEMPTS: u8 = 3;
@@ -270,35 +270,18 @@ impl DeviceStore {
         }
     }
 
-    /// Serialize all devices to a byte buffer.
+    /// Serialize all devices to a byte buffer using the versioned framing.
     fn serialize_all(&self, buf: &mut [u8]) -> usize {
-        if buf.len() < 3 {
+        let Some(mut writer) = framing::Writer::new(buf) else {
             return 0;
-        }
-
-        buf[0] = STORAGE_MAGIC;
-        buf[1] = STORAGE_VERSION;
-        buf[2] = self.devices.len() as u8;
-        let mut offset = 3;
-
+        };
         for device in &self.devices {
-            if offset >= buf.len() {
+            // Stop at the first record that doesn't fit (writer rolls it back).
+            if !writer.push(|slot| device.serialize(slot)) {
                 break;
             }
-
-            let record_len_offset = offset;
-            offset += 1;
-            let written = device.serialize(&mut buf[offset..]);
-            if written == 0 || written > u8::MAX as usize {
-                offset = record_len_offset;
-                break;
-            }
-
-            buf[record_len_offset] = written as u8;
-            offset += written;
         }
-
-        offset
+        writer.finish()
     }
 
     /// Deserialize all devices from a byte buffer.
@@ -307,7 +290,7 @@ impl DeviceStore {
             return;
         }
 
-        if data.len() >= 3 && data[0] == STORAGE_MAGIC && data[1] == STORAGE_VERSION {
+        if framing::is_versioned(data) {
             self.deserialize_versioned(data);
         } else {
             self.deserialize_legacy(data);
@@ -315,27 +298,12 @@ impl DeviceStore {
     }
 
     fn deserialize_versioned(&mut self, data: &[u8]) {
-        let count = data[2] as usize;
-        let mut offset = 3;
-
-        for _ in 0..count {
-            if offset >= data.len() {
-                break;
-            }
-
-            let record_len = data[offset] as usize;
-            offset += 1;
-            if record_len == 0 || offset + record_len > data.len() {
-                break;
-            }
-
-            if let Some(device) = PairedDevice::deserialize(&data[offset..offset + record_len]) {
+        for record in framing::records(data) {
+            if let Some(device) = PairedDevice::deserialize(record) {
                 if !self.devices.is_full() {
                     let _ = self.devices.push(device);
                 }
             }
-
-            offset += record_len;
         }
     }
 

@@ -24,6 +24,12 @@ mod ble_coordinator_impl;
 #[path = "ble/reconnect.rs"]
 mod ble_reconnect_impl;
 
+// Pure flash-record framing (host-tested independently of the embedded
+// `storage` shell, which is SoftDevice-coupled and not compiled here).
+#[cfg(test)]
+#[path = "storage/framing.rs"]
+mod storage_framing_impl;
+
 #[path = "power_logic.rs"]
 mod power_logic_impl;
 #[path = "ui/input_logic.rs"]

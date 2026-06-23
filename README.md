@@ -421,7 +421,6 @@ sequenceDiagram
 - [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
 - [ ] Non-blocking async-I2C OLED flush (once `ssd1306` async compiles) so a redraw never stalls the cooperative executor (`ui/display.rs`)
 - [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
-- [ ] Make the async I/O shells testable by mocking the GATT source / USB sink / flash behind traits — Layer 2 tests the decisions; this would cover the glue that executes them
 - [ ] Resolve Renode GPIO→GPIOTE injection so the simulation can exercise real button presses (it currently uses a synthetic stimulus task)
 - [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags
 - [ ] Monitor-input-aware profile switching across multiple PCs

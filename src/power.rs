@@ -1,31 +1,40 @@
-//! Power management module - low-power modes for battery operation.
+//! Power management — tracks activity and drives the device power state.
 //!
-//! Implements:
-//! - BLE idle mode (reduced advertising)
-//! - USB suspend handling
-//! - System sleep when inactive
+//! This board is **bus-powered** through the monitor's USB hub, not battery
+//! powered, so the aggressive low-power modes are intentionally *not* used:
+//! - We keep the fast 7.5 ms BLE connection interval for low HID latency rather
+//!   than relaxing it to save a few mA that wall power makes irrelevant.
+//! - We never enter System-OFF: it would drop USB enumeration and the BLE links,
+//!   which must stay up for the monitor hub. The Embassy executor already idles
+//!   the CPU (WFE / System-ON-Idle) automatically between events.
 //!
-//! nRF52840 power modes:
-//! - System ON: Normal operation (~3.5 mA with BLE active)
-//! - System ON Idle: CPU sleeping, peripherals active (~1.5 mA)
-//! - System OFF: Deep sleep, wake on GPIO/RTC (~0.3 µA)
+//! What this module *does* do is keep the power state — and thus the OLED
+//! auto-off — accurate to real activity, **including live HID traffic**, not
+//! just button presses and connect/disconnect events (see [`note_hid_activity`]).
+//! The state-transition policy is the pure, host-tested [`crate::power_logic`].
 
-use crate::{config, power_logic};
+use crate::config;
+use crate::power_logic::{self, next_power_state};
+use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::info;
 use embassy_time::Instant;
+
+pub use crate::power_logic::PowerState;
 
 /// Inactivity timeout before entering low-power mode.
 const IDLE_TIMEOUT_SECS: u64 = 60;
 
-/// Power state.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, defmt::Format)]
-pub enum PowerState {
-    /// Normal operation - BLE active, USB active.
-    Active,
-    /// Idle - no HID activity, but connections maintained.
-    Idle,
-    /// Low power - BLE idle, display off.
-    LowPower,
+/// Set whenever a HID report flows from a BLE device to the USB host, so the
+/// power manager counts real typing/mousing as activity (and keeps the OLED on)
+/// even though those reports never pass through the UI loop. Drained once per
+/// [`PowerManager::tick`].
+static HID_ACTIVITY: AtomicBool = AtomicBool::new(false);
+
+/// Record HID traffic as activity. Called from the BLE→USB report path
+/// ([`crate::usb::hid_device::hid_writer_task`]); cheap and lock-free so it's
+/// safe on the hot path.
+pub fn note_hid_activity() {
+    HID_ACTIVITY.store(true, Ordering::Relaxed);
 }
 
 /// Power manager tracks activity and manages sleep modes.
@@ -95,20 +104,22 @@ impl PowerManager {
 
     /// Periodic tick - call every ~1 second.
     pub fn tick(&mut self) {
+        // Fold in any HID traffic since the last tick so live typing/mousing
+        // counts as activity (keeps the screen on, holds the Active state).
+        if HID_ACTIVITY.swap(false, Ordering::Relaxed) {
+            self.activity();
+        }
         let elapsed = self.last_activity.elapsed().as_secs();
         self.update_state_with_elapsed(elapsed);
     }
 
     fn update_state_with_elapsed(&mut self, elapsed_secs: u64) {
-        let new_state = if self.usb_suspended
-            || (elapsed_secs > IDLE_TIMEOUT_SECS * 2 && !self.ble_connected)
-        {
-            PowerState::LowPower
-        } else if elapsed_secs > IDLE_TIMEOUT_SECS {
-            PowerState::Idle
-        } else {
-            PowerState::Active
-        };
+        let new_state = next_power_state(
+            elapsed_secs,
+            self.usb_suspended,
+            self.ble_connected,
+            IDLE_TIMEOUT_SECS,
+        );
 
         if new_state != self.state {
             info!("Power: {:?} -> {:?}", self.state, new_state);

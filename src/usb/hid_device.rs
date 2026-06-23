@@ -244,6 +244,9 @@ pub async fn hid_writer_task(
 
     loop {
         let report = report_rx.receive().await;
+        // Count live HID traffic as activity so the OLED stays on while the user
+        // is actually typing/mousing (these reports never reach the UI loop).
+        crate::power::note_hid_activity();
         let n = report.serialize(&mut buf);
         let bytes = &buf[..n];
 

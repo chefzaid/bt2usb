@@ -59,7 +59,7 @@ pub mod ui {
 }
 
 pub mod power_logic {
-    pub use crate::power_logic_impl::screen_should_be_on;
+    pub use crate::power_logic_impl::{next_power_state, screen_should_be_on, PowerState};
 }
 
 #[cfg(test)]

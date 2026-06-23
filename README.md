@@ -416,7 +416,7 @@ sequenceDiagram
 - [x] Auto-reconnect devices that rotate their Bluetooth address, recognizing them by their identity key instead of a now-stale stored address
 - [x] Subscribe to all of a device's HID reports, so multi-report devices (e.g. keyboard + media keys) aren't truncated to just the first
 - [x] Works in BIOS / pre-OS, not just after the OS HID driver loads (keyboard + mouse advertise the USB HID Boot subclass)
-- [ ] Real low-power modes: relax BLE connection parameters and enter System-OFF on inactivity, and route actual HID activity (not just button/connect events) into the power manager (`power.rs`, `main.rs`)
+- [x] Power state follows real HID traffic (not just button/connect events), so the OLED no longer sleeps mid-typing. Deep modes (System-OFF, relaxing the fast BLE interval) are intentionally skipped on this bus-powered device — they'd cost HID latency/availability for power that wall power makes irrelevant
 - [ ] NKRO, high-resolution, and multi-button (>3) HID translation beyond boot-compatible reports
 - [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
 - [ ] Non-blocking async-I2C OLED flush (once `ssd1306` async compiles) so a redraw never stalls the cooperative executor (`ui/display.rs`)

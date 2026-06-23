@@ -124,7 +124,7 @@ fn classify_report_id_prefix(data: &[u8]) -> Option<HidReport> {
         1 if payload.len() >= keyboard::KEYBOARD_REPORT_SIZE => {
             keyboard::KeyboardReport::from_ble_bytes(payload).map(HidReport::Keyboard)
         }
-        2 if payload.len() == mouse::MOUSE_REPORT_SIZE => {
+        2 if (3..=mouse::MOUSE_REPORT_SIZE).contains(&payload.len()) => {
             mouse::MouseReport::from_ble_bytes(payload).map(HidReport::Mouse)
         }
         3 if payload.len() == consumer::CONSUMER_REPORT_SIZE => {
@@ -137,7 +137,7 @@ fn classify_report_id_prefix(data: &[u8]) -> Option<HidReport> {
 fn infer_from_length(data: &[u8]) -> Option<HidReport> {
     match data.len() {
         8 => keyboard::KeyboardReport::from_ble_bytes(data).map(HidReport::Keyboard),
-        3..=4 => mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse),
+        3..=5 => mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse),
         2 => {
             let usage = u16::from_le_bytes([data[0], data[1]]);
             // Allow usage == 0 so consumer release events (key-up) are forwarded.

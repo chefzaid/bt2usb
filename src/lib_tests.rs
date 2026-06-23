@@ -172,16 +172,14 @@ fn mouse_report_serialize_roundtrip() {
         x: -10,
         y: 20,
         wheel: -3,
+        pan: 4,
     };
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 5];
     let written = original.serialize(&mut buf);
-    assert_eq!(written, 4);
+    assert_eq!(written, 5);
 
     let parsed = MouseReport::from_ble_bytes(&buf).unwrap();
-    assert_eq!(parsed.buttons, original.buttons);
-    assert_eq!(parsed.x, original.x);
-    assert_eq!(parsed.y, original.y);
-    assert_eq!(parsed.wheel, original.wheel);
+    assert_eq!(parsed, original);
 }
 
 #[test]
@@ -212,9 +210,35 @@ fn mouse_report_is_idle_with_movement_only() {
         x: 10,
         y: -5,
         wheel: 0,
+        pan: 0,
     };
     // Movement without buttons - not idle
     assert!(!report.is_idle());
+}
+
+#[test]
+fn mouse_report_extended_5_byte_with_pan() {
+    // [buttons][x][y][wheel][pan] — horizontal scroll right.
+    let data = [0x00, 0x00, 0x00, 0x00, 0x05];
+    let report = MouseReport::from_ble_bytes(&data).unwrap();
+    assert_eq!(report.pan, 5);
+    assert!(!report.is_idle());
+}
+
+#[test]
+fn mouse_report_back_forward_buttons() {
+    // Buttons 4 (back) and 5 (forward) — bits 3 and 4.
+    let data = [0b0001_1000, 0, 0, 0, 0];
+    let report = MouseReport::from_ble_bytes(&data).unwrap();
+    assert_eq!(report.buttons, 0b0001_1000);
+    assert!(!report.is_idle());
+}
+
+#[test]
+fn mouse_report_pan_absent_defaults_zero() {
+    // A 4-byte boot report (no pan byte) parses with pan = 0.
+    let report = MouseReport::from_ble_bytes(&[0x00, 0x01, 0x02, 0x03]).unwrap();
+    assert_eq!(report.pan, 0);
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -433,7 +457,7 @@ fn classify_report_invalid_2_byte_not_consumer() {
 
 #[test]
 fn classify_report_unknown_length() {
-    let data = [0x01, 0x02, 0x03, 0x04, 0x05]; // 5 bytes
+    let data = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]; // 7 bytes - no known report
     let report = classify_report(0, &data);
     assert!(report.is_none());
 }

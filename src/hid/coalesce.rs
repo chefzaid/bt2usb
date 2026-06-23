@@ -112,6 +112,7 @@ mod tests {
             x,
             y,
             wheel,
+            pan: 0,
         })
     }
 
@@ -216,7 +217,8 @@ mod tests {
                 buttons: 0,
                 x: 5,
                 y: 5,
-                wheel: 0
+                wheel: 0,
+                pan: 0
             })
         );
         assert_eq!(got_kb.unwrap().keycodes[0], 0x06);

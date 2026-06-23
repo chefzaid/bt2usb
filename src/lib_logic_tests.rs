@@ -26,10 +26,11 @@ fn hid_report_serialize_mouse() {
         x: 10,
         y: -20,
         wheel: 0,
+        pan: 0,
     });
-    let mut buf = [0u8; 4];
+    let mut buf = [0u8; 5];
     let len = report.serialize(&mut buf);
-    assert_eq!(len, 4);
+    assert_eq!(len, 5);
     assert_eq!(buf[0], 0x01);
 }
 

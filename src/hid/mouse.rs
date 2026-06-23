@@ -66,6 +66,22 @@ impl MouseReport {
         MOUSE_REPORT_SIZE
     }
 
+    /// Combine an older pending report with a `newer` one into a single report,
+    /// accumulating relative movement (saturating at the `i8` range) and taking
+    /// the newer button state.
+    ///
+    /// Used when reports pile up behind a busy USB sink: mouse motion is
+    /// relative, so coalescing by summing deltas preserves total travel instead
+    /// of discarding it (see [`crate::hid::coalesce`]).
+    pub fn merged_with(&self, newer: &Self) -> Self {
+        Self {
+            buttons: newer.buttons,
+            x: self.x.saturating_add(newer.x),
+            y: self.y.saturating_add(newer.y),
+            wheel: self.wheel.saturating_add(newer.wheel),
+        }
+    }
+
     /// Returns `true` when no buttons are pressed and there is no movement.
     #[cfg(test)]
     pub fn is_idle(&self) -> bool {

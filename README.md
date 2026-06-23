@@ -10,7 +10,7 @@
 
 **Use your Bluetooth keyboard and mouse with your PC Monitor's USB hub.**
 
-bt2usb is firmware for a small board that lives in your monitor's USB hub. It
+bt2usb is firmware for a small board that lives in your PC monitor's USB hub. It
 pairs with a Bluetooth keyboard and mouse and presents them to the PC as an
 ordinary wired USB keyboard and mouse, with no drivers to install.
 It remembers its devices across reboots and pairs a keyboard and a mouse at once.
@@ -404,25 +404,18 @@ sequenceDiagram
 
 ## Project Status & Roadmap
 
-### Implemented
-
 - [x] BLE Central: scan, connect, bonding/encryption, and up to two simultaneous HID links
 - [x] HID-over-GATT client with report-map / report-ID classification (keyboard, mouse, consumer)
 - [x] USB composite HID device (keyboard + mouse + consumer)
 - [x] Flash-backed pairing store with boot-time auto-reconnect
 - [x] OLED + 3-button UI with inactivity power-off
-- [x] Pure, host-tested logic cores (functional core / imperative shell): `ble/coordinator.rs` and `ui/ui_logic.rs`
+- [x] Pure, host-tested logic cores (functional core / imperative shell)
 - [x] Host tests, coverage, and CI; Renode SoftDevice-free simulation
 - [x] WSL-aware devcontainer
-
-### Future Enhancements
-
-Ordered by priority (most impactful first).
-
-- [ ] Never drop HID **release** reports under backpressure (coalesce, or apply backpressure) — a dropped key-up can otherwise leave a key stuck on the host (`ble/hid_client.rs`)
-- [ ] Resolve bonded peers by IRK so devices using rotating Resolvable Private Addresses auto-reconnect, instead of matching the now-stale stored address (`ble/multi_conn.rs`, `storage`)
-- [ ] Discover and subscribe to **all** HID Report characteristics, not just the first `0x2A4D`, so multi-report devices (e.g. keyboard + consumer keys) aren't truncated (`ble/hid_client.rs`)
-- [ ] Expose a USB HID **Boot-subclass** interface so the device works in BIOS / pre-OS, not only once an OS HID driver loads (`usb/hid_device.rs`)
+- [x] Never drop HID **release** reports under backpressure, so a key-up is never lost and keys can't stick
+- [x] Auto-reconnect devices that rotate their Bluetooth address, recognizing them by their identity key instead of a now-stale stored address
+- [x] Subscribe to all of a device's HID reports, so multi-report devices (e.g. keyboard + media keys) aren't truncated to just the first
+- [x] Works in BIOS / pre-OS, not just after the OS HID driver loads (keyboard + mouse advertise the USB HID Boot subclass)
 - [ ] Real low-power modes: relax BLE connection parameters and enter System-OFF on inactivity, and route actual HID activity (not just button/connect events) into the power manager (`power.rs`, `main.rs`)
 - [ ] NKRO, high-resolution, and multi-button (>3) HID translation beyond boot-compatible reports
 - [ ] LED pass-through (Caps / Num / Scroll Lock) from the host back to the BLE keyboard
@@ -430,7 +423,7 @@ Ordered by priority (most impactful first).
 - [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
 - [ ] Make the async I/O shells testable by mocking the GATT source / USB sink / flash behind traits — Layer 2 tests the decisions; this would cover the glue that executes them
 - [ ] Resolve Renode GPIO→GPIOTE injection so the simulation can exercise real button presses (it currently uses a synthetic stimulus task)
-- [ ] CI/CD pipeline for build, test, and firmware release
+- [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags
 - [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets
 - [ ] System tray companion app (Windows/macOS)

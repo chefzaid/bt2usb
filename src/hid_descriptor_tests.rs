@@ -1,8 +1,10 @@
 //! Host tests: HID report-descriptor parsing (`report_protocol`) and the
 //! descriptor-guided notification classifier (`classify_notification_with_hint`).
 
-use super::hid::report_protocol::{DesktopUsage, HidDescriptor, ReportKind, UsagePage};
-use super::hid::{classify_notification_with_hint, HidReport};
+use super::hid::report_protocol::{
+    DesktopUsage, HidDescriptor, ReportKind, ReportReference, ReportType, UsagePage,
+};
+use super::hid::{classify_known, classify_notification_with_hint, HidReport};
 
 // ── Usage-page / desktop-usage decoding ──────────────────────────────────────
 
@@ -114,5 +116,64 @@ fn hint_heuristic_when_no_descriptor() {
     assert!(matches!(
         classify_notification_with_hint(&data, None),
         Some(HidReport::Mouse(_))
+    ));
+}
+
+// ── Report Reference descriptor parsing ──────────────────────────────────────
+
+#[test]
+fn report_reference_parses_id_and_type() {
+    let r = ReportReference::parse(&[3, 1]).unwrap();
+    assert_eq!(r.report_id, 3);
+    assert_eq!(r.report_type, ReportType::Input);
+    assert!(r.is_input());
+
+    assert_eq!(
+        ReportReference::parse(&[1, 2]).unwrap().report_type,
+        ReportType::Output
+    );
+    assert_eq!(
+        ReportReference::parse(&[1, 3]).unwrap().report_type,
+        ReportType::Feature
+    );
+    assert_eq!(
+        ReportReference::parse(&[1, 9]).unwrap().report_type,
+        ReportType::Other(9)
+    );
+}
+
+#[test]
+fn report_reference_rejects_short_descriptor() {
+    assert!(ReportReference::parse(&[1]).is_none());
+    assert!(ReportReference::parse(&[]).is_none());
+}
+
+#[test]
+fn output_and_feature_reports_are_not_input() {
+    assert!(!ReportReference::parse(&[1, 2]).unwrap().is_input()); // Output
+    assert!(!ReportReference::parse(&[1, 3]).unwrap().is_input()); // Feature
+}
+
+// ── Known-kind classification (per-characteristic, no report-ID prefix) ───────
+
+#[test]
+fn classify_known_routes_each_kind() {
+    // Multi-report device: per-characteristic notifications carry no ID prefix.
+    let keyboard = [0x02, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00];
+    assert!(matches!(
+        classify_known(ReportKind::Keyboard, &keyboard),
+        Some(HidReport::Keyboard(_))
+    ));
+
+    let mouse = [0x01, 0x05, 0xFB, 0x00];
+    assert!(matches!(
+        classify_known(ReportKind::Mouse, &mouse),
+        Some(HidReport::Mouse(_))
+    ));
+
+    let consumer = [0xE9, 0x00]; // Volume Up
+    assert!(matches!(
+        classify_known(ReportKind::Consumer, &consumer),
+        Some(HidReport::Consumer(_))
     ));
 }

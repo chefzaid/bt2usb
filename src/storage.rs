@@ -23,6 +23,7 @@ use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use heapless::Vec;
 use nrf_softdevice::ble::{Address, EncryptionInfo, IdentityKey, MasterId};
+use sequential_storage::cache::NoCache;
 
 /// Flash page size for nRF52840 (4 KB).
 const FLASH_PAGE_SIZE: u32 = 4096;
@@ -195,18 +196,15 @@ impl DeviceStore {
         &mut self,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) {
-        let flash_range = STORAGE_START..STORAGE_END;
         let mut buf = [0u8; MAX_RECORD_SIZE];
 
-        match sequential_storage::map::fetch_item::<u8, &[u8], _>(
-            flash,
-            flash_range,
-            &mut sequential_storage::cache::NoCache::new(),
-            &mut buf,
-            &KEY_PAIRED_DEVICES,
-        )
-        .await
-        {
+        // sequential-storage 7 exposes a stateful `MapStorage` (the standalone
+        // `map::fetch_item` free function was removed). It borrows the flash for
+        // the duration of the access and is dropped before we return.
+        let config = sequential_storage::map::MapConfig::new(STORAGE_START..STORAGE_END);
+        let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
+
+        match map.fetch_item::<&[u8]>(&mut buf, &KEY_PAIRED_DEVICES).await {
             Ok(Some(data)) => {
                 self.devices.clear();
                 self.deserialize_all(data);
@@ -234,26 +232,22 @@ impl DeviceStore {
             return;
         }
 
-        let flash_range = STORAGE_START..STORAGE_END;
         let mut buf = [0u8; MAX_RECORD_SIZE];
         let mut data_buf = [0u8; MAX_RECORD_SIZE];
 
         let len = self.serialize_all(&mut data_buf);
-        let item = &data_buf[..len];
+        let item: &[u8] = &data_buf[..len];
+
+        let config = sequential_storage::map::MapConfig::new(STORAGE_START..STORAGE_END);
+        let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
 
         // SoftDevice flash operations need radio-idle timeslots and can fail with
         // a transient busy/timeout error while BLE links are active (this save
         // runs right at connect time). Retry a few times with a short backoff.
         for attempt in 1..=FLASH_WRITE_ATTEMPTS {
-            match sequential_storage::map::store_item::<u8, &[u8], _>(
-                flash,
-                flash_range.clone(),
-                &mut sequential_storage::cache::NoCache::new(),
-                &mut buf,
-                &KEY_PAIRED_DEVICES,
-                &item,
-            )
-            .await
+            match map
+                .store_item::<&[u8]>(&mut buf, &KEY_PAIRED_DEVICES, &item)
+                .await
             {
                 Ok(_) => {
                     info!("Saved {} devices to flash", self.devices.len());

@@ -32,6 +32,58 @@ pub enum ReportKind {
     Consumer,
 }
 
+/// Direction of a HID report, from a Report Reference descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum ReportType {
+    Input,
+    Output,
+    Feature,
+    Other(u8),
+}
+
+impl From<u8> for ReportType {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => ReportType::Input,
+            2 => ReportType::Output,
+            3 => ReportType::Feature,
+            other => ReportType::Other(other),
+        }
+    }
+}
+
+/// Parsed HID **Report Reference** descriptor (UUID `0x2908`).
+///
+/// Each HID Report characteristic (`0x2A4D`) carries one of these, identifying
+/// which report ID and direction its notifications belong to. On a multi-report
+/// device this is how we tell a keyboard report characteristic from a consumer
+/// one — their notification payloads carry no report-ID prefix.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct ReportReference {
+    pub report_id: u8,
+    pub report_type: ReportType,
+}
+
+impl ReportReference {
+    /// Parse the 2-byte descriptor value (`[report_id, report_type]`).
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.len() < 2 {
+            return None;
+        }
+        Some(Self {
+            report_id: data[0],
+            report_type: ReportType::from(data[1]),
+        })
+    }
+
+    /// `true` for input reports (the only ones we subscribe to for notifications).
+    pub fn is_input(&self) -> bool {
+        self.report_type == ReportType::Input
+    }
+}
+
 /// Usage page codes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]

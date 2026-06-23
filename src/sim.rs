@@ -28,6 +28,7 @@ mod ui;
 
 use core::fmt::Write as _;
 
+use defmt::unwrap;
 use defmt_rtt as _; // defmt global logger required by shared modules (e.g. buttons)
 use panic_probe as _; // panic handler → defmt
 
@@ -36,7 +37,7 @@ use embassy_futures::select::{select, Either};
 use embassy_nrf::gpio::AnyPin;
 use embassy_nrf::peripherals::UARTE0;
 use embassy_nrf::uarte::{self, Uarte};
-use embassy_nrf::{bind_interrupts, peripherals};
+use embassy_nrf::{bind_interrupts, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
@@ -58,7 +59,7 @@ type SimAddr = u32;
 static BUTTON_CHANNEL: Channel<CriticalSectionRawMutex, ButtonEvent, 4> = Channel::new();
 
 #[embassy_executor::task(pool_size = 3)]
-async fn button_task(pin: AnyPin, event: ButtonEvent) -> ! {
+async fn button_task(pin: Peri<'static, AnyPin>, event: ButtonEvent) -> ! {
     ui::buttons::button_task(pin, event, &BUTTON_CHANNEL.sender()).await
 }
 
@@ -184,17 +185,18 @@ async fn main(spawner: Spawner) {
 
     // UART0 for human-readable output (TX=P0.06, RX=P0.08). Renode's uart0
     // model emits the TX bytes regardless of physical pin routing.
-    let mut uart = Uarte::new(p.UARTE0, Irqs, p.P0_08, p.P0_06, uarte::Config::default());
+    // embassy-nrf 0.7 reordered Uarte::new args to (uarte, rxd, txd, irq, config).
+    let mut uart = Uarte::new(p.UARTE0, p.P0_08, p.P0_06, Irqs, uarte::Config::default());
 
     slog!(
         &mut uart,
         "bt2usb-sim starting (SoftDevice-free Renode build)"
     );
 
-    spawner.must_spawn(button_task(p.P0_11.into(), ButtonEvent::Up));
-    spawner.must_spawn(button_task(p.P0_12.into(), ButtonEvent::Down));
-    spawner.must_spawn(button_task(p.P0_24.into(), ButtonEvent::Select));
-    spawner.must_spawn(ui_stimulus());
+    spawner.spawn(unwrap!(button_task(p.P0_11.into(), ButtonEvent::Up)));
+    spawner.spawn(unwrap!(button_task(p.P0_12.into(), ButtonEvent::Down)));
+    spawner.spawn(unwrap!(button_task(p.P0_24.into(), ButtonEvent::Select)));
+    spawner.spawn(unwrap!(ui_stimulus()));
     slog!(
         &mut uart,
         "buttons ready (UP=P0.11 DOWN=P0.12 SELECT=P0.24)"

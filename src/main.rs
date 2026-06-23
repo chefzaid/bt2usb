@@ -55,6 +55,7 @@ use embassy_executor::Spawner;
 use embassy_nrf::gpio::AnyPin;
 use embassy_nrf::interrupt::{InterruptExt, Priority};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
+use embassy_nrf::Peri;
 use embassy_nrf::{self, bind_interrupts, interrupt, peripherals, twim};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -187,17 +188,17 @@ async fn hid_writer_task(
 }
 
 #[embassy_executor::task]
-async fn button_up_task(pin: AnyPin) -> ! {
+async fn button_up_task(pin: Peri<'static, AnyPin>) -> ! {
     ui::buttons::button_task(pin, ButtonEvent::Up, &BUTTON_CHANNEL.sender()).await
 }
 
 #[embassy_executor::task]
-async fn button_down_task(pin: AnyPin) -> ! {
+async fn button_down_task(pin: Peri<'static, AnyPin>) -> ! {
     ui::buttons::button_task(pin, ButtonEvent::Down, &BUTTON_CHANNEL.sender()).await
 }
 
 #[embassy_executor::task]
-async fn button_select_task(pin: AnyPin) -> ! {
+async fn button_select_task(pin: Peri<'static, AnyPin>) -> ! {
     ui::buttons::button_task(pin, ButtonEvent::Select, &BUTTON_CHANNEL.sender()).await
 }
 
@@ -222,31 +223,38 @@ async fn main(spawner: Spawner) {
     let usb = hid_device::init(p.USBD);
     // Spawn the SoftDevice task with the VBUS detector so it can forward USB
     // power SoC events to the USB stack.
-    unwrap!(spawner.spawn(softdevice_task(sd, usb.vbus)));
+    spawner.spawn(unwrap!(softdevice_task(sd, usb.vbus)));
     info!("SoftDevice started");
-    unwrap!(spawner.spawn(usb_device_task(usb.device)));
-    unwrap!(spawner.spawn(hid_writer_task(
+    spawner.spawn(unwrap!(usb_device_task(usb.device)));
+    spawner.spawn(unwrap!(hid_writer_task(
         usb.keyboard_writer,
         usb.mouse_writer,
         usb.consumer_writer,
     )));
     info!("USB HID device started");
 
-    unwrap!(spawner.spawn(ble_slot0_task(sd)));
-    unwrap!(spawner.spawn(ble_slot1_task(sd)));
-    unwrap!(spawner.spawn(ble_task(sd)));
+    spawner.spawn(unwrap!(ble_slot0_task(sd)));
+    spawner.spawn(unwrap!(ble_slot1_task(sd)));
+    spawner.spawn(unwrap!(ble_task(sd)));
     info!("BLE task started");
 
     let twi_config = twim::Config::default();
-    let twi = twim::Twim::new(p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config);
+    // embassy-nrf 0.7's Twim requires a RAM scratch buffer for writes whose
+    // source isn't in RAM (e.g. flash-resident SSD1306 command sequences); the
+    // framebuffer flush is already RAM-backed. This lives for the program.
+    static TWI_TX_BUF: static_cell::StaticCell<[u8; 64]> = static_cell::StaticCell::new();
+    let twi_tx_buf = TWI_TX_BUF.init([0u8; 64]);
+    let twi = twim::Twim::new(
+        p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config, twi_tx_buf,
+    );
 
     let mut display = ui::display::init(twi);
     ui::display::draw_home(&mut display, false, "");
     info!("OLED display initialised");
 
-    unwrap!(spawner.spawn(button_up_task(p.P0_11.into())));
-    unwrap!(spawner.spawn(button_down_task(p.P0_12.into())));
-    unwrap!(spawner.spawn(button_select_task(p.P0_24.into())));
+    spawner.spawn(unwrap!(button_up_task(p.P0_11.into())));
+    spawner.spawn(unwrap!(button_down_task(p.P0_12.into())));
+    spawner.spawn(unwrap!(button_select_task(p.P0_24.into())));
     info!("Button handlers started (3 buttons)");
 
     info!("Entering UI main loop");

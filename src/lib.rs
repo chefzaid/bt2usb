@@ -21,6 +21,9 @@ mod ble_adv_parser_impl;
 #[path = "ble/coordinator.rs"]
 mod ble_coordinator_impl;
 
+#[path = "ble/reconnect.rs"]
+mod ble_reconnect_impl;
+
 #[path = "power_logic.rs"]
 mod power_logic_impl;
 #[path = "ui/input_logic.rs"]
@@ -35,6 +38,10 @@ pub mod ble {
     /// Pure BLE coordination core (connection-slot state machine + reducers).
     pub mod coordinator {
         pub use crate::ble_coordinator_impl::*;
+    }
+    /// Pure boot-time auto-reconnect planner (RPA resolution sequencing).
+    pub mod reconnect {
+        pub use crate::ble_reconnect_impl::*;
     }
 }
 

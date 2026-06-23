@@ -5,6 +5,7 @@
 //! is no separate host reimplementation. `defmt::Format` is derived only when
 //! the `defmt` feature is on (firmware builds).
 
+pub mod coalesce;
 pub mod consumer;
 pub mod keyboard;
 pub mod mouse;
@@ -88,6 +89,17 @@ pub fn classify_notification_with_hint(
 
     // No descriptor available — heuristic fallback.
     classify_notification(data)
+}
+
+/// Classify a notification whose report kind is already known from its HID
+/// Report Reference descriptor.
+///
+/// Unlike [`classify_notification_with_hint`], this is used when each report
+/// characteristic is subscribed individually: the GATT value carries no
+/// report-ID prefix, so the kind comes from the characteristic's descriptor
+/// rather than from the payload.
+pub fn classify_known(kind: ReportKind, data: &[u8]) -> Option<HidReport> {
+    parse_by_kind(kind, data)
 }
 
 fn parse_by_kind(kind: ReportKind, data: &[u8]) -> Option<HidReport> {

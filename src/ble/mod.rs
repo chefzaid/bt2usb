@@ -18,6 +18,7 @@
 // are only compiled into the real firmware (`embedded` feature).
 pub mod adv_parser;
 pub mod coordinator;
+pub mod reconnect;
 
 #[cfg(feature = "embedded")]
 pub mod hid_client;

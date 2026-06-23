@@ -4,9 +4,10 @@
 //! a ~1 KB transfer that briefly blocks the cooperative executor. This is
 //! acceptable because redraws happen only on UI events (connect/scan/button),
 //! never on the keystroke→USB hot path (that runs in a separate task and is not
-//! routed through here). An async-I2C flush would remove even that occasional
-//! stall, but `ssd1306` 0.9's `async` feature does not compile in this
-//! configuration; revisit when upgrading the driver.
+//! routed through here). `ssd1306` 0.10 ships an `async` interface (gated behind
+//! its `async` feature, via `maybe_async_cfg`), but switching to it is more than
+//! a bound swap — it needs the async-specific traits/constructors — so the
+//! non-blocking flush remains a follow-up (roadmap: async-I2C flush).
 
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;

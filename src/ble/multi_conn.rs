@@ -7,7 +7,9 @@ use core::cell::RefCell;
 
 use crate::ble::coordinator::{self, Action, ConnManager, UiEvent, MAX_CONNECTIONS};
 use crate::ble::scanner::ScanResult;
-use crate::ble::{hid_client, scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
+use crate::ble::{
+    hid_client, reconnect, scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice,
+};
 use crate::config;
 use crate::config::MAX_PAIRED_DEVICES;
 use crate::hid::HidReport;
@@ -188,21 +190,56 @@ pub async fn ble_task(
     // Auto-reconnect the most-recently-used devices (up to the number of
     // connection slots) so a keyboard + mouse pair both come back after a
     // reboot without manual re-selection.
-    let autos: Vec<DiscoveredDevice, MAX_CONNECTIONS> = {
+    let peers: Vec<(DiscoveredDevice, Option<BondInfo>), MAX_CONNECTIONS> = {
         let store = DEVICE_STORE.lock().await;
         let mut v = Vec::new();
         for paired in store.iter_recent().take(MAX_CONNECTIONS) {
-            let _ = v.push(DiscoveredDevice {
+            let device = DiscoveredDevice {
                 address: paired.address,
                 name: paired.name.clone(),
                 rssi: paired.last_rssi,
-            });
+            };
+            let _ = v.push((device, paired.bond));
         }
         v
     };
-    for (slot, auto) in autos.into_iter().enumerate() {
-        manager.reserve_slot(slot, &auto);
-        send_slot_cmd(slot, SlotCommand::Connect(auto), slot0_tx, slot1_tx).await;
+
+    if !peers.is_empty() {
+        // Devices that use a rotating Resolvable Private Address advertise under
+        // a random address that differs from the one stored at pairing time, so
+        // a whitelist connect to the stored address would never match. Scan
+        // first and resolve each stored peer's IRK against the live
+        // advertisements so we reconnect to its *current* address.
+        let scan = scanner::scan(sd, event_tx).await.ok();
+        let scanned: &[DiscoveredDevice] =
+            scan.as_ref().map(|s| s.devices.as_slice()).unwrap_or(&[]);
+
+        let targets = reconnect::resolve_reconnect_targets(peers.len(), scanned.len(), |p, s| {
+            let (stored, bond) = &peers[p];
+            let advertised = scanned[s].address;
+            // Resolve a rotating RPA by IRK, or match a stable address directly.
+            bond.map(|b| b.peer_id.is_match(advertised))
+                .unwrap_or(false)
+                || stored.address == advertised
+        });
+
+        for (slot, target) in targets.iter().enumerate() {
+            let (stored, _) = &peers[target.peer];
+            let device = match target.scanned {
+                // Connect to the live (resolved) address, keeping the stored name.
+                Some(i) => DiscoveredDevice {
+                    address: scanned[i].address,
+                    name: stored.name.clone(),
+                    rssi: scanned[i].rssi,
+                },
+                // Not seen this scan — fall back to the stored address.
+                None => stored.clone(),
+            };
+            manager.reserve_slot(slot, &device);
+            send_slot_cmd(slot, SlotCommand::Connect(device), slot0_tx, slot1_tx).await;
+        }
+
+        last_scan = scan;
     }
 
     // The coordinator below is a thin interpreter: it asks the pure

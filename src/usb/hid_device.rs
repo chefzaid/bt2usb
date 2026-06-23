@@ -11,11 +11,13 @@ use crate::hid::HidReport;
 use defmt::{info, warn};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
-use embassy_nrf::{self, bind_interrupts, peripherals};
+use embassy_nrf::{self, bind_interrupts, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Receiver;
 use embassy_sync::signal::Signal;
-use embassy_usb::class::hid::{Config as HidConfig, HidWriter, State};
+use embassy_usb::class::hid::{
+    Config as HidConfig, HidBootProtocol, HidSubclass, HidWriter, State,
+};
 use embassy_usb::{Builder, Config, UsbDevice};
 use static_cell::StaticCell;
 
@@ -76,7 +78,7 @@ pub struct UsbHidDevice {
 /// Initialise the USB stack and create the composite HID device.
 ///
 /// Must be called exactly once.  All static buffers are consumed here.
-pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
+pub fn init(usbd: Peri<'static, peripherals::USBD>) -> UsbHidDevice {
     // The device is bus-powered through the monitor hub, so VBUS is present at
     // boot. Initialise as detected+ready so enumeration can proceed even if the
     // first SoC events were emitted before `softdevice_task` started draining
@@ -96,9 +98,10 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
     usb_config.max_power = 100; // mA
     usb_config.max_packet_size_0 = 64;
     // Advertise remote-wakeup capability so a host that has suspended the bus
-    // (e.g. PC asleep) permits the device to request wake. Actual wake-up
-    // signalling on incoming HID activity is a follow-up (needs UsbDevice
-    // access from the writer path); this at least exposes the capability.
+    // (e.g. PC asleep) permits the device to request wake. Emitting the wake
+    // signal on incoming HID activity is still unimplemented, but no longer
+    // blocked: embassy-usb 0.6 exposes `UsbDevice::remote_wakeup()` for that —
+    // it just needs routing a wake trigger to `usb_device_task`.
     usb_config.supports_remote_wakeup = true;
 
     // Allocate static descriptor buffers.
@@ -126,6 +129,11 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
         request_handler: None,
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
+        // Advertise the Boot Interface subclass so the keyboard works in BIOS /
+        // pre-OS environments (before an OS HID driver loads). Our keyboard
+        // report is already boot-protocol compatible (8-byte layout).
+        hid_subclass: HidSubclass::Boot,
+        hid_boot_protocol: HidBootProtocol::Keyboard,
     };
     let keyboard_writer = HidWriter::new(&mut builder, kb_state, kb_config);
 
@@ -135,6 +143,9 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
         request_handler: None,
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
+        // Boot mouse subclass for pre-OS use; our 3-byte report is boot compatible.
+        hid_subclass: HidSubclass::Boot,
+        hid_boot_protocol: HidBootProtocol::Mouse,
     };
     let mouse_writer = HidWriter::new(&mut builder, mouse_state, mouse_config);
 
@@ -144,6 +155,9 @@ pub fn init(usbd: peripherals::USBD) -> UsbHidDevice {
         request_handler: None,
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
+        // Consumer Control has no boot protocol — only keyboard/mouse do.
+        hid_subclass: HidSubclass::No,
+        hid_boot_protocol: HidBootProtocol::None,
     };
     let consumer_writer = HidWriter::new(&mut builder, consumer_state, consumer_config);
 

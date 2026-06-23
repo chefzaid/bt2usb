@@ -1,0 +1,119 @@
+name: CI
+
+# Build, lint, test, and (on tags) release the bt2usb firmware.
+# Mirrors the local `mask ci` workflow so contributors get the same checks.
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Match the local dev default so defmt-gated code compiles identically.
+  DEFMT_LOG: debug
+
+jobs:
+  # Formatting + host-side unit/integration tests (the pure logic cores).
+  lint-and-test:
+    name: Format & host tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Run host unit + integration tests
+        run: cargo test --lib --tests
+
+  # Embedded clippy (deny warnings) + release build for the nRF52840 target.
+  embedded:
+    name: Embedded build & clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable) + ARM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Install flip-link (linker)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: flip-link
+      - name: Clippy (embedded, deny warnings)
+        run: cargo clippy --features embedded --target thumbv7em-none-eabihf -- -D warnings
+      - name: Build release firmware
+        run: cargo build --features embedded --target thumbv7em-none-eabihf --release
+      - name: Upload firmware ELF
+        uses: actions/upload-artifact@v4
+        with:
+          name: bt2usb-firmware-elf
+          path: target/thumbv7em-none-eabihf/release/bt2usb
+          if-no-files-found: error
+
+  # SoftDevice-free on-target simulation (Layer 3). Boots the sim ELF in Renode
+  # and asserts the coordinator + UI logic run on the simulated MCU.
+  simulation:
+    name: Renode simulation test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable) + ARM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      - name: Install flip-link (linker)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: flip-link
+      - name: Build simulation firmware
+        run: cargo build --features sim --target thumbv7em-none-eabihf
+      - name: Install Renode + renode-test deps
+        run: bash scripts/install-renode.sh
+      - name: Run headless Renode robot test
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          renode-test renode/bt2usb-sim.robot
+
+  # Publish the release firmware (ELF + Intel HEX) on version tags.
+  release:
+    name: Publish firmware
+    needs: [lint-and-test, embedded, simulation]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable) + ARM target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+          components: llvm-tools
+      - uses: Swatinem/rust-cache@v2
+      - name: Install build tools (flip-link, cargo-binutils)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: flip-link,cargo-binutils
+      - name: Build release firmware
+        run: cargo build --features embedded --target thumbv7em-none-eabihf --release
+      - name: Convert ELF to Intel HEX
+        run: |
+          cargo objcopy --features embedded --target thumbv7em-none-eabihf --release -- -O ihex bt2usb-${{ github.ref_name }}.hex
+          cp target/thumbv7em-none-eabihf/release/bt2usb bt2usb-${{ github.ref_name }}.elf
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bt2usb-${{ github.ref_name }}.hex
+            bt2usb-${{ github.ref_name }}.elf
+          generate_release_notes: true

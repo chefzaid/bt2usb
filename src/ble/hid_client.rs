@@ -1,104 +1,299 @@
-//! BLE GATT HID Client - discovers and subscribes to HID Report
+//! BLE GATT HID Client - discovers and subscribes to **all** HID Report
 //! characteristics on a connected peripheral.
 //!
 //! After GAP connection is established, this module:
 //! 1. Discovers the HID Service (UUID 0x1812).
-//! 2. Finds all HID Report characteristics (UUID 0x2A4D).
-//! 3. Reads the Report Reference descriptor to classify each report
-//!    (input/output, report ID).
-//! 4. Enables CCCD notifications on input report characteristics.
+//! 2. Collects *every* HID Report characteristic (UUID 0x2A4D) — not just the
+//!    first — so multi-report devices (e.g. keyboard + consumer keys) aren't
+//!    truncated to their first report.
+//! 3. Reads each one's Report Reference descriptor (0x2908) to classify it
+//!    (report ID + direction), cross-referenced with the Report Map.
+//! 4. Enables CCCD notifications on each input report characteristic.
 //! 5. Forwards received HID reports to the USB task via a channel.
+//!
+//! The `#[gatt_client]` macro can only bind a single characteristic per UUID,
+//! so this uses a hand-rolled [`gatt_client::Client`] implementation instead.
 
 use crate::ble::BleErrorTag;
 use crate::hid;
-use crate::hid::report_protocol::HidDescriptor;
+use crate::hid::coalesce::ReportCoalescer;
+use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference};
 use crate::hid::HidReport;
+use core::cell::RefCell;
 use defmt::{info, warn};
+use embassy_futures::select::select;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Sender;
-use nrf_softdevice::ble::{gatt_client, Connection};
+use embassy_sync::signal::Signal;
+use heapless::Vec;
+use nrf_softdevice::ble::gatt_client::{
+    self, Characteristic, Client, Descriptor, DiscoverError, HvxType,
+};
+use nrf_softdevice::ble::{Connection, Uuid};
 
-/// nrf-softdevice GATT client struct for the HID-over-GATT service.
-///
-/// The `#[nrf_softdevice::gatt_client]` macro generates discovery and
-/// read/write/notify helpers for the listed characteristics.
-#[nrf_softdevice::gatt_client(uuid = "1812")]
-pub struct HidServiceClient {
-    /// HID Report (Input) - notifications carry live keystrokes / mouse data.
-    /// 32 bytes covers boot reports (≤8 B) with headroom for larger
-    /// report-protocol notifications (capped by `att_mtu`).
-    #[characteristic(uuid = "2a4d", read, notify)]
-    pub hid_report: [u8; 32],
+// HID-over-GATT 16-bit UUIDs.
+const UUID_HID_SERVICE: u16 = 0x1812;
+const UUID_REPORT: u16 = 0x2A4D;
+const UUID_REPORT_MAP: u16 = 0x2A4B;
+const UUID_PROTOCOL_MODE: u16 = 0x2A4E;
+const UUID_REPORT_REFERENCE: u16 = 0x2908;
+const UUID_CCCD: u16 = 0x2902;
 
-    /// HID Report Map - describes the report descriptor (for advanced parsing).
-    #[characteristic(uuid = "2a4b", read)]
-    pub report_map: [u8; 128],
+/// Maximum number of HID Report (0x2A4D) characteristics tracked per device.
+/// A composite HID peripheral rarely exposes more than a handful of reports.
+const MAX_REPORTS: usize = 8;
 
-    /// Protocol Mode - 0 = Boot Protocol, 1 = Report Protocol.
-    #[characteristic(uuid = "2a4e", read, write)]
-    pub protocol_mode: u8,
+/// Largest notification payload we copy out of the GATT event (boot reports are
+/// ≤8 B; report-protocol notifications are capped by `att_mtu`).
+const MAX_REPORT_LEN: usize = 32;
+
+/// A discovered HID Report characteristic and the descriptor handles needed to
+/// subscribe to and classify it.
+#[derive(Clone, Copy)]
+struct ReportCharacteristic {
+    value_handle: u16,
+    cccd_handle: Option<u16>,
+    report_ref_handle: Option<u16>,
 }
 
-/// Discover the HID service on the connected peripheral and subscribe
-/// to HID Report notifications.
+/// An active subscription: a notifying value handle and the report kind resolved
+/// for it (`None` → defer to the heuristic classifier).
+#[derive(Clone, Copy)]
+struct Subscription {
+    value_handle: u16,
+    kind: Option<ReportKind>,
+}
+
+/// Notification event surfaced by the GATT run loop.
+pub struct ReportNotification {
+    kind: Option<ReportKind>,
+    data: Vec<u8, MAX_REPORT_LEN>,
+}
+
+/// Hand-rolled HID-over-GATT client.
 ///
-/// Returns the `HidServiceClient` on success so the caller can manage
-/// the subscription lifetime.
+/// Captures every HID Report characteristic plus the Report Map and Protocol
+/// Mode handles. Handles are gathered during discovery; the notification
+/// subscriptions are resolved afterwards in [`HidServiceClient::subscribe_all`].
+pub struct HidServiceClient {
+    report_map_handle: Option<u16>,
+    protocol_mode_handle: Option<u16>,
+    reports: Vec<ReportCharacteristic, MAX_REPORTS>,
+    subscriptions: Vec<Subscription, MAX_REPORTS>,
+}
+
+fn descriptor_handle(descriptors: &[Descriptor], uuid_16: u16) -> Option<u16> {
+    let want = Uuid::new_16(uuid_16);
+    descriptors
+        .iter()
+        .find(|d| d.uuid == Some(want))
+        .map(|d| d.handle)
+}
+
+impl Client for HidServiceClient {
+    type Event = ReportNotification;
+
+    fn uuid() -> Uuid {
+        Uuid::new_16(UUID_HID_SERVICE)
+    }
+
+    fn new_undiscovered(_conn: Connection) -> Self {
+        Self {
+            report_map_handle: None,
+            protocol_mode_handle: None,
+            reports: Vec::new(),
+            subscriptions: Vec::new(),
+        }
+    }
+
+    fn discovered_characteristic(
+        &mut self,
+        characteristic: &Characteristic,
+        descriptors: &[Descriptor],
+    ) {
+        let Some(uuid) = characteristic.uuid else {
+            return;
+        };
+
+        if uuid == Uuid::new_16(UUID_REPORT_MAP) {
+            self.report_map_handle = Some(characteristic.handle_value);
+        } else if uuid == Uuid::new_16(UUID_PROTOCOL_MODE) {
+            self.protocol_mode_handle = Some(characteristic.handle_value);
+        } else if uuid == Uuid::new_16(UUID_REPORT) {
+            // A Report characteristic with a CCCD is a notifiable *input* report;
+            // its Report Reference descriptor tells us the report ID + direction.
+            let _ = self.reports.push(ReportCharacteristic {
+                value_handle: characteristic.handle_value,
+                cccd_handle: descriptor_handle(descriptors, UUID_CCCD),
+                report_ref_handle: descriptor_handle(descriptors, UUID_REPORT_REFERENCE),
+            });
+        }
+    }
+
+    fn discovery_complete(&mut self) -> Result<(), DiscoverError> {
+        if self.reports.is_empty() {
+            return Err(DiscoverError::ServiceIncomplete);
+        }
+        Ok(())
+    }
+
+    fn on_hvx(
+        &self,
+        _conn: &Connection,
+        type_: HvxType,
+        handle: u16,
+        data: &[u8],
+    ) -> Option<Self::Event> {
+        if type_ != HvxType::Notification {
+            return None;
+        }
+        // Only surface notifications from handles we actually subscribed to.
+        let sub = self
+            .subscriptions
+            .iter()
+            .find(|s| s.value_handle == handle)?;
+
+        let mut buf: Vec<u8, MAX_REPORT_LEN> = Vec::new();
+        let n = data.len().min(buf.capacity());
+        let _ = buf.extend_from_slice(&data[..n]);
+        Some(ReportNotification {
+            kind: sub.kind,
+            data: buf,
+        })
+    }
+}
+
+impl HidServiceClient {
+    /// Subscribe to every discovered input report characteristic, resolving each
+    /// one's kind from its Report Reference descriptor and the Report Map.
+    async fn subscribe_all(
+        &mut self,
+        conn: &Connection,
+        descriptor: Option<&HidDescriptor>,
+    ) -> Result<(), BleErrorTag> {
+        // Snapshot the (Copy) report list so we can fill `subscriptions` while
+        // iterating without aliasing `&mut self`.
+        let reports = self.reports.clone();
+
+        for report in reports.iter() {
+            // An input report has a CCCD; without one there's nothing to enable.
+            let Some(cccd) = report.cccd_handle else {
+                continue;
+            };
+
+            // Resolve the report kind from its Report Reference (0x2908) value,
+            // mapped through the Report Map's report-ID table. Anything we can't
+            // resolve is subscribed with `kind = None` and classified by the
+            // heuristic fallback at notification time.
+            let kind = match (report.report_ref_handle, descriptor) {
+                (Some(ref_handle), Some(desc)) => {
+                    let mut buf = [0u8; 2];
+                    match gatt_client::read(conn, ref_handle, &mut buf).await {
+                        Ok(n) => ReportReference::parse(&buf[..n])
+                            .filter(ReportReference::is_input)
+                            .and_then(|r| desc.report_kind_for_id(r.report_id)),
+                        Err(_) => None,
+                    }
+                }
+                _ => None,
+            };
+
+            // Enable notifications (write 0x0001 to the CCCD).
+            match gatt_client::write(conn, cccd, &[0x01, 0x00]).await {
+                Ok(_) => {
+                    let _ = self.subscriptions.push(Subscription {
+                        value_handle: report.value_handle,
+                        kind,
+                    });
+                }
+                Err(_) => warn!("Could not enable notifications on a report characteristic"),
+            }
+        }
+
+        if self.subscriptions.is_empty() {
+            warn!("No HID report characteristics could be subscribed");
+            return Err(BleErrorTag::NotifyFailed);
+        }
+
+        info!(
+            "Subscribed to {} of {} HID report characteristics",
+            self.subscriptions.len(),
+            self.reports.len()
+        );
+        Ok(())
+    }
+}
+
+/// Read and parse the Report Map (0x2A4B) so report IDs can be mapped to kinds.
+async fn read_report_map(conn: &Connection, client: &HidServiceClient) -> Option<HidDescriptor> {
+    let handle = client.report_map_handle?;
+    let mut buf = [0u8; 128];
+    match gatt_client::read(conn, handle, &mut buf).await {
+        Ok(n) => {
+            let desc = HidDescriptor::parse(&buf[..n]);
+            match desc {
+                Some(d) => info!(
+                    "Report map parsed: keyboard={} mouse={} consumer={}",
+                    d.has_keyboard, d.has_mouse, d.has_consumer
+                ),
+                None => warn!("Report map parsing returned no recognized report types"),
+            }
+            desc
+        }
+        Err(_) => {
+            warn!("Could not read HID report map");
+            None
+        }
+    }
+}
+
+/// Discover the HID service and subscribe to all HID Report notifications.
+///
+/// Returns the client (which owns the subscription handles) and the parsed
+/// Report Map descriptor for notification-time classification.
 pub async fn discover_and_subscribe(
     conn: &Connection,
 ) -> Result<(HidServiceClient, Option<HidDescriptor>), BleErrorTag> {
     info!("Discovering HID service...");
 
-    // GATT service/characteristic discovery.
-    let client: HidServiceClient = gatt_client::discover(conn)
+    let mut client: HidServiceClient = gatt_client::discover(conn)
         .await
         .map_err(|_| BleErrorTag::HidNotFound)?;
 
-    info!("HID service discovered");
+    info!(
+        "HID service discovered ({} report characteristics)",
+        client.reports.len()
+    );
 
-    // Ensure Report Protocol mode (1). We only subscribe to the HID Report
-    // characteristic (0x2A4D); a device switched to Boot Protocol routes input
-    // to the *Boot* Keyboard/Mouse Input Report characteristics (0x2A22/0x2A33)
-    // which we do not subscribe to — forcing boot mode would silence reports.
+    // Force Report Protocol mode (1). Boot Protocol would route input to the
+    // Boot Keyboard/Mouse Input Report characteristics, which we don't track.
     // Report Protocol is also the GATT default, so this is mostly defensive.
-    match client.protocol_mode_write(&1u8).await {
-        Ok(_) => info!("Set HID protocol to Report mode"),
-        Err(_) => warn!("Could not set report protocol (using device default)"),
-    }
-
-    let mut descriptor_info: Option<HidDescriptor> = None;
-    match client.report_map_read().await {
-        Ok(map) => {
-            descriptor_info = HidDescriptor::parse(&map);
-            if let Some(desc) = descriptor_info {
-                let k_id = desc.keyboard_report_id.unwrap_or(0);
-                let m_id = desc.mouse_report_id.unwrap_or(0);
-                let c_id = desc.consumer_report_id.unwrap_or(0);
-                info!(
-                    "Report map parsed: keyboard={} mouse={} consumer={} (ids: k={} m={} c={})",
-                    desc.has_keyboard, desc.has_mouse, desc.has_consumer, k_id, m_id, c_id
-                );
-            } else {
-                warn!("Report map parsing returned no recognized report types");
-            }
+    if let Some(handle) = client.protocol_mode_handle {
+        match gatt_client::write(conn, handle, &[1u8]).await {
+            Ok(_) => info!("Set HID protocol to Report mode"),
+            Err(_) => warn!("Could not set report protocol (using device default)"),
         }
-        Err(_) => warn!("Could not read HID report map"),
     }
 
-    // Enable CCCD notifications on the HID Report characteristic.
-    client
-        .hid_report_cccd_write(true)
-        .await
-        .map_err(|_| BleErrorTag::NotifyFailed)?;
+    let descriptor = read_report_map(conn, &client).await;
 
-    info!("Subscribed to HID report notifications");
-    Ok((client, descriptor_info))
+    client.subscribe_all(conn, descriptor.as_ref()).await?;
+
+    Ok((client, descriptor))
 }
 
 /// Run the notification listener loop.
 ///
-/// Blocks until the connection drops.  Each received HID report is
-/// classified and sent to `report_tx` for the USB task to consume.
+/// Blocks until the connection drops.  Each received HID report is classified
+/// and forwarded to `report_tx` for the USB task to consume.
+///
+/// The GATT callback (`gatt_client::run`) is *synchronous*, so it cannot await
+/// channel backpressure. Instead of the old `try_send`-and-drop — which could
+/// silently drop a key-*up* and leave a key stuck on the host — it pushes into a
+/// [`ReportCoalescer`]. A concurrent drain future `pop`s from the coalescer and
+/// `send().await`s with backpressure, so reports are never dropped on a full
+/// channel; the coalescer keeps memory bounded by merging per-endpoint state
+/// while preserving release reports and accumulating relative mouse motion.
 pub async fn run_notification_loop(
     conn: &Connection,
     client: &HidServiceClient,
@@ -107,22 +302,41 @@ pub async fn run_notification_loop(
 ) {
     info!("HID notification loop started");
 
-    // The nrf-softdevice gatt_client event callback.
-    // We use `run()` which processes GATT events and calls our closure
-    // for each notification.
-    let _result = gatt_client::run(conn, client, |event| match event {
-        HidServiceClientEvent::HidReportNotification(data) => {
-            let parsed = hid::classify_notification_with_hint(&data, descriptor.as_ref());
+    // Single-producer (sync GATT callback) / single-consumer (async drain)
+    // hand-off on the cooperative executor. The `RefCell` is only ever borrowed
+    // synchronously — never across an `.await` — so it cannot double-borrow.
+    let coalescer: RefCell<ReportCoalescer> = RefCell::new(ReportCoalescer::new());
+    let wake: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
-            if let Some(report) = parsed {
-                // try_send avoids blocking; if USB task is behind, we drop.
-                if report_tx.try_send(report).is_err() {
-                    warn!("HID report channel full - dropping report");
-                }
+    // Producer: classify each notification and enqueue it (never blocks). A
+    // report whose characteristic resolved to a known kind is classified
+    // directly (its payload carries no report-ID prefix); otherwise we fall back
+    // to the descriptor-guided heuristic.
+    let gatt_fut = gatt_client::run(conn, client, |event: ReportNotification| {
+        let parsed = match event.kind {
+            Some(kind) => hid::classify_known(kind, &event.data),
+            None => hid::classify_notification_with_hint(&event.data, descriptor.as_ref()),
+        };
+        if let Some(report) = parsed {
+            coalescer.borrow_mut().push(report);
+            wake.signal(());
+        }
+    });
+
+    // Consumer: drain pending reports into the USB channel, applying
+    // backpressure (`send().await`) so nothing is ever dropped.
+    let drain_fut = async {
+        loop {
+            // Pop without holding the borrow across the await below.
+            let next = coalescer.borrow_mut().pop();
+            match next {
+                Some(report) => report_tx.send(report).await,
+                None => wake.wait().await,
             }
         }
-    })
-    .await;
+    };
+
+    let _ = select(gatt_fut, drain_fut).await;
 
     info!("HID notification loop ended (connection closed)");
 }

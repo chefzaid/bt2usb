@@ -12,6 +12,7 @@ use crate::config::BUTTON_DEBOUNCE_MS;
 use crate::ui::ButtonEvent;
 use defmt::info;
 use embassy_nrf::gpio::{AnyPin, Input, Pull};
+use embassy_nrf::Peri;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Sender;
 use embassy_time::{Duration, Timer};
@@ -21,7 +22,7 @@ use embassy_time::{Duration, Timer};
 /// Waits for the pin to go low (pressed), debounces, sends the event,
 /// then waits for release before repeating.
 pub async fn button_task(
-    pin: AnyPin,
+    pin: Peri<'static, AnyPin>,
     event: ButtonEvent,
     tx: &Sender<'static, CriticalSectionRawMutex, ButtonEvent, 4>,
 ) -> ! {

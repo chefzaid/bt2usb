@@ -34,7 +34,7 @@ default = []
 embedded = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time", 
             "dep:embassy-usb", "dep:embassy-sync", "dep:embassy-futures",
             "dep:nrf-softdevice", "dep:nrf-softdevice-s140",
-            "dep:ssd1306", "dep:embedded-graphics",
+            "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
             "dep:cortex-m", "dep:cortex-m-rt", "dep:embedded-hal", "dep:embedded-hal-async",
             "dep:sequential-storage", "dep:embedded-storage-async",
             "dep:defmt", "dep:defmt-rtt", "dep:panic-probe", 
@@ -47,7 +47,7 @@ defmt = ["dep:defmt"]
 # SoftDevice usually provides it.
 sim = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
        "dep:embassy-sync", "dep:embassy-futures",
-       "dep:ssd1306", "dep:embedded-graphics",
+       "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
        "dep:cortex-m", "dep:cortex-m-rt", "dep:embedded-hal", "dep:embedded-hal-async",
        "dep:defmt", "dep:defmt-rtt", "dep:panic-probe",
        "dep:static_cell", "heapless/defmt-03", "defmt",

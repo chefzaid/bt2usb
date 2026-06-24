@@ -248,8 +248,8 @@ async fn main(spawner: Spawner) {
         p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config, twi_tx_buf,
     );
 
-    let mut display = ui::display::init(twi);
-    ui::display::draw_home(&mut display, false, "");
+    let mut display = ui::display::init(twi).await;
+    ui::display::draw_home(&mut display, false, "").await;
     info!("OLED display initialised");
 
     spawner.spawn(unwrap!(button_up_task(p.P0_11.into())));
@@ -284,23 +284,26 @@ async fn main(spawner: Spawner) {
                 if was_display_off {
                     // Wake the OLED panel before redrawing.
                     if display_powered_off {
-                        ui::display::set_power(&mut display, true);
+                        ui::display::set_power(&mut display, true).await;
                         display_powered_off = false;
                     }
                     match screen {
-                        Screen::Home => ui::display::draw_home(
-                            &mut display,
-                            !connected_name.is_empty(),
-                            connected_name.as_str(),
-                        ),
-                        Screen::Scanning => ui::display::draw_scanning(&mut display, 0),
+                        Screen::Home => {
+                            ui::display::draw_home(
+                                &mut display,
+                                !connected_name.is_empty(),
+                                connected_name.as_str(),
+                            )
+                            .await
+                        }
+                        Screen::Scanning => ui::display::draw_scanning(&mut display, 0).await,
                         Screen::DeviceList => {
-                            ui::display::draw_device_list(&mut display, &devices, selected)
+                            ui::display::draw_device_list(&mut display, &devices, selected).await
                         }
                         Screen::Connected => {
-                            ui::display::draw_connected(&mut display, connected_name.as_str())
+                            ui::display::draw_connected(&mut display, connected_name.as_str()).await
                         }
-                        Screen::Error => ui::display::draw_error(&mut display, "Ready"),
+                        Screen::Error => ui::display::draw_error(&mut display, "Ready").await,
                     }
                     continue;
                 }
@@ -317,13 +320,13 @@ async fn main(spawner: Spawner) {
                 match outcome.redraw {
                     ui::ui_logic::Redraw::Scanning => {
                         scan_dots = 0;
-                        ui::display::draw_scanning(&mut display, scan_dots);
+                        ui::display::draw_scanning(&mut display, scan_dots).await;
                     }
                     ui::ui_logic::Redraw::DeviceList => {
-                        ui::display::draw_device_list(&mut display, &devices, selected);
+                        ui::display::draw_device_list(&mut display, &devices, selected).await;
                     }
                     ui::ui_logic::Redraw::Home => {
-                        ui::display::draw_home(&mut display, false, "");
+                        ui::display::draw_home(&mut display, false, "").await;
                     }
                     ui::ui_logic::Redraw::None => {}
                 }
@@ -340,7 +343,7 @@ async fn main(spawner: Spawner) {
             embassy_futures::select::Either4::Second(event) => match event {
                 BleEvent::ScanStarted => {
                     if display_powered_off {
-                        ui::display::set_power(&mut display, true);
+                        ui::display::set_power(&mut display, true).await;
                         display_powered_off = false;
                     }
                     screen = Screen::Scanning;
@@ -348,7 +351,7 @@ async fn main(spawner: Spawner) {
                     device_count = 0;
                     devices.clear();
                     scan_dots = 0;
-                    ui::display::draw_scanning(&mut display, scan_dots);
+                    ui::display::draw_scanning(&mut display, scan_dots).await;
                 }
 
                 BleEvent::DeviceFound(dev) => {
@@ -368,9 +371,9 @@ async fn main(spawner: Spawner) {
                     screen = ui::ui_logic::on_scan_complete(device_count);
                     if screen == Screen::DeviceList {
                         selected = selected.min(device_count.saturating_sub(1));
-                        ui::display::draw_device_list(&mut display, &devices, selected);
+                        ui::display::draw_device_list(&mut display, &devices, selected).await;
                     } else {
-                        ui::display::draw_error(&mut display, "No devices found");
+                        ui::display::draw_error(&mut display, "No devices found").await;
                     }
                 }
 
@@ -379,7 +382,7 @@ async fn main(spawner: Spawner) {
                     devices.clear();
                     connected_name = name.clone();
                     power.set_ble_connected(true);
-                    ui::display::draw_connected(&mut display, name.as_str());
+                    ui::display::draw_connected(&mut display, name.as_str()).await;
                     info!("UI: connected to {}", name.as_str());
                 }
 
@@ -390,7 +393,7 @@ async fn main(spawner: Spawner) {
                     device_count = 0;
                     connected_name.clear();
                     power.set_ble_connected(false);
-                    ui::display::draw_home(&mut display, false, "");
+                    ui::display::draw_home(&mut display, false, "").await;
                     info!("UI: disconnected");
                 }
 
@@ -402,7 +405,7 @@ async fn main(spawner: Spawner) {
                         ble::BleErrorTag::HidNotFound => "No HID service",
                         ble::BleErrorTag::NotifyFailed => "Notify failed",
                     };
-                    ui::display::draw_error(&mut display, msg);
+                    ui::display::draw_error(&mut display, msg).await;
                 }
             },
 
@@ -414,19 +417,19 @@ async fn main(spawner: Spawner) {
                 if !power.display_on() {
                     if !display_powered_off {
                         // Turn off the OLED panel at the hardware level to save power.
-                        ui::display::set_power(&mut display, false);
+                        ui::display::set_power(&mut display, false).await;
                         display_powered_off = true;
                     }
                 } else if display_powered_off {
                     // Power state changed (e.g. BLE event woke us) — turn display back on.
-                    ui::display::set_power(&mut display, true);
+                    ui::display::set_power(&mut display, true).await;
                     display_powered_off = false;
                 }
 
                 // Animate the scanning spinner once per tick while scanning.
                 if screen == Screen::Scanning && !display_powered_off {
                     scan_dots = ui::input_logic::next_scan_dots(scan_dots);
-                    ui::display::draw_scanning(&mut display, scan_dots);
+                    ui::display::draw_scanning(&mut display, scan_dots).await;
                 }
             }
 

@@ -1,42 +1,42 @@
 //! SSD1306 OLED display wrapper.
 //!
-//! NOTE: rendering uses the *blocking* embedded-hal I2C. A full 128×64 flush is
-//! a ~1 KB transfer that briefly blocks the cooperative executor. This is
-//! acceptable because redraws happen only on UI events (connect/scan/button),
-//! never on the keystroke→USB hot path (that runs in a separate task and is not
-//! routed through here). `ssd1306` 0.10 ships an `async` interface (gated behind
-//! its `async` feature, via `maybe_async_cfg`), but switching to it is more than
-//! a bound swap — it needs the async-specific traits/constructors — so the
-//! non-blocking flush remains a follow-up (roadmap: async-I2C flush).
+//! Rendering uses **async** I2C (`ssd1306` 0.10's `Ssd1306Async`): a full
+//! 128×64 flush is a ~1 KB transfer, and `.await`ing it lets the cooperative
+//! executor run other tasks during the DMA instead of stalling. Drawing into the
+//! framebuffer (`clear_buffer`, `Text::draw`) stays synchronous — only the I2C
+//! flushes/commands are async. Redraws only happen on UI events
+//! (connect/scan/button), never on the keystroke→USB hot path.
 
 use embedded_graphics::mono_font::ascii::FONT_6X10;
 use embedded_graphics::mono_font::MonoTextStyleBuilder;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
-use ssd1306::mode::BufferedGraphicsMode;
+use ssd1306::mode::BufferedGraphicsModeAsync;
 use ssd1306::prelude::*;
-use ssd1306::I2CDisplayInterface;
-use ssd1306::Ssd1306;
+use ssd1306::{I2CDisplayInterface, Ssd1306Async};
 
-/// Type alias for the concrete display driver.
+/// Type alias for the concrete async display driver.
 ///
 /// Generic over the I²C implementation so callers pass in their HAL's
-/// I²C peripheral.
-pub type Display<I2C> =
-    Ssd1306<I2CInterface<I2C>, DisplaySize128x64, BufferedGraphicsMode<DisplaySize128x64>>;
+/// async I²C peripheral.
+pub type Display<I2C> = Ssd1306Async<
+    I2CInterface<I2C>,
+    DisplaySize128x64,
+    BufferedGraphicsModeAsync<DisplaySize128x64>,
+>;
 
 /// Initialise the SSD1306 display and clear the screen.
-pub fn init<I2C>(i2c: I2C) -> Display<I2C>
+pub async fn init<I2C>(i2c: I2C) -> Display<I2C>
 where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
     let interface = I2CDisplayInterface::new(i2c);
-    let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
+    let mut display = Ssd1306Async::new(interface, DisplaySize128x64, DisplayRotation::Rotate0)
         .into_buffered_graphics_mode();
-    let _ = display.init();
+    let _ = display.init().await;
     display.clear_buffer();
-    let _ = display.flush();
+    let _ = display.flush().await;
     display
 }
 
@@ -48,9 +48,9 @@ fn text_style() -> embedded_graphics::mono_font::MonoTextStyle<'static, BinaryCo
 }
 
 /// Render the Home screen.
-pub fn draw_home<I2C>(display: &mut Display<I2C>, connected: bool, device_name: &str)
+pub async fn draw_home<I2C>(display: &mut Display<I2C>, connected: bool, device_name: &str)
 where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
     display.clear_buffer();
 
@@ -65,13 +65,13 @@ where
         let _ = Text::new("Press SELECT to scan", Point::new(0, 38), text_style()).draw(display);
     }
 
-    let _ = display.flush();
+    let _ = display.flush().await;
 }
 
 /// Render the Scanning screen with a simple progress indicator.
-pub fn draw_scanning<I2C>(display: &mut Display<I2C>, dots: u8)
+pub async fn draw_scanning<I2C>(display: &mut Display<I2C>, dots: u8)
 where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
     display.clear_buffer();
 
@@ -88,16 +88,16 @@ where
 
     let _ = Text::new("Please wait...", Point::new(0, 30), text_style()).draw(display);
 
-    let _ = display.flush();
+    let _ = display.flush().await;
 }
 
 /// Render the discovered-device list with current selection.
-pub fn draw_device_list<I2C>(
+pub async fn draw_device_list<I2C>(
     display: &mut Display<I2C>,
     devices: &[heapless::String<32>],
     selected: usize,
 ) where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
     display.clear_buffer();
 
@@ -113,12 +113,12 @@ pub fn draw_device_list<I2C>(
         let _ = Text::new(line.as_str(), Point::new(0, y), text_style()).draw(display);
     }
 
-    let _ = display.flush();
+    let _ = display.flush().await;
 }
 
-pub fn draw_connected<I2C>(display: &mut Display<I2C>, device_name: &str)
+pub async fn draw_connected<I2C>(display: &mut Display<I2C>, device_name: &str)
 where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
     display.clear_buffer();
 
@@ -127,20 +127,20 @@ where
     let _ = Text::new("SEL:add  DOWN:disc", Point::new(0, 38), text_style()).draw(display);
     let _ = Text::new("HID active", Point::new(0, 52), text_style()).draw(display);
 
-    let _ = display.flush();
+    let _ = display.flush().await;
 }
 
 /// Render a transient error message.
-pub fn draw_error<I2C>(display: &mut Display<I2C>, message: &str)
+pub async fn draw_error<I2C>(display: &mut Display<I2C>, message: &str)
 where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
     display.clear_buffer();
 
     let _ = Text::new("ERROR", Point::new(0, 10), text_style()).draw(display);
     let _ = Text::new(message, Point::new(0, 30), text_style()).draw(display);
 
-    let _ = display.flush();
+    let _ = display.flush().await;
 }
 
 /// Turn the OLED panel on or off at the hardware level.
@@ -148,9 +148,9 @@ where
 /// When off, the SSD1306 stops driving the OLED pixels, reducing power
 /// consumption to near zero.  The display buffer is preserved so the
 /// screen content reappears immediately when turned back on.
-pub fn set_power<I2C>(display: &mut Display<I2C>, on: bool)
+pub async fn set_power<I2C>(display: &mut Display<I2C>, on: bool)
 where
-    I2C: embedded_hal::i2c::I2c,
+    I2C: embedded_hal_async::i2c::I2c,
 {
-    let _ = display.set_display_on(on);
+    let _ = display.set_display_on(on).await;
 }

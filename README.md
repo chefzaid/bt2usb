@@ -419,7 +419,7 @@ sequenceDiagram
 - [x] Power state follows real HID traffic (not just button/connect events), so the OLED no longer sleeps mid-typing. Deep modes (System-OFF, relaxing the fast BLE interval) are intentionally skipped on this bus-powered device — they'd cost HID latency/availability for power that wall power makes irrelevant
 - [ ] NKRO and high-resolution (16-bit) HID translation — these need report-ID multiplexing to coexist with the boot interface. (Multi-button (5-button) mice and horizontal scroll / AC Pan **are** now supported — boot-safe, since a boot host reads only mouse bytes 0–2.)
 - [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
-- [ ] Non-blocking async-I2C OLED flush (once `ssd1306` async compiles) so a redraw never stalls the cooperative executor (`ui/display.rs`)
+- [x] Non-blocking async-I2C OLED flush — a redraw now yields during the ~1 KB I2C transfer instead of stalling the cooperative executor
 - [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
 - [ ] Resolve Renode GPIO→GPIOTE injection so the simulation can exercise real button presses (it currently uses a synthetic stimulus task)
 - [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags

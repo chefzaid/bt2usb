@@ -421,7 +421,7 @@ sequenceDiagram
 - [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
 - [x] Non-blocking async-I2C OLED flush — a redraw now yields during the ~1 KB I2C transfer instead of stalling the cooperative executor
 - [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
-- [ ] Resolve Renode GPIO→GPIOTE injection so the simulation can exercise real button presses (it currently uses a synthetic stimulus task)
+- [ ] Resolve Renode GPIO→GPIOTE injection for real button presses. **Root-caused** (by running the sim in Renode and logging register writes): embassy-nrf detects edges via the SENSE→DETECT→`LATCH`→GPIOTE-**PORT**-event chain, but Renode's stock `NRF52840_GPIO` drops `DETECTMODE`/`LATCH` writes as "unhandled" and never raises the PORT event — so injected edges are lost. Fix = custom Renode GPIO+GPIOTE peripherals modeling that chain; the sim meanwhile uses a synthetic stimulus.
 - [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags
 - [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets

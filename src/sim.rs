@@ -66,11 +66,17 @@ async fn button_task(pin: Peri<'static, AnyPin>, event: ButtonEvent) -> ! {
 /// Synthetic button stimulus.
 ///
 /// The real `button_task`s above are spawned (so the GPIO driver's setup runs),
-/// but Renode's GPIOTE model doesn't drive embassy-nrf's edge waits from
-/// injected pin changes, so physical presses don't reach the firmware. To still
-/// exercise the UI reducer (`ui_logic::on_button`) on the simulated MCU, this
-/// task feeds a rotating sequence of button events into the same channel the
-/// real buttons use.
+/// but an injected GPIO edge (`gpio0 OnGPIO <pin> <level>`) never reaches
+/// embassy-nrf's async edge wait under Renode. Root cause (confirmed by logging
+/// the firmware's register writes in Renode): embassy-nrf detects input edges
+/// via the SENSE → DETECT → LATCH → GPIOTE **PORT** event chain
+/// (`gpiote.rs::on_irq` reads `GPIOTE.EVENTS_PORT`, then `GPIO.LATCH` to find the
+/// triggered pins), but Renode's stock `NRF52840_GPIO` drops `DETECTMODE` (0x24)
+/// and `LATCH` (0x20) writes as "unhandled" and never raises the GPIOTE PORT
+/// event. Resolving it needs custom Renode GPIO + GPIOTE peripherals that model
+/// SENSE/DETECTMODE/LATCH and drive the PORT event/IRQ. Until then, this task
+/// feeds a rotating sequence of button events into the same channel the real
+/// buttons use, so the UI reducer (`ui_logic::on_button`) is still exercised.
 #[embassy_executor::task]
 async fn ui_stimulus() -> ! {
     let sequence = [

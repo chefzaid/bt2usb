@@ -43,6 +43,8 @@ mod config;
 mod hid;
 mod power;
 mod power_logic;
+mod sd_setup;
+mod stack;
 mod storage;
 mod ui;
 mod usb;
@@ -94,30 +96,6 @@ static BUTTON_CHANNEL: Channel<CriticalSectionRawMutex, ButtonEvent, 4> = Channe
 bind_interrupts!(struct TwimIrqs {
     TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
 });
-
-fn softdevice_config() -> nrf_softdevice::Config {
-    nrf_softdevice::Config {
-        clock: Some(nrf_softdevice::raw::nrf_clock_lf_cfg_t {
-            source: nrf_softdevice::raw::NRF_CLOCK_LF_SRC_RC as u8,
-            rc_ctiv: 16,
-            rc_temp_ctiv: 2,
-            accuracy: nrf_softdevice::raw::NRF_CLOCK_LF_ACCURACY_500_PPM as u8,
-        }),
-        conn_gap: Some(nrf_softdevice::raw::ble_gap_conn_cfg_t {
-            conn_count: 2,
-            event_length: config::BLE_CONN_EVENT_LENGTH,
-        }),
-        conn_gatt: Some(nrf_softdevice::raw::ble_gatt_conn_cfg_t { att_mtu: 64 }),
-        gap_role_count: Some(nrf_softdevice::raw::ble_gap_cfg_role_count_t {
-            adv_set_count: 0,      // we don't advertise
-            periph_role_count: 0,  // we don't act as peripheral
-            central_role_count: 2, // up to two central connections
-            central_sec_count: 2,
-            _bitfield_1: nrf_softdevice::raw::ble_gap_cfg_role_count_t::new_bitfield_1(0),
-        }),
-        ..Default::default()
-    }
-}
 
 #[embassy_executor::task]
 async fn softdevice_task(
@@ -218,9 +196,10 @@ async fn main(spawner: Spawner) {
     interrupt::USBD.set_priority(Priority::P2);
     interrupt::TWISPI0.set_priority(Priority::P2);
 
-    let sd = nrf_softdevice::Softdevice::enable(&softdevice_config());
+    let sd = nrf_softdevice::Softdevice::enable(&sd_setup::softdevice_config());
 
-    let usb = hid_device::init(p.USBD);
+    let (vbus_detected, usb_power_ready) = sd_setup::enable_usb_power_events();
+    let usb = hid_device::init(p.USBD, vbus_detected, usb_power_ready);
     // Spawn the SoftDevice task with the VBUS detector so it can forward USB
     // power SoC events to the USB stack.
     spawner.spawn(unwrap!(softdevice_task(sd, usb.vbus)));
@@ -238,7 +217,12 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(ble_task(sd)));
     info!("BLE task started");
 
-    let twi_config = twim::Config::default();
+    let mut twi_config = twim::Config::default();
+    // Most SSD1306 modules carry their own I2C pull-ups, but a bare panel or
+    // a module without them would leave the bus floating. The internal
+    // pull-ups (~13 kΩ) are harmless in parallel with external ones.
+    twi_config.sda_pullup = true;
+    twi_config.scl_pullup = true;
     // embassy-nrf 0.7's Twim requires a RAM scratch buffer for writes whose
     // source isn't in RAM (e.g. flash-resident SSD1306 command sequences); the
     // framebuffer flush is already RAM-backed. This lives for the program.
@@ -266,6 +250,7 @@ async fn main(spawner: Spawner) {
     let mut power = PowerManager::new();
     let mut display_powered_off = false;
     let mut scan_dots: u8 = 0;
+    let mut stack_reported: usize = 0;
 
     loop {
         let action = embassy_futures::select::select4(
@@ -411,6 +396,14 @@ async fn main(spawner: Spawner) {
 
             embassy_futures::select::Either4::Third(_) => {
                 power.tick();
+
+                // Report the stack's worst case whenever it grows, so real use
+                // on hardware shows how much headroom is left.
+                let (stack_used, stack_total) = stack::high_water();
+                if stack_used > stack_reported {
+                    stack_reported = stack_used;
+                    info!("stack high-water: {} of {} bytes", stack_used, stack_total);
+                }
                 // Auto-off applies on every screen (the inactivity policy lives
                 // in `PowerManager::display_on`), not just Home — otherwise the
                 // panel would stay lit forever while connected.

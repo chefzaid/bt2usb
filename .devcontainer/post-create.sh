@@ -13,9 +13,6 @@ echo "→ Installing thumbv7em-none-eabihf target..."
 rustup target add thumbv7em-none-eabihf
 
 # - Install cargo tools for embedded development ---------------
-echo "→ Installing flip-link (stack overflow protection)..."
-cargo install --locked flip-link || true
-
 echo "→ Installing probe-rs (flashing & debugging)..."
 cargo install --locked probe-rs-tools || true
 
@@ -64,7 +61,6 @@ echo "Rust version:     $(rustc --version)"
 echo "Cargo version:    $(cargo --version)"
 echo "Host target:      $(rustc -vV | sed -n 's/^host: //p')   (host tests build for this)"
 echo "Target installed: $(rustup target list --installed | grep thumb | head -1)"
-echo "flip-link:        $(flip-link --version 2>/dev/null || echo 'not found')"
 echo "probe-rs:         $(probe-rs --version 2>/dev/null || echo 'not found')"
 echo "mask:             $(mask --version 2>/dev/null || echo 'not found')"
 echo "cargo-llvm-cov:   $(cargo llvm-cov --version 2>/dev/null || echo 'not found')"

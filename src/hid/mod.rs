@@ -7,6 +7,7 @@
 
 pub mod coalesce;
 pub mod consumer;
+pub mod held;
 pub mod keyboard;
 pub mod mouse;
 pub mod report_protocol;

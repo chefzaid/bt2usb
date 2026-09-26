@@ -248,3 +248,60 @@ fn on_slot_error_with_surviving_link_reports_summary() {
     assert!(matches!(acts[1], Action::Emit(UiEvent::Connected(_))));
     assert_eq!(m.active_count(), 1);
 }
+
+#[test]
+fn on_slot_link_lost_keeps_slot_reserved_for_reconnect() {
+    let mut m = mgr();
+    let kb = dev(1, "kb");
+    m.connect_slot(0, &kb);
+    let acts = on_slot_link_lost(&mut m, 0, &kb);
+    assert_eq!(acts.len(), 1);
+    assert_eq!(acts[0], Action::Emit(UiEvent::Disconnected));
+    // Not active any more, but still held for the same device so a new
+    // connect request can't take the slot out from under the reconnect.
+    assert_eq!(m.active_count(), 0);
+    assert!(m.is_slot_occupied(0));
+    assert!(m.is_connected_address(&1));
+    assert_eq!(m.find_empty_slot(), Some(1));
+}
+
+#[test]
+fn on_slot_link_lost_with_other_link_reports_summary() {
+    let mut m = mgr();
+    let kb = dev(1, "kb");
+    m.connect_slot(0, &kb);
+    m.connect_slot(1, &dev(2, "Mouse"));
+    let acts = on_slot_link_lost(&mut m, 0, &kb);
+    assert_eq!(
+        acts[0],
+        Action::Emit(UiEvent::Connected({
+            let mut s: String<32> = String::new();
+            let _ = s.push_str("Mouse");
+            s
+        }))
+    );
+    assert_eq!(m.occupied_count(), 2);
+}
+
+#[test]
+fn link_lost_then_reconnected_is_active_again() {
+    let mut m = mgr();
+    let kb = dev(1, "kb");
+    m.connect_slot(0, &kb);
+    on_slot_link_lost(&mut m, 0, &kb);
+    let acts = on_slot_connected(&mut m, 0, &kb);
+    assert_eq!(m.active_count(), 1);
+    assert!(matches!(acts[1], Action::Emit(UiEvent::Connected(_))));
+}
+
+#[test]
+fn disconnect_while_reconnecting_targets_the_slot() {
+    // A user "disconnect" must reach a slot that's silently reconnecting, so
+    // the worker stops retrying.
+    let mut m = mgr();
+    let kb = dev(1, "kb");
+    m.connect_slot(0, &kb);
+    on_slot_link_lost(&mut m, 0, &kb);
+    let acts = plan_disconnect(&m);
+    assert_eq!(acts.as_slice(), &[Action::DisconnectSlot(0)]);
+}

@@ -73,6 +73,19 @@ mod softdevice_types {
 #[cfg(feature = "embedded")]
 pub use softdevice_types::{BleCommand, BleEvent, DiscoveredDevice};
 
+/// Serialises SoftDevice GAP scan and connect procedures.
+///
+/// The SoftDevice allows only one locally initiated scan *or* connection
+/// establishment at a time: a second `sd_ble_gap_connect` / `scan_start` while
+/// one is pending fails with `NRF_ERROR_INVALID_STATE`. Both connection slots
+/// and the scanner run concurrently, so each holds this lock for the duration
+/// of its procedure (connection *establishment* only, not the life of a link).
+#[cfg(feature = "embedded")]
+pub static GAP_PROCEDURE: embassy_sync::mutex::Mutex<
+    embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex,
+    (),
+> = embassy_sync::mutex::Mutex::new(());
+
 /// Lightweight error tag for UI display (no dynamic alloc).
 ///
 /// Re-exported from the pure coordination core so the same tag type is shared

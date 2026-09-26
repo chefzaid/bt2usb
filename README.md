@@ -117,6 +117,9 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 src/
 |-- main.rs            # firmware entry point + UI loop (imperative shell)
 |-- sim.rs             # SoftDevice-free entry point for Renode
+|-- selftest.rs        # on-board bring-up self-test (mask selftest)
+|-- sd_setup.rs        # SoftDevice config shared by firmware + self-test
+|-- stack.rs           # stack high-water measurement (paint-stack)
 |-- lib.rs             # host-test entry point (re-exposes the pure modules)
 |-- config.rs
 |-- power.rs           power_logic.rs   storage.rs
@@ -185,7 +188,7 @@ All inter-task communication uses Embassy channels (`Channel<CriticalSectionRawM
 
 ```bash
 rustup target add thumbv7em-none-eabihf
-cargo install probe-rs-tools flip-link defmt-print cargo-llvm-cov mask
+cargo install probe-rs-tools defmt-print cargo-llvm-cov mask
 ```
 
 ### Hardware Setup
@@ -208,6 +211,11 @@ mask run --release   # smaller/faster release build
 ```
 
 If flashing fails, re-check cabling/probe permissions and re-run `mask probe-list`.
+
+**First time on a new board?** Follow [docs/FIRST_FLASH.md](docs/FIRST_FLASH.md):
+it runs an on-board self-test (`mask selftest`) that checks the SoftDevice,
+flash, USB enumeration, OLED, buttons and BLE radio stage by stage, then walks
+through pairing, reconnect, stuck-key, PC-wake and in-monitor checks.
 
 ### SoftDevice
 
@@ -257,7 +265,7 @@ A `.devcontainer/` setup is provided:
 
 - No hard `/dev/bus/usb` bind mount required at startup (avoids failing when no probe is attached yet).
 - Container runs `--privileged` and installs embedded tools in `post-create.sh`.
-- Installs: `probe-rs-tools`, `flip-link`, `mask`, `cargo-llvm-cov`, and ARM targets.
+- Installs: `probe-rs-tools`, `mask`, `cargo-llvm-cov`, and ARM targets.
 
 **WSL2 USB workflow**
 
@@ -281,6 +289,10 @@ emulated. Everything *between* them can, on the host or in a simulator:
   boot, the memory map, GPIO buttons, timers and the real UI/coordinator logic on
   a simulated nRF52840. See the [Renode simulation](#on-target-simulation-renode)
   guide below.
+- **On-board self-test + bring-up checklist:** `mask selftest` flashes a
+  bring-up image that checks each hardware stage on a real board, and
+  [docs/FIRST_FLASH.md](docs/FIRST_FLASH.md) covers the end-to-end checks
+  (pairing, reconnect, stuck keys, PC wake) that need real devices.
 - **Full end-to-end:** SoftDevice BLE + USB enumeration require a real
   nRF52840-DK (RTT/probe workflows; WSL via `usbipd-win`).
 
@@ -303,6 +315,10 @@ The SoftDevice-free `sim` build boots on a simulated nRF52840 in
 (`ble::coordinator`, `ui::ui_logic`) plus the GPIO/timer drivers and boot path —
 no hardware. It excludes the SoftDevice, USB, and flash stacks (those need real
 silicon) and logs to UART0, which Renode prints directly (no probe or decoder).
+Renode's nRF52840 GPIO/GPIOTE are swapped for small custom models
+(`renode/nrf52840_sense_gpio.cs` + `renode/nrf52840-sense-gpio.repl`, compiled
+by Renode at load time) that implement the pin-sense/`LATCH`/PORT-event chain
+embassy-nrf waits on, so button presses are real GPIO edges.
 
 **1. Build the sim firmware** (just needs the ARM target; no probe/board):
 
@@ -337,7 +353,15 @@ mask sim                  # builds + launches Renode with renode/bt2usb-sim.resc
 ```
 
 A UART0 terminal streams the firmware log — the coordinator and UI reducer
-running on the simulated MCU:
+running on the simulated MCU. The BLE scenario advances on its own; press the
+buttons from the Renode monitor. They're active-low with pull-ups (SELECT =
+P0.24, DOWN = P0.12, UP = P0.11), so drive the pin low to press and high to
+release:
+
+```
+(bt2usb-sim) gpio0 OnGPIO 24 false     # press SELECT
+(bt2usb-sim) gpio0 OnGPIO 24 true      # release SELECT
+```
 
 ```
 entering sim UI loop (screen=Home)
@@ -346,18 +370,21 @@ scenario: connect device 0 (Keyboard)
   action: UI Connected 'Keyboard'
 button Select -> screen Scanning (selected 0)
   cmd: StartScan
+  scan: 2 devices -> screen DeviceList
 ```
 
-**3b. Run it headless (CI):** the robot test boots the sim and asserts the
-expected UART output, exiting non-zero on failure:
+**3b. Run it headless (CI):** the robot test boots the sim, presses SELECT,
+DOWN, UP and SELECT through the GPIO pins, and asserts the expected UART output
+(screen transitions plus the coordinator scenario), exiting non-zero on failure:
 
 ```bash
 mask sim-test             # → renode-test renode/bt2usb-sim.robot
 ```
 
-Buttons are driven by a synthetic stimulus task because injected GPIO edges
-don't reach embassy-nrf's GPIOTE wait under Renode; on real hardware the buttons
-drive `ui_logic` directly.
+The presses go through the same path as on hardware: pin edge → SENSE/`LATCH`
+→ GPIOTE PORT interrupt → `ui::buttons` task (with its debounce) →
+`BUTTON_CHANNEL` → `ui_logic`. The sim has no radio, so a scan "completes"
+immediately with the scenario's two devices.
 
 ---
 
@@ -420,8 +447,12 @@ sequenceDiagram
 - [ ] NKRO and high-resolution (16-bit) HID translation — these need report-ID multiplexing to coexist with the boot interface. (Multi-button (5-button) mice and horizontal scroll / AC Pan **are** now supported — boot-safe, since a boot host reads only mouse bytes 0–2.)
 - [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
 - [x] Non-blocking async-I2C OLED flush — a redraw now yields during the ~1 KB I2C transfer instead of stalling the cooperative executor
-- [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
-- [ ] Resolve Renode GPIO→GPIOTE injection for real button presses. **Root-caused** (by running the sim in Renode and logging register writes): embassy-nrf detects edges via the SENSE→DETECT→`LATCH`→GPIOTE-**PORT**-event chain, but Renode's stock `NRF52840_GPIO` drops `DETECTMODE`/`LATCH` writes as "unhandled" and never raises the PORT event — so injected edges are lost. Fix = custom Renode GPIO+GPIOTE peripherals modeling that chain; the sim meanwhile uses a synthetic stimulus.
+- [x] Reconnect automatically when a paired keyboard/mouse drops its link (sleep, range, power) or isn't around at boot, with one GAP scan/connect at a time so the two slots and the scanner never collide in the SoftDevice
+- [x] Release any key or mouse button a device was holding when its link drops, so nothing sticks or auto-repeats on the PC
+- [x] Wake a sleeping PC from the Bluetooth keyboard/mouse (USB remote wakeup)
+- [x] Track USB unplug/replug via the SoftDevice's USB power events, and keep the paired-device flash pages outside the linker's code region
+- [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate; the boot log prints the real requirement)
+- [x] Real button presses in the Renode simulation. embassy-nrf detects edges via the SENSE→DETECT→`LATCH`→GPIOTE-**PORT**-event chain, which Renode's stock `NRF52840_GPIO` doesn't model (it drops `DETECTMODE`/`LATCH` writes and never raises the PORT event). Custom Renode GPIO+GPIOTE peripherals (`renode/nrf52840_sense_gpio.cs`) now model that chain, so edges injected with `gpio0 OnGPIO <pin> <level>` drive the real button tasks — the synthetic stimulus task is gone, and the robot test presses SELECT/DOWN/UP and asserts the resulting screen transitions
 - [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags
 - [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets

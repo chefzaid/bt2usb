@@ -7,7 +7,9 @@
 //! without hardware:
 //!
 //! - boot + the Embassy executor + the RTC time driver + the memory map,
-//! - the GPIO button driver (real `ui::buttons` code, on P0.11/12/24),
+//! - the GPIO button driver (real `ui::buttons` code, on P0.11/12/24), driven
+//!   by edges injected on the simulated pins (`gpio0 OnGPIO <pin> <level>`;
+//!   buttons are active-low, so `false` = pressed, `true` = released),
 //! - the **real** host-tested logic — `ui::ui_logic` (screen transitions) and
 //!   `ble::coordinator` (connection-slot state machine + reducers) — driven by a
 //!   synthetic BLE scenario, with `Address` substituted by a `u32` stand-in.
@@ -58,39 +60,14 @@ type SimAddr = u32;
 
 static BUTTON_CHANNEL: Channel<CriticalSectionRawMutex, ButtonEvent, 4> = Channel::new();
 
+/// The real button driver. Under Renode, presses come from edges injected on
+/// the simulated pins; they reach embassy-nrf's async edge wait through the
+/// pin SENSE → LATCH → GPIOTE PORT chain, which the stock Renode nRF52840 GPIO
+/// model lacks — hence the custom GPIO/GPIOTE models in
+/// `renode/nrf52840_sense_gpio.cs`.
 #[embassy_executor::task(pool_size = 3)]
 async fn button_task(pin: Peri<'static, AnyPin>, event: ButtonEvent) -> ! {
     ui::buttons::button_task(pin, event, &BUTTON_CHANNEL.sender()).await
-}
-
-/// Synthetic button stimulus.
-///
-/// The real `button_task`s above are spawned (so the GPIO driver's setup runs),
-/// but an injected GPIO edge (`gpio0 OnGPIO <pin> <level>`) never reaches
-/// embassy-nrf's async edge wait under Renode. Root cause (confirmed by logging
-/// the firmware's register writes in Renode): embassy-nrf detects input edges
-/// via the SENSE → DETECT → LATCH → GPIOTE **PORT** event chain
-/// (`gpiote.rs::on_irq` reads `GPIOTE.EVENTS_PORT`, then `GPIO.LATCH` to find the
-/// triggered pins), but Renode's stock `NRF52840_GPIO` drops `DETECTMODE` (0x24)
-/// and `LATCH` (0x20) writes as "unhandled" and never raises the GPIOTE PORT
-/// event. Resolving it needs custom Renode GPIO + GPIOTE peripherals that model
-/// SENSE/DETECTMODE/LATCH and drive the PORT event/IRQ. Until then, this task
-/// feeds a rotating sequence of button events into the same channel the real
-/// buttons use, so the UI reducer (`ui_logic::on_button`) is still exercised.
-#[embassy_executor::task]
-async fn ui_stimulus() -> ! {
-    let sequence = [
-        ButtonEvent::Select, // Home  -> Scanning (StartScan)
-        ButtonEvent::Down,   // DeviceList navigation (once populated)
-        ButtonEvent::Select, // connect highlighted
-        ButtonEvent::Down,   // Connected -> Home (disconnect)
-    ];
-    let mut i = 0usize;
-    loop {
-        Timer::after(Duration::from_secs(3)).await;
-        BUTTON_CHANNEL.send(sequence[i % sequence.len()]).await;
-        i += 1;
-    }
 }
 
 /// Format a line and write it to UART0 (Renode console). EasyDMA needs the
@@ -202,7 +179,6 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(button_task(p.P0_11.into(), ButtonEvent::Up)));
     spawner.spawn(unwrap!(button_task(p.P0_12.into(), ButtonEvent::Down)));
     spawner.spawn(unwrap!(button_task(p.P0_24.into(), ButtonEvent::Select)));
-    spawner.spawn(unwrap!(ui_stimulus()));
     slog!(
         &mut uart,
         "buttons ready (UP=P0.11 DOWN=P0.12 SELECT=P0.24)"
@@ -256,7 +232,18 @@ async fn main(spawner: Spawner) {
                 }
                 if let Some(cmd) = outcome.command {
                     match cmd {
-                        UiCommand::StartScan => slog!(&mut uart, "  cmd: StartScan"),
+                        UiCommand::StartScan => {
+                            slog!(&mut uart, "  cmd: StartScan");
+                            // No radio here: the scan "finds" the scenario's
+                            // devices at once, via the real scan-complete reducer.
+                            screen = ui_logic::on_scan_complete(device_count);
+                            slog!(
+                                &mut uart,
+                                "  scan: {} devices -> screen {:?}",
+                                device_count,
+                                screen
+                            );
+                        }
                         UiCommand::Connect(i) => slog!(&mut uart, "  cmd: Connect({})", i),
                         UiCommand::Disconnect => slog!(&mut uart, "  cmd: Disconnect"),
                     }

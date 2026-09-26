@@ -295,6 +295,28 @@ pub fn on_slot_disconnected<A: Clone + PartialEq>(
     actions
 }
 
+/// A slot worker's established link dropped (peer asleep, out of range or
+/// powered off) and the worker is now silently trying to reconnect to it.
+///
+/// The slot stays reserved for that device — it is still "connecting" — so a
+/// new connect request doesn't steal it, and the UI shows only the links that
+/// are actually up.
+pub fn on_slot_link_lost<A: Clone + PartialEq>(
+    manager: &mut ConnManager<A>,
+    slot: usize,
+    device: &DeviceInfo<A>,
+) -> Vec<Action<A>, 1> {
+    let mut actions = Vec::new();
+    manager.reserve_slot(slot, device);
+    let event = if manager.active_count() == 0 {
+        UiEvent::Disconnected
+    } else {
+        UiEvent::Connected(connection_summary(manager))
+    };
+    let _ = actions.push(Action::Emit(event));
+    actions
+}
+
 /// A slot worker reported an error.
 pub fn on_slot_error<A: Clone + PartialEq>(
     manager: &mut ConnManager<A>,

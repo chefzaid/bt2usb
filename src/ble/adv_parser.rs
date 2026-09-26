@@ -13,8 +13,8 @@ pub fn contains_hid_service_uuid(data: &[u8]) -> bool {
         let ad_type = data[i + 1];
         if ad_type == 0x02 || ad_type == 0x03 {
             let uuid_data = &data[i + 2..i + 1 + len];
-            for chunk in uuid_data.chunks_exact(2) {
-                if chunk == hid_uuid_le {
+            for chunk in uuid_data.as_chunks::<2>().0 {
+                if *chunk == hid_uuid_le {
                     return true;
                 }
             }

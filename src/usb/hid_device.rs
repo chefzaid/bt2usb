@@ -8,7 +8,9 @@ use crate::hid::consumer::CONSUMER_REPORT_DESCRIPTOR;
 use crate::hid::keyboard::{KeyboardLeds, KEYBOARD_REPORT_DESCRIPTOR};
 use crate::hid::mouse::MOUSE_REPORT_DESCRIPTOR;
 use crate::hid::HidReport;
+use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, warn};
+use embassy_futures::select::{select, Either};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
 use embassy_nrf::{self, bind_interrupts, peripherals, Peri};
@@ -92,12 +94,18 @@ static USB_MSOS_DESC: StaticCell<[u8; 256]> = StaticCell::new();
 static USB_CTRL_BUF: StaticCell<[u8; 128]> = StaticCell::new();
 static USB_POWER_HANDLER: StaticCell<UsbPowerHandler> = StaticCell::new();
 static USB_SUSPEND_SIGNAL: Signal<CriticalSectionRawMutex, bool> = Signal::new();
+/// Whether the host has suspended the bus (PC asleep).
+static USB_SUSPENDED: AtomicBool = AtomicBool::new(false);
+/// Raised by the HID writer when input arrives while suspended; the USB device
+/// task answers it with a remote wakeup so a key press wakes the PC.
+static REMOTE_WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static SOFTWARE_VBUS: StaticCell<SoftwareVbusDetect> = StaticCell::new();
 
 struct UsbPowerHandler;
 
 impl embassy_usb::Handler for UsbPowerHandler {
     fn suspended(&mut self, suspended: bool) {
+        USB_SUSPENDED.store(suspended, Ordering::Relaxed);
         USB_SUSPEND_SIGNAL.signal(suspended);
     }
 }
@@ -122,14 +130,18 @@ pub struct UsbHidDevice {
 
 /// Initialise the USB stack and create the composite HID device.
 ///
+/// `vbus_detected` / `power_ready` seed the software VBUS detector with the
+/// USB regulator state read from the SoftDevice at boot (see
+/// `enable_usb_power_events` in `main.rs`); the SoftDevice's USB power SoC
+/// events keep it accurate afterwards, across unplug/replug.
+///
 /// Must be called exactly once.  All static buffers are consumed here.
-pub fn init(usbd: Peri<'static, peripherals::USBD>) -> UsbHidDevice {
-    // The device is bus-powered through the monitor hub, so VBUS is present at
-    // boot. Initialise as detected+ready so enumeration can proceed even if the
-    // first SoC events were emitted before `softdevice_task` started draining
-    // them; subsequent PowerUsbDetected/Removed/PowerReady events keep it
-    // accurate across unplug/replug.
-    let vbus: Vbus = SOFTWARE_VBUS.init(SoftwareVbusDetect::new(true, true));
+pub fn init(
+    usbd: Peri<'static, peripherals::USBD>,
+    vbus_detected: bool,
+    power_ready: bool,
+) -> UsbHidDevice {
+    let vbus: Vbus = SOFTWARE_VBUS.init(SoftwareVbusDetect::new(vbus_detected, power_ready));
 
     // Create the low-level USB driver with software VBUS detection (SoftDevice
     // owns the POWER peripheral, so HardwareVbusDetect cannot be used).
@@ -143,10 +155,7 @@ pub fn init(usbd: Peri<'static, peripherals::USBD>) -> UsbHidDevice {
     usb_config.max_power = 100; // mA
     usb_config.max_packet_size_0 = 64;
     // Advertise remote-wakeup capability so a host that has suspended the bus
-    // (e.g. PC asleep) permits the device to request wake. Emitting the wake
-    // signal on incoming HID activity is still unimplemented, but no longer
-    // blocked: embassy-usb 0.6 exposes `UsbDevice::remote_wakeup()` for that —
-    // it just needs routing a wake trigger to `usb_device_task`.
+    // (e.g. PC asleep) lets a key press wake it; see `run_usb_device`.
     usb_config.supports_remote_wakeup = true;
 
     // Allocate static descriptor buffers.
@@ -227,7 +236,21 @@ pub fn init(usbd: Peri<'static, peripherals::USBD>) -> UsbHidDevice {
 /// It runs forever (or until the USB cable is disconnected).
 pub async fn run_usb_device(mut device: UsbDevice<'static, UsbDriver>) -> ! {
     info!("USB device task started");
-    device.run().await
+    loop {
+        device.run_until_suspend().await;
+        // Drop a wake request left over from before the suspend, so input that
+        // arrived while the PC was still awake can't wake it right back up.
+        REMOTE_WAKE.reset();
+        match select(device.wait_resume(), REMOTE_WAKE.wait()).await {
+            Either::First(()) => {}
+            Either::Second(()) => match device.remote_wakeup().await {
+                Ok(()) => info!("USB remote wakeup sent"),
+                // The host didn't enable remote wakeup for us (a per-device OS
+                // setting); stay suspended until it resumes the bus itself.
+                Err(e) => info!("USB remote wakeup not possible: {}", e),
+            },
+        }
+    }
 }
 
 /// HID report forwarding task - reads from the BLE→USB channel and
@@ -244,6 +267,10 @@ pub async fn hid_writer_task(
 
     loop {
         let report = report_rx.receive().await;
+        if USB_SUSPENDED.load(Ordering::Relaxed) {
+            // The write below waits for the bus to resume; ask the host to wake.
+            REMOTE_WAKE.signal(());
+        }
         // Count live HID traffic as activity so the OLED stays on while the user
         // is actually typing/mousing (these reports never reach the UI loop).
         crate::power::note_hid_activity();

@@ -383,7 +383,7 @@ echo "Installing Rust target..."
 ./scripts/run-tool.sh rustup target add thumbv7em-none-eabihf
 
 echo "Installing embedded tools..."
-./scripts/run-tool.sh cargo install probe-rs-tools flip-link cargo-binutils cargo-bloat mask
+./scripts/run-tool.sh cargo install probe-rs-tools cargo-binutils cargo-bloat mask
 
 echo "Installing coverage tools..."
 ./scripts/run-tool.sh cargo install cargo-llvm-cov

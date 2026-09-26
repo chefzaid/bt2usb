@@ -44,10 +44,6 @@ jobs:
           targets: thumbv7em-none-eabihf
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Install flip-link (linker)
-        uses: taiki-e/install-action@v2
-        with:
-          tool: flip-link
       - name: Clippy (embedded, deny warnings)
         run: cargo clippy --features embedded --target thumbv7em-none-eabihf -- -D warnings
       - name: Build release firmware
@@ -71,10 +67,6 @@ jobs:
         with:
           targets: thumbv7em-none-eabihf
       - uses: Swatinem/rust-cache@v2
-      - name: Install flip-link (linker)
-        uses: taiki-e/install-action@v2
-        with:
-          tool: flip-link
       - name: Build simulation firmware
         run: cargo build --features sim --target thumbv7em-none-eabihf
       - name: Install Renode + renode-test deps
@@ -100,10 +92,10 @@ jobs:
           targets: thumbv7em-none-eabihf
           components: llvm-tools
       - uses: Swatinem/rust-cache@v2
-      - name: Install build tools (flip-link, cargo-binutils)
+      - name: Install build tools (cargo-binutils)
         uses: taiki-e/install-action@v2
         with:
-          tool: flip-link,cargo-binutils
+          tool: cargo-binutils
       - name: Build release firmware
         run: cargo build --features embedded --target thumbv7em-none-eabihf --release
       - name: Convert ELF to Intel HEX

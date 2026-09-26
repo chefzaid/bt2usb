@@ -8,8 +8,12 @@
 
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 runner = "probe-rs run --chip nRF52840_xxAA"
+# No flip-link: it moves the stack to the *bottom* of RAM, which pushes
+# `__sdata` up to the top. nrf-softdevice reports `__sdata` to the SoftDevice as
+# the application RAM base (APP_RAM_BASE), so with flip-link the SoftDevice
+# would be told it owns (and write-protects) almost all of RAM, including the
+# whole stack. `memory_sd.x` asserts `__sdata == ORIGIN(RAM)` to keep it out.
 rustflags = [
-    "-C", "linker=flip-link",       # flip-link for stack overflow protection
     "-C", "link-arg=-Tlink.x",      # cortex-m-rt linker script
     "-C", "link-arg=-Tdefmt.x",     # defmt linker section
     "-C", "link-arg=--nmagic",       # disable page alignment (saves flash)

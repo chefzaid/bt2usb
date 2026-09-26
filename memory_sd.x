@@ -12,10 +12,14 @@
 MEMORY
 {
     /*
-     * Flash: starts after SoftDevice (0x0002_7000)
-     * Length: 1024K - 156K (SoftDevice) = 868K
+     * Flash: starts after SoftDevice (0x0002_7000) and stops at the
+     * paired-device/bond storage region (config::STORAGE_FLASH_PAGE_START =
+     * page 240 = 0x000F_0000, 4 pages). Keeping storage outside FLASH means
+     * the linker errors out instead of silently placing code or rodata on
+     * pages that `sequential-storage` erases at runtime.
+     * Length: 0xF0000 - 0x27000 = 804K. (0xF4000..0x100000 is left unused.)
      */
-    FLASH : ORIGIN = 0x00027000, LENGTH = 868K
+    FLASH : ORIGIN = 0x00027000, LENGTH = 804K
 
     /*
      * RAM: starts after SoftDevice RAM reservation (0x2000_6000)
@@ -29,3 +33,11 @@ MEMORY
      */
     RAM : ORIGIN = 0x20006000, LENGTH = 232K
 }
+
+/* The application RAM base that nrf-softdevice hands to the SoftDevice
+ * (APP_RAM_BASE) is `__sdata`, so .data must start right at ORIGIN(RAM) with
+ * the stack at the top of RAM. A linker that moves the stack below .data
+ * (e.g. flip-link, which also rewrites ORIGIN(RAM)) would make the SoftDevice
+ * claim and write-protect everything underneath, including the stack. */
+ASSERT(__sdata == ORIGIN(RAM) && _stack_start == ORIGIN(RAM) + LENGTH(RAM),
+       "stack must sit at the top of RAM and .data at ORIGIN(RAM): the SoftDevice uses __sdata as APP_RAM_BASE (is flip-link in use?)");

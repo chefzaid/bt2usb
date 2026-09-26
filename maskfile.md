@@ -40,9 +40,9 @@ fi
 
 ```bash
 if [[ "${release}" == "true" ]]; then
-    ./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release
+    ./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
 else
-    ./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf
+    ./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --bin bt2usb
 fi
 ```
 
@@ -51,7 +51,7 @@ fi
 > Build and flash firmware to the connected nRF52840 board
 
 ```bash
-./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release
+./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
 ```
 
 ## flash-debug
@@ -59,7 +59,20 @@ fi
 > Flash debug build with RTT logging enabled
 
 ```bash
-./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf
+./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --bin bt2usb
+```
+
+## selftest
+
+> Flash and run the on-board self-test (new-board bring-up, see docs/FIRST_FLASH.md)
+
+Checks the SoftDevice, flash storage, USB enumeration, OLED, buttons and BLE
+radio on the connected board and prints one PASS/FAIL/SKIP line per stage.
+Needs the SoftDevice flashed once. Flash the real firmware afterwards with
+`mask run --release`.
+
+```bash
+./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest
 ```
 
 ## test
@@ -224,7 +237,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 > Show firmware binary size breakdown
 
 ```bash
-./scripts/run-tool.sh cargo size --features embedded --target thumbv7em-none-eabihf --release -- -A
+./scripts/run-tool.sh cargo size --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -- -A
 ```
 
 ## bloat
@@ -232,7 +245,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 > Analyze what's contributing to binary size (requires cargo-bloat)
 
 ```bash
-./scripts/run-tool.sh cargo bloat --features embedded --target thumbv7em-none-eabihf --release -n 30
+./scripts/run-tool.sh cargo bloat --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -n 30
 ```
 
 ## rtt

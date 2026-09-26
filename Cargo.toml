@@ -20,6 +20,14 @@ name = "bt2usb"
 path = "src/main.rs"
 required-features = ["embedded"]
 
+# On-board bring-up check: flash this before the real firmware on a new board
+# (`mask selftest`, see docs/FIRST_FLASH.md). Same SoftDevice/USB/pin setup as
+# the firmware, one PASS/FAIL line per hardware stage over RTT.
+[[bin]]
+name = "bt2usb-selftest"
+path = "src/selftest.rs"
+required-features = ["embedded"]
+
 # SoftDevice-free simulation binary for Renode (Layer 3 testing).
 # Boots on a simulated nRF52840 and runs the real UI + coordinator logic
 # (no BLE radio / SoftDevice / USB). See README "Renode simulation".
@@ -35,7 +43,8 @@ embedded = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
             "dep:embassy-usb", "dep:embassy-sync", "dep:embassy-futures",
             "dep:nrf-softdevice", "dep:nrf-softdevice-s140",
             "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
-            "dep:cortex-m", "dep:cortex-m-rt", "dep:embedded-hal", "dep:embedded-hal-async",
+            "dep:cortex-m", "dep:cortex-m-rt", "cortex-m-rt/paint-stack",
+            "dep:embedded-hal", "dep:embedded-hal-async",
             "dep:sequential-storage", "dep:embedded-storage-async",
             "dep:defmt", "dep:defmt-rtt", "dep:panic-probe", 
             "dep:static_cell", "heapless/defmt-03", "defmt"]

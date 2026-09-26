@@ -103,7 +103,22 @@ static SOFTWARE_VBUS: StaticCell<SoftwareVbusDetect> = StaticCell::new();
 
 struct UsbPowerHandler;
 
+/// Whether the host has enumerated and configured the device.
+static USB_CONFIGURED: AtomicBool = AtomicBool::new(false);
+
+/// True once the host has configured the device (enumeration finished), until
+/// it is reset or unplugged.
+#[allow(dead_code)] // used by the self-test binary
+pub fn is_configured() -> bool {
+    USB_CONFIGURED.load(Ordering::Relaxed)
+}
+
 impl embassy_usb::Handler for UsbPowerHandler {
+    fn configured(&mut self, configured: bool) {
+        USB_CONFIGURED.store(configured, Ordering::Relaxed);
+        info!("USB configured by host: {}", configured);
+    }
+
     fn suspended(&mut self, suspended: bool) {
         USB_SUSPENDED.store(suspended, Ordering::Relaxed);
         USB_SUSPEND_SIGNAL.signal(suspended);

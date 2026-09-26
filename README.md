@@ -117,6 +117,9 @@ The nRF52840 has **1 MB internal flash** and **256 KB RAM**; no external memory 
 src/
 |-- main.rs            # firmware entry point + UI loop (imperative shell)
 |-- sim.rs             # SoftDevice-free entry point for Renode
+|-- selftest.rs        # on-board bring-up self-test (mask selftest)
+|-- sd_setup.rs        # SoftDevice config shared by firmware + self-test
+|-- stack.rs           # stack high-water measurement (paint-stack)
 |-- lib.rs             # host-test entry point (re-exposes the pure modules)
 |-- config.rs
 |-- power.rs           power_logic.rs   storage.rs
@@ -209,6 +212,11 @@ mask run --release   # smaller/faster release build
 
 If flashing fails, re-check cabling/probe permissions and re-run `mask probe-list`.
 
+**First time on a new board?** Follow [docs/FIRST_FLASH.md](docs/FIRST_FLASH.md):
+it runs an on-board self-test (`mask selftest`) that checks the SoftDevice,
+flash, USB enumeration, OLED, buttons and BLE radio stage by stage, then walks
+through pairing, reconnect, stuck-key, PC-wake and in-monitor checks.
+
 ### SoftDevice
 
 SoftDevice must be flashed **once per board** before running bt2usb.
@@ -281,6 +289,10 @@ emulated. Everything *between* them can, on the host or in a simulator:
   boot, the memory map, GPIO buttons, timers and the real UI/coordinator logic on
   a simulated nRF52840. See the [Renode simulation](#on-target-simulation-renode)
   guide below.
+- **On-board self-test + bring-up checklist:** `mask selftest` flashes a
+  bring-up image that checks each hardware stage on a real board, and
+  [docs/FIRST_FLASH.md](docs/FIRST_FLASH.md) covers the end-to-end checks
+  (pairing, reconnect, stuck keys, PC wake) that need real devices.
 - **Full end-to-end:** SoftDevice BLE + USB enumeration require a real
   nRF52840-DK (RTT/probe workflows; WSL via `usbipd-win`).
 

@@ -52,7 +52,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bt2usb-firmware-elf
-          path: target/thumbv7em-none-eabihf/release/bt2usb
+          path: |
+            target/thumbv7em-none-eabihf/release/bt2usb
+            target/thumbv7em-none-eabihf/release/bt2usb-selftest
           if-no-files-found: error
 
   # SoftDevice-free on-target simulation (Layer 3). Boots the sim ELF in Renode
@@ -100,7 +102,8 @@ jobs:
         run: cargo build --features embedded --target thumbv7em-none-eabihf --release
       - name: Convert ELF to Intel HEX
         run: |
-          cargo objcopy --features embedded --target thumbv7em-none-eabihf --release -- -O ihex bt2usb-${{ github.ref_name }}.hex
+          cargo objcopy --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -- -O ihex bt2usb-${{ github.ref_name }}.hex
+          cp target/thumbv7em-none-eabihf/release/bt2usb-selftest bt2usb-selftest-${{ github.ref_name }}.elf
           cp target/thumbv7em-none-eabihf/release/bt2usb bt2usb-${{ github.ref_name }}.elf
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
@@ -108,4 +111,5 @@ jobs:
           files: |
             bt2usb-${{ github.ref_name }}.hex
             bt2usb-${{ github.ref_name }}.elf
+            bt2usb-selftest-${{ github.ref_name }}.elf
           generate_release_notes: true

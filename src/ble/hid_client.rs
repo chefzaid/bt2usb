@@ -17,6 +17,7 @@
 use crate::ble::BleErrorTag;
 use crate::hid;
 use crate::hid::coalesce::ReportCoalescer;
+use crate::hid::held::HeldInputs;
 use crate::hid::keyboard::KeyboardLeds;
 use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, ReportType};
 use crate::hid::HidReport;
@@ -330,6 +331,7 @@ pub async fn run_notification_loop(
     descriptor: Option<HidDescriptor>,
     report_tx: &Sender<'_, CriticalSectionRawMutex, HidReport, 16>,
     led_rx: Option<&mut LedReceiver>,
+    held: &mut HeldInputs,
 ) {
     info!("HID notification loop started");
 
@@ -361,7 +363,10 @@ pub async fn run_notification_loop(
             // Pop without holding the borrow across the await below.
             let next = coalescer.borrow_mut().pop();
             match next {
-                Some(report) => report_tx.send(report).await,
+                Some(report) => {
+                    held.note(&report);
+                    report_tx.send(report).await
+                }
                 None => wake.wait().await,
             }
         }

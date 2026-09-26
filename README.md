@@ -185,7 +185,7 @@ All inter-task communication uses Embassy channels (`Channel<CriticalSectionRawM
 
 ```bash
 rustup target add thumbv7em-none-eabihf
-cargo install probe-rs-tools flip-link defmt-print cargo-llvm-cov mask
+cargo install probe-rs-tools defmt-print cargo-llvm-cov mask
 ```
 
 ### Hardware Setup
@@ -257,7 +257,7 @@ A `.devcontainer/` setup is provided:
 
 - No hard `/dev/bus/usb` bind mount required at startup (avoids failing when no probe is attached yet).
 - Container runs `--privileged` and installs embedded tools in `post-create.sh`.
-- Installs: `probe-rs-tools`, `flip-link`, `mask`, `cargo-llvm-cov`, and ARM targets.
+- Installs: `probe-rs-tools`, `mask`, `cargo-llvm-cov`, and ARM targets.
 
 **WSL2 USB workflow**
 
@@ -420,7 +420,11 @@ sequenceDiagram
 - [ ] NKRO and high-resolution (16-bit) HID translation — these need report-ID multiplexing to coexist with the boot interface. (Multi-button (5-button) mice and horizontal scroll / AC Pan **are** now supported — boot-safe, since a boot host reads only mouse bytes 0–2.)
 - [x] Mirror the host's Caps / Num / Scroll Lock LEDs back onto the BLE keyboard
 - [x] Non-blocking async-I2C OLED flush — a redraw now yields during the ~1 KB I2C transfer instead of stalling the cooperative executor
-- [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate)
+- [x] Reconnect automatically when a paired keyboard/mouse drops its link (sleep, range, power) or isn't around at boot, with one GAP scan/connect at a time so the two slots and the scanner never collide in the SoftDevice
+- [x] Release any key or mouse button a device was holding when its link drops, so nothing sticks or auto-repeats on the PC
+- [x] Wake a sleeping PC from the Bluetooth keyboard/mouse (USB remote wakeup)
+- [x] Track USB unplug/replug via the SoftDevice's USB power events, and keep the paired-device flash pages outside the linker's code region
+- [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate; the boot log prints the real requirement)
 - [ ] Resolve Renode GPIO→GPIOTE injection for real button presses. **Root-caused** (by running the sim in Renode and logging register writes): embassy-nrf detects edges via the SENSE→DETECT→`LATCH`→GPIOTE-**PORT**-event chain, but Renode's stock `NRF52840_GPIO` drops `DETECTMODE`/`LATCH` writes as "unhandled" and never raises the PORT event — so injected edges are lost. Fix = custom Renode GPIO+GPIOTE peripherals modeling that chain; the sim meanwhile uses a synthetic stimulus.
 - [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags
 - [ ] Monitor-input-aware profile switching across multiple PCs

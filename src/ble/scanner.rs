@@ -32,6 +32,10 @@ pub async fn scan(
     sd: &Softdevice,
     event_tx: &Sender<'_, CriticalSectionRawMutex, BleEvent, 8>,
 ) -> Result<ScanResult, BleErrorTag> {
+    // Wait for any in-flight connection attempt to finish (bounded by
+    // BLE_CONNECT_TIMEOUT_SECS); the SoftDevice can't scan while one is pending.
+    let _gap = crate::ble::GAP_PROCEDURE.lock().await;
+
     info!("BLE scan starting ({} s window)", BLE_SCAN_DURATION_SECS);
     event_tx.send(BleEvent::ScanStarted).await;
 

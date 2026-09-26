@@ -27,6 +27,17 @@ pub const BLE_CONN_EVENT_LENGTH: u16 = 6;
 /// BLE supervision timeout (in 10 ms units). 400 = 4 s.
 pub const BLE_SUP_TIMEOUT: u16 = 400;
 
+/// How long one connection attempt scans for its peer before giving up.
+///
+/// The SoftDevice runs only one GAP scan/connect procedure at a time, so an
+/// attempt holds the radio and a user-requested scan waits for it; this bounds
+/// that wait. 6 s covers at least three of the default 1.7 s scan intervals.
+pub const BLE_CONNECT_TIMEOUT_SECS: u16 = 6;
+
+/// Pause between silent reconnect attempts to a lost or not-yet-seen paired
+/// device, leaving the radio free for a user scan in between.
+pub const BLE_RECONNECT_BACKOFF_MS: u64 = 500;
+
 // USB
 
 /// USB VID/PID - use the "pid.codes" open-source test VID.

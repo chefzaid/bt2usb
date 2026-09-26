@@ -1,0 +1,25 @@
+// GPIO + GPIOTE overlay for the stock nRF52840 platform.
+//
+// Replaces Renode's gpio0/gpio1/gpiote with the models in
+// renode/nrf52840_sense_gpio.cs, which implement the pin SENSE -> LATCH ->
+// DETECT -> GPIOTE PORT event chain that embassy-nrf uses for async edge waits.
+// Same names, addresses and IRQ as platforms/cpus/nrf52840.repl.
+//
+// A platform file can't redeclare an existing peripheral, so load it after the
+// stock platform, once the stock models are unregistered:
+//
+//   include @renode/nrf52840_sense_gpio.cs
+//   machine LoadPlatformDescription @platforms/cpus/nrf52840.repl
+//   sysbus Unregister sysbus.gpiote
+//   sysbus Unregister sysbus.gpio0
+//   sysbus Unregister sysbus.gpio1
+//   machine LoadPlatformDescription @renode/nrf52840-sense-gpio.repl
+
+gpio0: GPIOPort.NRF52840_SenseGPIO @ sysbus 0x50000500
+
+gpio1: GPIOPort.NRF52840_SenseGPIO @ sysbus 0x50000800
+
+gpiote: GPIOPort.NRF52840_SenseGPIOTE @ sysbus 0x40006000
+    port0: gpio0
+    port1: gpio1
+    -> nvic@6

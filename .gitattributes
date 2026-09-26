@@ -15,6 +15,7 @@ maskfile.md text eol=lf
 *.resc   text eol=lf
 *.robot  text eol=lf
 *.repl   text eol=lf
+*.cs     text eol=lf
 
 # Rust sources and configs: LF for consistency across Windows/WSL/CI.
 *.rs    text eol=lf

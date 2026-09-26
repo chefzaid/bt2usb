@@ -287,8 +287,8 @@ fi
 
 > Build + run the headless Renode robot test (asserts the sim's UART output)
 
-Boots the sim in Renode (no GUI) and asserts that both pure cores
-(`ble::coordinator` and `ui::ui_logic`) run on the simulated MCU. Suitable for
+Boots the sim in Renode (no GUI), presses the GPIO buttons, and asserts that
+both pure cores (`ble::coordinator` and `ui::ui_logic`) run on the simulated MCU. Suitable for
 CI. Requires `renode-test` on PATH (ships with Renode).
 
 ```bash

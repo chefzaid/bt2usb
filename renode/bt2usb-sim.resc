@@ -3,15 +3,23 @@
 
 # ── What this does ───────────────────────────────────────────────────────────
 # Boots the `bt2usb-sim` binary (built with `--features sim`) on Renode's
-# bundled nRF52840 model. The firmware reuses the real GPIO button driver and
-# the host-tested UI/coordinator logic, driven by a synthetic BLE scenario plus
-# a synthetic button-stimulus task. Human-readable output goes to UART0.
+# bundled nRF52840 model, with its GPIO/GPIOTE swapped for models that
+# implement pin SENSE/LATCH and the GPIOTE PORT event (renode/*.cs, *.repl) so
+# injected button edges reach the firmware. The firmware reuses the real GPIO
+# button driver and the host-tested UI/coordinator logic, driven by a synthetic
+# BLE scenario plus the buttons you press. Human-readable output goes to UART0.
 #
 # Build the ELF first:
 #   mask sim-build   (cargo build --features sim --target thumbv7em-none-eabihf)
 #
-# Interactive run (opens a UART terminal window in the Renode GUI):
+# Interactive run (opens a UART terminal window in the Renode GUI), from the
+# repository root:
 #   renode renode/bt2usb-sim.resc
+#
+# Press a button in the monitor. Buttons are active-low (pulled up): drive the
+# pin low to press, high to release. SELECT = 24, DOWN = 12, UP = 11 (P0.xx):
+#   gpio0 OnGPIO 24 false     # press SELECT
+#   gpio0 OnGPIO 24 true      # release SELECT
 #
 # Headless / CI run (asserts the output, no GUI):
 #   renode-test renode/bt2usb-sim.robot
@@ -22,8 +30,16 @@ $bin ?= @target/thumbv7em-none-eabihf/debug/bt2usb-sim
 
 using sysbus
 
+# GPIO/GPIOTE models with pin SENSE/LATCH + GPIOTE PORT event (compiled here).
+include @renode/nrf52840_sense_gpio.cs
+
 mach create "bt2usb-sim"
 machine LoadPlatformDescription @platforms/cpus/nrf52840.repl
+# Swap the stock GPIO/GPIOTE (no SENSE/LATCH, no PORT event) for the models above.
+sysbus Unregister sysbus.gpiote
+sysbus Unregister sysbus.gpio0
+sysbus Unregister sysbus.gpio1
+machine LoadPlatformDescription @renode/nrf52840-sense-gpio.repl
 
 # Show UART0 output (the firmware's log) in a terminal window.
 showAnalyzer sysbus.uart0
@@ -36,8 +52,10 @@ runMacro $reset
 
 echo ""
 echo "bt2usb-sim loaded. UART0 output (coordinator + UI logic) appears in the"
-echo "analyzer window once started. The firmware drives its own button/BLE"
-echo "stimulus, so transitions appear automatically — no input needed."
+echo "analyzer window once started. The BLE scenario runs on its own; press the"
+echo "buttons (active-low; SELECT=24, DOWN=12, UP=11) to drive the UI, e.g.:"
+echo "    gpio0 OnGPIO 24 false     # press SELECT"
+echo "    gpio0 OnGPIO 24 true      # release SELECT"
 echo ""
 
 start

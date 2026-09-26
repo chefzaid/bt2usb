@@ -303,6 +303,10 @@ The SoftDevice-free `sim` build boots on a simulated nRF52840 in
 (`ble::coordinator`, `ui::ui_logic`) plus the GPIO/timer drivers and boot path —
 no hardware. It excludes the SoftDevice, USB, and flash stacks (those need real
 silicon) and logs to UART0, which Renode prints directly (no probe or decoder).
+Renode's nRF52840 GPIO/GPIOTE are swapped for small custom models
+(`renode/nrf52840_sense_gpio.cs` + `renode/nrf52840-sense-gpio.repl`, compiled
+by Renode at load time) that implement the pin-sense/`LATCH`/PORT-event chain
+embassy-nrf waits on, so button presses are real GPIO edges.
 
 **1. Build the sim firmware** (just needs the ARM target; no probe/board):
 
@@ -337,7 +341,15 @@ mask sim                  # builds + launches Renode with renode/bt2usb-sim.resc
 ```
 
 A UART0 terminal streams the firmware log — the coordinator and UI reducer
-running on the simulated MCU:
+running on the simulated MCU. The BLE scenario advances on its own; press the
+buttons from the Renode monitor. They're active-low with pull-ups (SELECT =
+P0.24, DOWN = P0.12, UP = P0.11), so drive the pin low to press and high to
+release:
+
+```
+(bt2usb-sim) gpio0 OnGPIO 24 false     # press SELECT
+(bt2usb-sim) gpio0 OnGPIO 24 true      # release SELECT
+```
 
 ```
 entering sim UI loop (screen=Home)
@@ -346,18 +358,21 @@ scenario: connect device 0 (Keyboard)
   action: UI Connected 'Keyboard'
 button Select -> screen Scanning (selected 0)
   cmd: StartScan
+  scan: 2 devices -> screen DeviceList
 ```
 
-**3b. Run it headless (CI):** the robot test boots the sim and asserts the
-expected UART output, exiting non-zero on failure:
+**3b. Run it headless (CI):** the robot test boots the sim, presses SELECT,
+DOWN, UP and SELECT through the GPIO pins, and asserts the expected UART output
+(screen transitions plus the coordinator scenario), exiting non-zero on failure:
 
 ```bash
 mask sim-test             # → renode-test renode/bt2usb-sim.robot
 ```
 
-Buttons are driven by a synthetic stimulus task because injected GPIO edges
-don't reach embassy-nrf's GPIOTE wait under Renode; on real hardware the buttons
-drive `ui_logic` directly.
+The presses go through the same path as on hardware: pin edge → SENSE/`LATCH`
+→ GPIOTE PORT interrupt → `ui::buttons` task (with its debounce) →
+`BUTTON_CHANNEL` → `ui_logic`. The sim has no radio, so a scan "completes"
+immediately with the scenario's two devices.
 
 ---
 
@@ -425,7 +440,7 @@ sequenceDiagram
 - [x] Wake a sleeping PC from the Bluetooth keyboard/mouse (USB remote wakeup)
 - [x] Track USB unplug/replug via the SoftDevice's USB power events, and keep the paired-device flash pages outside the linker's code region
 - [ ] Verify the SoftDevice RAM reservation against the value reported at `enable` on real hardware and tune `memory_sd.x` (currently a design estimate; the boot log prints the real requirement)
-- [ ] Resolve Renode GPIO→GPIOTE injection for real button presses. **Root-caused** (by running the sim in Renode and logging register writes): embassy-nrf detects edges via the SENSE→DETECT→`LATCH`→GPIOTE-**PORT**-event chain, but Renode's stock `NRF52840_GPIO` drops `DETECTMODE`/`LATCH` writes as "unhandled" and never raises the PORT event — so injected edges are lost. Fix = custom Renode GPIO+GPIOTE peripherals modeling that chain; the sim meanwhile uses a synthetic stimulus.
+- [x] Real button presses in the Renode simulation. embassy-nrf detects edges via the SENSE→DETECT→`LATCH`→GPIOTE-**PORT**-event chain, which Renode's stock `NRF52840_GPIO` doesn't model (it drops `DETECTMODE`/`LATCH` writes and never raises the PORT event). Custom Renode GPIO+GPIOTE peripherals (`renode/nrf52840_sense_gpio.cs`) now model that chain, so edges injected with `gpio0 OnGPIO <pin> <level>` drive the real button tasks — the synthetic stimulus task is gone, and the robot test presses SELECT/DOWN/UP and asserts the resulting screen transitions
 - [x] CI/CD pipeline for build, test, and firmware release with GitHub Actionsn uses the headless Renode simulation test, then publishes the firmware ELF + Intel HEX on `v*` tags
 - [ ] Monitor-input-aware profile switching across multiple PCs
 - [ ] Multiple BLE profile sets

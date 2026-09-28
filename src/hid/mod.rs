@@ -5,12 +5,14 @@
 //! is no separate host reimplementation. `defmt::Format` is derived only when
 //! the `defmt` feature is on (firmware builds).
 
+pub mod aggregate;
 pub mod coalesce;
 pub mod consumer;
-pub mod held;
+pub mod delivery;
 pub mod keyboard;
 pub mod mouse;
 pub mod report_protocol;
+pub mod wake;
 
 use report_protocol::{HidDescriptor, ReportKind};
 
@@ -50,9 +52,9 @@ impl HidReport {
 
 pub fn classify_report(report_id: u8, data: &[u8]) -> Option<HidReport> {
     match report_id {
-        1 => keyboard::KeyboardReport::from_ble_bytes(data).map(HidReport::Keyboard),
-        2 => mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse),
-        3 => consumer::ConsumerReport::from_ble_bytes(data).map(HidReport::Consumer),
+        1 => parse_by_kind(ReportKind::Keyboard, data),
+        2 => parse_by_kind(ReportKind::Mouse, data),
+        3 => parse_by_kind(ReportKind::Consumer, data),
         _ => infer_from_length(data),
     }
 }
@@ -66,26 +68,23 @@ pub fn classify_notification_with_hint(
     descriptor: Option<&HidDescriptor>,
 ) -> Option<HidReport> {
     if let Some(desc) = descriptor {
-        if desc.has_report_ids() && data.len() > 1 {
-            let report_id = data[0];
-            if let Some(kind) = desc.report_kind_for_id(report_id) {
-                // Descriptor recognises this report ID — parse with type info.
-                if let Some(report) = parse_by_kind(kind, &data[1..]) {
-                    return Some(report);
-                }
-            }
-            // Descriptor has report IDs but this ID is unrecognised.
-            // Still strip the first byte and try standard ID-based classification
-            // (handles devices that send report types not listed in the descriptor).
-            // Do NOT fall through to the length-based heuristic because the raw
-            // payload includes a report-ID prefix that would be misinterpreted.
-            return classify_report(report_id, &data[1..]);
+        if desc.has_report_ids() {
+            let (&report_id, payload) = data.split_first()?;
+            // Descriptor IDs are device-defined, not conventional 1/2/3 IDs.
+            // Unknown IDs or malformed known reports must not become another
+            // endpoint's input through a length-based fallback.
+            return parse_by_kind(desc.report_kind_for_id(report_id)?, payload);
         }
 
-        // Descriptor present but no report IDs — boot-protocol device.
-        if let Some(report) = classify_report(0, data) {
-            return Some(report);
-        }
+        // No prefix is declared. Only route to a kind actually advertised;
+        // having no report IDs alone does not imply the boot report layout.
+        let report = classify_report(0, data)?;
+        return match report {
+            HidReport::Keyboard(_) if desc.has_keyboard => Some(report),
+            HidReport::Mouse(_) if desc.has_mouse => Some(report),
+            HidReport::Consumer(_) if desc.has_consumer => Some(report),
+            _ => None,
+        };
     }
 
     // No descriptor available — heuristic fallback.
@@ -103,15 +102,41 @@ pub fn classify_known(kind: ReportKind, data: &[u8]) -> Option<HidReport> {
     parse_by_kind(kind, data)
 }
 
-fn parse_by_kind(kind: ReportKind, data: &[u8]) -> Option<HidReport> {
+/// Classify a HID-over-GATT Report characteristic value. GATT values never
+/// carry the Report ID prefix: the Report Reference descriptor supplies it.
+/// Numbered maps require a recognized characteristic kind. Unnumbered maps
+/// constrain the fallback to advertised kinds, still without stripping byte 0.
+pub fn classify_gatt_notification(
+    data: &[u8],
+    kind: Option<ReportKind>,
+    descriptor: Option<&HidDescriptor>,
+) -> Option<HidReport> {
     match kind {
-        ReportKind::Keyboard => {
+        Some(kind) => classify_known(kind, data),
+        None => match descriptor {
+            Some(desc) if !desc.has_report_ids() => {
+                classify_notification_with_hint(data, Some(desc))
+            }
+            Some(_) => None,
+            None => classify_report(0, data),
+        },
+    }
+}
+
+fn parse_by_kind(kind: ReportKind, data: &[u8]) -> Option<HidReport> {
+    // These decoders support only fixed byte-aligned layouts. Silently taking
+    // the first bytes of NKRO/16-bit-axis reports generates unintended input.
+    match (kind, data.len()) {
+        (ReportKind::Keyboard, keyboard::KEYBOARD_REPORT_SIZE) => {
             keyboard::KeyboardReport::from_ble_bytes(data).map(HidReport::Keyboard)
         }
-        ReportKind::Mouse => mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse),
-        ReportKind::Consumer => {
+        (ReportKind::Mouse, 3..=mouse::MOUSE_REPORT_SIZE) => {
+            mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse)
+        }
+        (ReportKind::Consumer, consumer::CONSUMER_REPORT_SIZE) => {
             consumer::ConsumerReport::from_ble_bytes(data).map(HidReport::Consumer)
         }
+        _ => None,
     }
 }
 
@@ -122,7 +147,7 @@ fn classify_report_id_prefix(data: &[u8]) -> Option<HidReport> {
 
     let payload = &data[1..];
     match data[0] {
-        1 if payload.len() >= keyboard::KEYBOARD_REPORT_SIZE => {
+        1 if payload.len() == keyboard::KEYBOARD_REPORT_SIZE => {
             keyboard::KeyboardReport::from_ble_bytes(payload).map(HidReport::Keyboard)
         }
         2 if (3..=mouse::MOUSE_REPORT_SIZE).contains(&payload.len()) => {

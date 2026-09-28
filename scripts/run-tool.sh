@@ -38,23 +38,7 @@ resolve_tool_path() {
 		candidates+=("/mnt/c/Users/${USERNAME}/.cargo/bin/${name}" "/mnt/c/Users/${USERNAME}/.cargo/bin/${name}.exe")
 	fi
 
-	if [ -d "/mnt/c/Users" ]; then
-		local user_dir
-		for user_dir in /mnt/c/Users/*; do
-			if [ -d "$user_dir/.cargo/bin" ]; then
-				candidates+=("$user_dir/.cargo/bin/${name}" "$user_dir/.cargo/bin/${name}.exe")
-			fi
-		done
-	fi
-
-	if [ -d "/c/Users" ]; then
-		local user_dir
-		for user_dir in /c/Users/*; do
-			if [ -d "$user_dir/.cargo/bin" ]; then
-				candidates+=("$user_dir/.cargo/bin/${name}" "$user_dir/.cargo/bin/${name}.exe")
-			fi
-		done
-	fi
+	# Never execute a tool from another user's profile as a PATH fallback.
 
 	local candidate
 	for candidate in "${candidates[@]}"; do
@@ -64,11 +48,26 @@ resolve_tool_path() {
 		fi
 	done
 
+	# WSL may have a different Linux username and no USERPROFILE/USERNAME.
+	# Ask Windows for the current user's profile instead of scanning every user.
+	if command -v wslpath >/dev/null 2>&1 && command -v cmd.exe >/dev/null 2>&1; then
+		local windows_profile windows_profile_unix
+		if windows_profile="$(cmd.exe /d /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r')" &&
+			windows_profile_unix="$(wslpath -u "$windows_profile" 2>/dev/null)"; then
+			for candidate in "$windows_profile_unix/.cargo/bin/$name" "$windows_profile_unix/.cargo/bin/$name.exe"; do
+				if [ -x "$candidate" ]; then
+					printf '%s\n' "$candidate"
+					return 0
+				fi
+			done
+		fi
+	fi
+
 	return 1
 }
 
 if ! resolved="$(resolve_tool_path "$tool")"; then
-	echo "Error: '$tool' was not found in PATH or common Rust install locations." >&2
+	echo "Error: '$tool' was not found in PATH or the current user's Rust install locations." >&2
 	echo "Install Rust via rustup and ensure ~/.cargo/bin is available to your shell." >&2
 	exit 127
 fi

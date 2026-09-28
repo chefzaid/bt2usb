@@ -4,13 +4,18 @@ Work through this top to bottom the first time bt2usb goes onto a new board.
 Each step says what to look for, so a problem shows up at the stage that
 causes it instead of as "the keyboard doesn't work".
 
-Everything except BLE radio behaviour and USB enumeration is already covered
-without hardware: host tests (`mask test`), the embedded build and clippy, and
-the Renode simulation (`mask sim-test`). This list covers what only real
-silicon can show.
+Host tests (`mask test`), embedded build/lint checks, and the Renode simulation
+(`mask sim-test`) cover shared logic and selected simulated paths. Real radio,
+USB, flash behavior, I2C wiring, power, timing, and interoperability still need
+this board checklist. See [Testing](TESTING.md) for the coverage boundaries.
 
 Tick each box as you go. Write down the numbers the log gives you (SoftDevice
 RAM, stack high-water); they feed back into the configuration.
+
+Save a separate copy of the completed checklist with the firmware commit/tag,
+ELF hash, board revision, SoftDevice version, peripheral models, host OS, and
+monitor/hub model. Mark skipped checks explicitly. Expected results below are
+acceptance targets, not a claim that every device combination has passed.
 
 ## 0. Before you start
 
@@ -38,6 +43,10 @@ RAM, stack high-water); they feed back into the configuration.
 - [ ] `mask probe-list` shows the probe.
 
 ## 1. SoftDevice (once per board)
+
+Obtain `s140_nrf52_7.3.0_softdevice.hex` from Nordic's S140 v7.3.0 distribution
+and place it in the project root, or substitute its full path in the command.
+Record the source/version and archive hash with the test evidence.
 
 ```bash
 probe-rs download s140_nrf52_7.3.0_softdevice.hex --chip nRF52840_xxAA --format hex
@@ -71,7 +80,7 @@ types on the PC: the only HID report it sends is an all-zero mouse report.
 - [ ] Recorded: SoftDevice RAM = ______ bytes. If it is well below 24576,
       nrf-softdevice also prints the exact RAM start that would free the rest.
       Tightening `memory_sd.x` is optional (there's ample RAM), but the value
-      closes the README roadmap item.
+      informs the memory-budget task in [TODO.md](../TODO.md).
 - [ ] Self-test: 0 failed.
 
 ## 3. Real firmware
@@ -81,7 +90,8 @@ mask run --release
 ```
 
 - [ ] Log shows `SoftDevice started`, `USB HID device started`,
-      `OLED display initialised`, `Entering UI main loop`, with no panic.
+      `UI and isolated OLED tasks started`, and `OLED initialized/recovered`,
+      with no panic.
 - [ ] `USB configured by host: true` appears, and the PC lists the device
       (keyboard, mouse and consumer-control interfaces).
 - [ ] The OLED shows the Home screen.
@@ -96,6 +106,8 @@ Do these with the nRF USB port still plugged straight into the PC.
 - [ ] **Pair a mouse** the same way. Both keep working at once, and the OLED
       shows "2 devices".
 - [ ] **Media keys** (volume, play/pause) work, if the keyboard has them.
+- [ ] **Five-button mouse / horizontal scroll:** each supported extra button and
+      scroll direction works; mark unsupported peripheral features as skipped.
 - [ ] **Caps Lock LED:** press Caps Lock; the keyboard's own LED follows
       (for keyboards that have one and accept LED writes over BLE).
 - [ ] **Reboot reconnect:** press the DK's reset button. Both devices come
@@ -110,9 +122,13 @@ Do these with the nRF USB port still plugged straight into the PC.
 - [ ] **No stuck keys:** hold a key down, and while holding it switch the
       keyboard off (or pull its battery). Within about 4 s the key stops
       repeating on the PC.
+- [ ] **No stuck mouse/media input:** repeat link-loss tests while holding a
+      mouse button and a consumer-control key. Record release latency.
 - [ ] **Scan while reconnecting:** with one device switched off (so its slot
-      is retrying), press SELECT to scan. The scan still runs (it may start up
-      to 6 s late) and lists nearby devices.
+      is retrying), press SELECT to scan. The scan still runs after queued radio
+      procedures complete and lists nearby devices. Record the observed delay;
+      each connection/resolution scan has a 6-second timeout, but contention
+      between slots can add to the total wait.
 - [ ] **Stack:** after all of the above, the latest `stack high-water` line is
       well under half of the total. Recorded: ______ bytes.
 
@@ -127,20 +143,64 @@ connected for logs.
 - [ ] **Unplug/replug:** unplug the nRF USB cable for a few seconds and plug
       it back in, with the board kept powered from the debugger. The log shows
       `USB configured by host: true` again, and typing works.
+- [ ] **Input during USB outage:** hold/release keys and mouse buttons during
+      the outage, then reconnect USB. The host has no lingering held input.
+      Repeat with both BLE links active and sustained mouse movement.
 - [ ] **PC sleep and wake:** put the PC to sleep and press a key on the BLE
       keyboard. The log shows `USB remote wakeup sent` and the PC wakes.
       (If it shows "not possible" instead, the OS hasn't allowed this device
       to wake the PC: on Windows, Device Manager → the keyboard → Power
       Management → "Allow this device to wake the computer".)
+- [ ] **Wake filtering:** mouse movement/scroll, releasing an already-held input,
+      and BLE disconnect cleanup do not wake the host. A newly pressed mouse
+      button or consumer-control key requests wake when permitted by the host.
+- [ ] **Independent USB interfaces:** with an unpolled or fault-injected endpoint,
+      the other interfaces continue delivering input. When the endpoint becomes
+      available again, current held/released state is restored without replaying
+      mouse motion. Record the USB capture and observed recovery time.
 - [ ] **BIOS / boot menu:** reboot the PC and enter its firmware setup with
       the BLE keyboard. This works once the keyboard has reconnected after the
       board powers up, which is when the monitor powers its hub.
 - [ ] **Monitor off and on:** turn the monitor off and on. The board
       power-cycles with the hub, then the devices reconnect by themselves.
+- [ ] **Unit identity:** record the 16-character USB serial. It remains the same
+      after reflash and changing ports; if a second board is available, its
+      factory-derived serial differs.
 
-## 6. Afterwards
+## 6. Device management and degraded display
+
+Run destructive pairing tests on test devices whose records can be recreated.
+These are logical management checks; they do not establish physical key erasure.
+
+- [ ] **Cancel by default:** press UP from Home/Connected/Error, choose a saved
+      device, then press SELECT twice. The first press opens confirmation and
+      the second chooses the default Cancel; the record remains.
+- [ ] **Forget one peer:** open its confirmation, press DOWN to choose Forget,
+      then SELECT. The affected link/input state clears, the success notice is
+      retained, and other saved peers remain. Reset the board and confirm the
+      forgotten device does not reconnect until explicitly paired again.
+- [ ] **Factory reset:** choose the final saved-list entry, then DOWN and SELECT
+      in its confirmation. After the success notice and reboot, no prior peer
+      auto-reconnects. Re-pair the test keyboard/mouse afterwards.
+- [ ] **Failure reporting:** inject a flash write failure in a controlled test.
+      The UI retains a storage error and does not report deletion/enrollment
+      success. Record cached/persistent state and behavior after reboot.
+- [ ] **Two sources sharing an endpoint:** if available, hold overlapping keys
+      or mouse buttons on two devices. Releasing/disconnecting one preserves the
+      other's held state. More than six unique keyboard keys produces rollover;
+      consumer input follows lowest-active-slot priority. Record supported pairs.
+- [ ] **OLED failure isolation:** with power off, disconnect the test display,
+      then boot with previously paired peripherals. BLE/USB input still works
+      and display errors/retries appear in logs. Reconnect wiring only with power
+      off, then verify normal display behavior after boot. Live-bus recovery
+      requires a controlled fault-injection fixture and a separate result record.
+
+## 7. Afterwards
 
 - [ ] If the SoftDevice RAM value let you tighten `memory_sd.x`, commit that
-      and tick the README roadmap item.
+      with the recorded memory/stack margin evidence, and update the applicable
+      [TODO.md](../TODO.md) task.
 - [ ] Note anything that didn't behave as described here in an issue, with
-      the RTT log around it.
+      the sanitized RTT log around it. Do not include bond keys or private input.
+- [ ] Archive the completed result record; leave this template unchecked for
+      the next board or release. Review remaining [release gates](OPERATIONS.md).

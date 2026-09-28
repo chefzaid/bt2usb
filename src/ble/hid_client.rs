@@ -14,13 +14,13 @@
 //! The `#[gatt_client]` macro can only bind a single characteristic per UUID,
 //! so this uses a hand-rolled [`gatt_client::Client`] implementation instead.
 
+use super::long_read::{EndOfValue, LongRead, ReadFailure, MAX_ATTRIBUTE_LEN};
 use crate::ble::BleErrorTag;
 use crate::hid;
 use crate::hid::coalesce::ReportCoalescer;
-use crate::hid::held::HeldInputs;
+use crate::hid::delivery::HidEvent;
 use crate::hid::keyboard::KeyboardLeds;
 use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, ReportType};
-use crate::hid::HidReport;
 use crate::usb::hid_device::LedReceiver;
 use core::cell::RefCell;
 use defmt::{info, warn};
@@ -32,7 +32,7 @@ use heapless::Vec;
 use nrf_softdevice::ble::gatt_client::{
     self, Characteristic, Client, Descriptor, DiscoverError, HvxType,
 };
-use nrf_softdevice::ble::{Connection, Uuid};
+use nrf_softdevice::ble::{Connection, GattError, Uuid};
 
 // HID-over-GATT 16-bit UUIDs.
 const UUID_HID_SERVICE: u16 = 0x1812;
@@ -160,9 +160,10 @@ impl Client for HidServiceClient {
             .iter()
             .find(|s| s.value_handle == handle)?;
 
+        // Truncating an unsupported report can turn it into a different valid
+        // input (for example the prefix of a long keyboard report). Reject it.
         let mut buf: Vec<u8, MAX_REPORT_LEN> = Vec::new();
-        let n = data.len().min(buf.capacity());
-        let _ = buf.extend_from_slice(&data[..n]);
+        buf.extend_from_slice(data).ok()?;
         Some(ReportNotification {
             kind: sub.kind,
             data: buf,
@@ -199,14 +200,24 @@ impl HidServiceClient {
             // No CCCD → not a notifiable input. If it's an Output report, it's the
             // keyboard LED sink we write host Caps/Num/Scroll state to.
             let Some(cccd) = report.cccd_handle else {
-                let is_output =
-                    matches!(report_ref, Some(r) if r.report_type == ReportType::Output);
+                let is_output = matches!(report_ref, Some(r)
+                if r.report_type == ReportType::Output
+                    && descriptor.is_some_and(|d| {
+                        d.report_kind_for_id(r.report_id) == Some(ReportKind::Keyboard)
+                            || (!d.has_report_ids() && d.has_keyboard && !d.has_mouse && !d.has_consumer)
+                    }));
                 if is_output && self.keyboard_led_handle.is_none() {
                     self.keyboard_led_handle = Some(report.value_handle);
                     info!("Found keyboard LED output report");
                 }
                 continue;
             };
+
+            // A CCCD does not override an explicit Output/Feature direction.
+            // Never turn an arbitrary notifiable output into host input.
+            if report_ref.is_some_and(|r| !r.is_input()) {
+                continue;
+            }
 
             // Input report: resolve its kind from the Report Reference mapped
             // through the Report Map's report-ID table. Anything we can't resolve
@@ -215,6 +226,10 @@ impl HidServiceClient {
             let kind = report_ref
                 .filter(ReportReference::is_input)
                 .and_then(|r| descriptor.and_then(|d| d.report_kind_for_id(r.report_id)));
+            if descriptor.is_some_and(HidDescriptor::has_report_ids) && kind.is_none() {
+                warn!("Skipping unknown or ambiguous HID report reference");
+                continue;
+            }
 
             // Enable notifications (write 0x0001 to the CCCD).
             match gatt_client::write(conn, cccd, &[0x01, 0x00]).await {
@@ -256,26 +271,49 @@ impl HidServiceClient {
 }
 
 /// Read and parse the Report Map (0x2A4B) so report IDs can be mapped to kinds.
-async fn read_report_map(conn: &Connection, client: &HidServiceClient) -> Option<HidDescriptor> {
-    let handle = client.report_map_handle?;
-    let mut buf = [0u8; 128];
-    match gatt_client::read(conn, handle, &mut buf).await {
-        Ok(n) => {
-            let desc = HidDescriptor::parse(&buf[..n]);
-            match desc {
-                Some(d) => info!(
-                    "Report map parsed: keyboard={} mouse={} consumer={}",
-                    d.has_keyboard, d.has_mouse, d.has_consumer
-                ),
-                None => warn!("Report map parsing returned no recognized report types"),
+async fn read_report_map(
+    conn: &Connection,
+    client: &HidServiceClient,
+) -> Result<Option<HidDescriptor>, BleErrorTag> {
+    // A missing characteristic is the sole legacy-fallback case. A present but
+    // unreadable/malformed map must never fall through to payload heuristics.
+    let Some(handle) = client.report_map_handle else {
+        warn!("HID report map absent; using legacy report classification");
+        return Ok(None);
+    };
+    let mut read = LongRead::new(conn.att_mtu()).map_err(|_| BleErrorTag::ReportMapReadFailed)?;
+    let mut fragment = [0u8; MAX_ATTRIBUTE_LEN];
+    loop {
+        let result = gatt_client::read_by_offset(conn, handle, read.offset(), &mut fragment).await;
+        let completed = match result {
+            Ok(n) => read.append(&fragment[..n]),
+            Err(gatt_client::ReadError::Gatt(GattError::ATTERR_INVALID_OFFSET)) => {
+                read.finish_at_end(EndOfValue::InvalidOffset).map(|()| true)
             }
-            desc
+            Err(gatt_client::ReadError::Gatt(GattError::ATTERR_ATTRIBUTE_NOT_LONG)) => read
+                .finish_at_end(EndOfValue::AttributeNotLong)
+                .map(|()| true),
+            Err(gatt_client::ReadError::Truncated) => return Err(BleErrorTag::ReportMapTooLarge),
+            Err(_) => return Err(BleErrorTag::ReportMapReadFailed),
         }
-        Err(_) => {
-            warn!("Could not read HID report map");
-            None
+        .map_err(|failure| match failure {
+            ReadFailure::TooLarge => BleErrorTag::ReportMapTooLarge,
+            _ => BleErrorTag::ReportMapReadFailed,
+        })?;
+        if completed {
+            break;
         }
     }
+    let bytes = read.value().ok_or(BleErrorTag::ReportMapReadFailed)?;
+    let descriptor = HidDescriptor::parse(bytes).ok_or(BleErrorTag::ReportMapInvalid)?;
+    info!(
+        "Complete report map ({} bytes): keyboard={} mouse={} consumer={}",
+        bytes.len(),
+        descriptor.has_keyboard,
+        descriptor.has_mouse,
+        descriptor.has_consumer
+    );
+    Ok(Some(descriptor))
 }
 
 /// Discover the HID service and subscribe to all HID Report notifications.
@@ -287,9 +325,10 @@ pub async fn discover_and_subscribe(
 ) -> Result<(HidServiceClient, Option<HidDescriptor>), BleErrorTag> {
     info!("Discovering HID service...");
 
-    let mut client: HidServiceClient = gatt_client::discover(conn)
-        .await
-        .map_err(|_| BleErrorTag::HidNotFound)?;
+    let mut client: HidServiceClient = gatt_client::discover(conn).await.map_err(|err| {
+        warn!("HID discovery failed: {:?}", err);
+        BleErrorTag::HidNotFound
+    })?;
 
     info!(
         "HID service discovered ({} report characteristics)",
@@ -306,7 +345,7 @@ pub async fn discover_and_subscribe(
         }
     }
 
-    let descriptor = read_report_map(conn, &client).await;
+    let descriptor = read_report_map(conn, &client).await?;
 
     client.subscribe_all(conn, descriptor.as_ref()).await?;
 
@@ -329,9 +368,9 @@ pub async fn run_notification_loop(
     conn: &Connection,
     client: &HidServiceClient,
     descriptor: Option<HidDescriptor>,
-    report_tx: &Sender<'_, CriticalSectionRawMutex, HidReport, 16>,
+    report_tx: &Sender<'_, CriticalSectionRawMutex, HidEvent, 16>,
     led_rx: Option<&mut LedReceiver>,
-    held: &mut HeldInputs,
+    source: usize,
 ) {
     info!("HID notification loop started");
 
@@ -346,10 +385,7 @@ pub async fn run_notification_loop(
     // directly (its payload carries no report-ID prefix); otherwise we fall back
     // to the descriptor-guided heuristic.
     let gatt_fut = gatt_client::run(conn, client, |event: ReportNotification| {
-        let parsed = match event.kind {
-            Some(kind) => hid::classify_known(kind, &event.data),
-            None => hid::classify_notification_with_hint(&event.data, descriptor.as_ref()),
-        };
+        let parsed = hid::classify_gatt_notification(&event.data, event.kind, descriptor.as_ref());
         if let Some(report) = parsed {
             coalescer.borrow_mut().push(report);
             wake.signal(());
@@ -363,10 +399,7 @@ pub async fn run_notification_loop(
             // Pop without holding the borrow across the await below.
             let next = coalescer.borrow_mut().pop();
             match next {
-                Some(report) => {
-                    held.note(&report);
-                    report_tx.send(report).await
-                }
+                Some(report) => report_tx.send(HidEvent::Report { source, report }).await,
                 None => wake.wait().await,
             }
         }

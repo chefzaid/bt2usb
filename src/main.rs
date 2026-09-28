@@ -29,11 +29,12 @@
 //! | `ble_task`          | BLE coordinator: scan, slot orchestration, flash persist |
 //! | `ble_slot{0,1}_task`| Per-slot connect/secure + HID notification loop      |
 //! | `usb_device_task`   | USB enumeration and endpoint servicing               |
-//! | `hid_writer_task`   | Forwards BLE reports → USB HID endpoints              |
+//! | `hid_writer_task`   | Dispatches aggregate state to independent USB workers |
+//! | `display_task`      | OLED rendering, initialization and fault recovery    |
 //! | `button_*_task`     | Per-button debounced GPIO watcher (×3)               |
 //!
-//! The UI state machine runs in `main` itself (reacting to button and BLE events
-//! and driving the OLED), not a separate task.
+//! The UI state machine runs in `main`, reacting to button and BLE events and
+//! publishing the latest view to the display task without waiting for I2C.
 
 #![no_std]
 #![no_main]
@@ -65,15 +66,15 @@ use nrf_softdevice::SocEvent;
 
 use crate::ble::multi_conn::{self, SlotCommand, SlotEvent};
 use crate::ble::{BleCommand, BleEvent};
-use crate::hid::HidReport;
+use crate::hid::delivery::HidEvent;
 use crate::power::PowerManager;
 use crate::ui::{ButtonEvent, Screen};
 use crate::usb::hid_device;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Ticker};
 use heapless::Vec;
 
 /// BLE HID reports → USB HID writer.
-static HID_REPORT_CHANNEL: Channel<CriticalSectionRawMutex, HidReport, 16> = Channel::new();
+static HID_REPORT_CHANNEL: Channel<CriticalSectionRawMutex, HidEvent, 16> = Channel::new();
 
 /// UI → BLE commands (scan, connect, disconnect).
 static BLE_CMD_CHANNEL: Channel<CriticalSectionRawMutex, BleCommand, 4> = Channel::new();
@@ -180,6 +181,11 @@ async fn button_select_task(pin: Peri<'static, AnyPin>) -> ! {
     ui::buttons::button_task(pin, ButtonEvent::Select, &BUTTON_CHANNEL.sender()).await
 }
 
+#[embassy_executor::task]
+async fn display_task(twi: twim::Twim<'static, peripherals::TWISPI0>) -> ! {
+    ui::display::run(ui::display::StopSafeI2c::new(twi)).await
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("bt2usb firmware starting");
@@ -232,203 +238,155 @@ async fn main(spawner: Spawner) {
         p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config, twi_tx_buf,
     );
 
-    let mut display = ui::display::init(twi).await;
-    ui::display::draw_home(&mut display, false, "").await;
-    info!("OLED display initialised");
-
+    spawner.spawn(unwrap!(display_task(twi)));
     spawner.spawn(unwrap!(button_up_task(p.P0_11.into())));
     spawner.spawn(unwrap!(button_down_task(p.P0_12.into())));
     spawner.spawn(unwrap!(button_select_task(p.P0_24.into())));
-    info!("Button handlers started (3 buttons)");
+    info!("UI and isolated OLED tasks started");
 
-    info!("Entering UI main loop");
-    let mut screen = Screen::Home;
-    let mut selected: usize = 0;
-    let mut device_count: usize = 0;
-    let mut devices: Vec<heapless::String<32>, 8> = Vec::new();
-    let mut connected_name: heapless::String<32> = heapless::String::new();
+    let mut state = ui::ui_logic::UiState::new();
+    let mut paired: Vec<ble::DiscoveredDevice, 4> = Vec::new();
+    let mut management = ui::ui_logic::ManagementRequests::default();
     let mut power = PowerManager::new();
-    let mut display_powered_off = false;
-    let mut scan_dots: u8 = 0;
-    let mut stack_reported: usize = 0;
+    let mut stack_reported = 0;
+    let mut housekeeping = Ticker::every(Duration::from_secs(1));
+    ui::display::publish(&state, power.display_on());
 
     loop {
+        // Prioritize bus power and maintenance; display work is in another
+        // task and cannot prevent this loop from draining BLE events.
         let action = embassy_futures::select::select4(
+            hid_device::suspend_signal().wait(),
+            housekeeping.next(),
             BUTTON_CHANNEL.receive(),
             BLE_EVENT_CHANNEL.receive(),
-            Timer::after(Duration::from_secs(1)),
-            hid_device::suspend_signal().wait(),
         )
         .await;
-
         match action {
-            embassy_futures::select::Either4::First(btn) => {
-                let was_display_off = !power.display_on();
-                power.activity();
-
-                if was_display_off {
-                    // Wake the OLED panel before redrawing.
-                    if display_powered_off {
-                        ui::display::set_power(&mut display, true).await;
-                        display_powered_off = false;
-                    }
-                    match screen {
-                        Screen::Home => {
-                            ui::display::draw_home(
-                                &mut display,
-                                !connected_name.is_empty(),
-                                connected_name.as_str(),
-                            )
-                            .await
-                        }
-                        Screen::Scanning => ui::display::draw_scanning(&mut display, 0).await,
-                        Screen::DeviceList => {
-                            ui::display::draw_device_list(&mut display, &devices, selected).await
-                        }
-                        Screen::Connected => {
-                            ui::display::draw_connected(&mut display, connected_name.as_str()).await
-                        }
-                        Screen::Error => ui::display::draw_error(&mut display, "Ready").await,
-                    }
-                    continue;
-                }
-
-                // Decide the transition with the pure UI reducer, then apply
-                // its outcome (state + redraw + BLE command).
-                let outcome = ui::ui_logic::on_button(screen, btn, selected, device_count);
-                screen = outcome.screen;
-                selected = outcome.selected;
-                if outcome.reset_devices {
-                    device_count = 0;
-                    devices.clear();
-                }
-                match outcome.redraw {
-                    ui::ui_logic::Redraw::Scanning => {
-                        scan_dots = 0;
-                        ui::display::draw_scanning(&mut display, scan_dots).await;
-                    }
-                    ui::ui_logic::Redraw::DeviceList => {
-                        ui::display::draw_device_list(&mut display, &devices, selected).await;
-                    }
-                    ui::ui_logic::Redraw::Home => {
-                        ui::display::draw_home(&mut display, false, "").await;
-                    }
-                    ui::ui_logic::Redraw::None => {}
-                }
-                if let Some(cmd) = outcome.command {
-                    let ble_cmd = match cmd {
-                        ui::ui_logic::UiCommand::StartScan => BleCommand::StartScan,
-                        ui::ui_logic::UiCommand::Connect(index) => BleCommand::Connect(index),
-                        ui::ui_logic::UiCommand::Disconnect => BleCommand::Disconnect,
-                    };
-                    BLE_CMD_CHANNEL.send(ble_cmd).await;
-                }
-            }
-
-            embassy_futures::select::Either4::Second(event) => match event {
-                BleEvent::ScanStarted => {
-                    if display_powered_off {
-                        ui::display::set_power(&mut display, true).await;
-                        display_powered_off = false;
-                    }
-                    screen = Screen::Scanning;
-                    selected = 0;
-                    device_count = 0;
-                    devices.clear();
-                    scan_dots = 0;
-                    ui::display::draw_scanning(&mut display, scan_dots).await;
-                }
-
-                BleEvent::DeviceFound(dev) => {
-                    if !devices.is_full() {
-                        let _ = devices.push(dev.name.clone());
-                    }
-                    device_count = devices.len();
-                    info!(
-                        "UI: device #{} = {} (RSSI {})",
-                        device_count,
-                        dev.name.as_str(),
-                        dev.rssi
-                    );
-                }
-
-                BleEvent::ScanComplete => {
-                    screen = ui::ui_logic::on_scan_complete(device_count);
-                    if screen == Screen::DeviceList {
-                        selected = selected.min(device_count.saturating_sub(1));
-                        ui::display::draw_device_list(&mut display, &devices, selected).await;
-                    } else {
-                        ui::display::draw_error(&mut display, "No devices found").await;
-                    }
-                }
-
-                BleEvent::Connected(name) => {
-                    screen = Screen::Connected;
-                    devices.clear();
-                    connected_name = name.clone();
-                    power.set_ble_connected(true);
-                    ui::display::draw_connected(&mut display, name.as_str()).await;
-                    info!("UI: connected to {}", name.as_str());
-                }
-
-                BleEvent::Disconnected => {
-                    screen = Screen::Home;
-                    devices.clear();
-                    selected = 0;
-                    device_count = 0;
-                    connected_name.clear();
-                    power.set_ble_connected(false);
-                    ui::display::draw_home(&mut display, false, "").await;
-                    info!("UI: disconnected");
-                }
-
-                BleEvent::Error(tag) => {
-                    screen = Screen::Error;
-                    let msg = match tag {
-                        ble::BleErrorTag::ScanFailed => "Scan failed",
-                        ble::BleErrorTag::ConnectFailed => "Connect failed",
-                        ble::BleErrorTag::HidNotFound => "No HID service",
-                        ble::BleErrorTag::NotifyFailed => "Notify failed",
-                    };
-                    ui::display::draw_error(&mut display, msg).await;
-                }
-            },
-
-            embassy_futures::select::Either4::Third(_) => {
-                power.tick();
-
-                // Report the stack's worst case whenever it grows, so real use
-                // on hardware shows how much headroom is left.
-                let (stack_used, stack_total) = stack::high_water();
-                if stack_used > stack_reported {
-                    stack_reported = stack_used;
-                    info!("stack high-water: {} of {} bytes", stack_used, stack_total);
-                }
-                // Auto-off applies on every screen (the inactivity policy lives
-                // in `PowerManager::display_on`), not just Home — otherwise the
-                // panel would stay lit forever while connected.
-                if !power.display_on() {
-                    if !display_powered_off {
-                        // Turn off the OLED panel at the hardware level to save power.
-                        ui::display::set_power(&mut display, false).await;
-                        display_powered_off = true;
-                    }
-                } else if display_powered_off {
-                    // Power state changed (e.g. BLE event woke us) — turn display back on.
-                    ui::display::set_power(&mut display, true).await;
-                    display_powered_off = false;
-                }
-
-                // Animate the scanning spinner once per tick while scanning.
-                if screen == Screen::Scanning && !display_powered_off {
-                    scan_dots = ui::input_logic::next_scan_dots(scan_dots);
-                    ui::display::draw_scanning(&mut display, scan_dots).await;
-                }
-            }
-
-            embassy_futures::select::Either4::Fourth(suspended) => {
+            embassy_futures::select::Either4::First(suspended) => {
                 power.set_usb_suspended(suspended);
             }
+            embassy_futures::select::Either4::Second(_) => {
+                power.tick();
+                let (used, total) = stack::high_water();
+                if used > stack_reported {
+                    stack_reported = used;
+                    info!("stack high-water: {} of {} bytes", used, total);
+                }
+                if state.screen == Screen::Scanning && power.display_on() {
+                    state.scan_dots = ui::input_logic::next_scan_dots(state.scan_dots);
+                }
+            }
+            embassy_futures::select::Either4::Third(button) => {
+                let was_off = !power.display_on();
+                power.activity();
+                // First press only wakes the screen. USB suspend still wins.
+                if !was_off && !management.is_pending() {
+                    if let Some(command) = state.button(button) {
+                        use ui::ui_logic::UiCommand;
+                        let request_id = if matches!(
+                            command,
+                            UiCommand::ListPaired | UiCommand::Forget(_) | UiCommand::FactoryReset
+                        ) {
+                            management.begin(command)
+                        } else {
+                            None
+                        };
+                        let ble_command = match command {
+                            UiCommand::StartScan => Some(BleCommand::StartScan),
+                            UiCommand::Connect(index) => Some(BleCommand::Connect(index)),
+                            UiCommand::Disconnect => Some(BleCommand::Disconnect),
+                            UiCommand::ListPaired => {
+                                request_id.map(|id| BleCommand::ListPaired { id })
+                            }
+                            UiCommand::Forget(index) => paired.get(index).and_then(|peer| {
+                                request_id.map(|id| BleCommand::Forget {
+                                    id,
+                                    address: peer.address,
+                                })
+                            }),
+                            UiCommand::FactoryReset => {
+                                request_id.map(|id| BleCommand::FactoryReset { id })
+                            }
+                            UiCommand::Dismiss => None,
+                        };
+                        if let Some(ble_command) = ble_command {
+                            // Never deadlock UI and BLE by awaiting a full command
+                            // channel while BLE is awaiting a full event channel.
+                            if BLE_CMD_CHANNEL.try_send(ble_command).is_err() {
+                                state.error("Busy; try again");
+                                if let Some(id) = request_id {
+                                    management.complete(id);
+                                }
+                            }
+                        } else if command != UiCommand::Dismiss {
+                            if let Some(id) = request_id {
+                                management.complete(id);
+                            }
+                            state.error("Device changed; retry");
+                        }
+                    }
+                }
+            }
+            embassy_futures::select::Either4::Fourth(event) => match event {
+                BleEvent::ScanStarted => state.scan_started(),
+                BleEvent::DeviceFound(device) => {
+                    if state.screen == Screen::Scanning {
+                        let _ = state.devices.push(device.name);
+                    }
+                }
+                BleEvent::ScanComplete => state.scan_complete(),
+                BleEvent::Connected(name) => {
+                    power.set_ble_connected(true);
+                    state.connection_status(Some(name));
+                }
+                BleEvent::Disconnected => {
+                    power.set_ble_connected(false);
+                    state.connection_status(None);
+                }
+                BleEvent::Error(tag) => {
+                    state.error(ble_error_message(tag));
+                }
+                BleEvent::PairedDevices { id, devices } => {
+                    if management.complete(id) == Some(ui::ui_logic::UiCommand::ListPaired) {
+                        paired = devices;
+                        state.paired_names.clear();
+                        for peer in &paired {
+                            let _ = state.paired_names.push(peer.name.clone());
+                        }
+                        if state.screen != Screen::Error {
+                            state.screen = Screen::SavedDevices;
+                            state.selected = 0;
+                        }
+                    }
+                }
+                BleEvent::ManagementResult { id, result } => {
+                    if let Some(command) = management.complete(id) {
+                        match result {
+                            Ok(()) => {
+                                paired.clear();
+                                state.management_completed(command);
+                            }
+                            Err(tag) => state.error(ble_error_message(tag)),
+                        }
+                    }
+                }
+            },
         }
+        ui::display::publish(&state, power.display_on());
+    }
+}
+
+fn ble_error_message(tag: ble::BleErrorTag) -> &'static str {
+    match tag {
+        ble::BleErrorTag::ScanFailed => "Scan failed",
+        ble::BleErrorTag::ConnectFailed => "Connect failed",
+        ble::BleErrorTag::HidNotFound => "No HID service",
+        ble::BleErrorTag::NotifyFailed => "Notify failed",
+        ble::BleErrorTag::StorageFailed => "Storage failed",
+        ble::BleErrorTag::ManagementFailed => "Action failed; retry",
+        ble::BleErrorTag::ReportMapReadFailed => "HID map read failed",
+        ble::BleErrorTag::ReportMapTooLarge => "HID map too large",
+        ble::BleErrorTag::ReportMapInvalid => "Unsupported HID map",
     }
 }

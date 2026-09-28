@@ -12,7 +12,7 @@
 //! boot-compatible report layouts), so they also work in BIOS / pre-OS
 //! environments, not only once an OS HID driver has loaded.
 //!
-//! The USB task reads HID reports from the BLE→USB channel and writes
-//! them to the correct HID endpoint.
+//! The USB dispatcher combines source-tagged BLE input and retained state;
+//! independent endpoint workers deliver it without cross-interface blocking.
 
 pub mod hid_device;

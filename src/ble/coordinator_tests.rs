@@ -149,12 +149,28 @@ fn plan_connect_success_reserves_and_emits_connect() {
 }
 
 #[test]
-fn plan_connect_already_connected_is_noop() {
+fn plan_connect_already_connected_acknowledges_without_duplicate_connect() {
     let mut m = mgr();
     m.connect_slot(0, &dev(7, "kb"));
     let devices = [dev(7, "kb")];
     let acts = plan_connect(&mut m, &devices, 0);
-    assert!(acts.is_empty(), "no duplicate connect");
+    assert_eq!(
+        acts.as_slice(),
+        &[Action::Emit(UiEvent::Connected(dev(7, "kb").name))]
+    );
+    assert_eq!(m.active_count(), 1);
+    assert_eq!(m.occupied_count(), 1);
+}
+
+#[test]
+fn plan_connect_already_connecting_waits_for_real_result() {
+    let mut m = mgr();
+    let devices = [dev(7, "kb")];
+    m.reserve_slot(0, &devices[0]);
+    let acts = plan_connect(&mut m, &devices, 0);
+    assert!(acts.is_empty(), "no duplicate worker or premature success");
+    assert_eq!(m.active_count(), 0);
+    assert_eq!(m.occupied_count(), 1);
 }
 
 #[test]
@@ -304,4 +320,45 @@ fn disconnect_while_reconnecting_targets_the_slot() {
     on_slot_link_lost(&mut m, 0, &kb);
     let acts = plan_disconnect(&m);
     assert_eq!(acts.as_slice(), &[Action::DisconnectSlot(0)]);
+}
+
+#[test]
+fn name_only_scan_response_updates_known_hid_even_when_list_is_full() {
+    let mut found = heapless::Vec::<_, 1>::new();
+    assert!(merge_advertisement(
+        &mut found,
+        1u8,
+        -60,
+        &[3, 3, 0x12, 0x18]
+    ));
+    assert_eq!(found[0].name.as_str(), "Unknown");
+    assert!(!merge_advertisement(
+        &mut found,
+        1,
+        -50,
+        &[3, 9, b'K', b'B']
+    ));
+    assert_eq!(found[0].name.as_str(), "KB");
+    assert_eq!(found[0].rssi, -50);
+    assert!(!merge_advertisement(
+        &mut found,
+        2,
+        -20,
+        &[3, 3, 0x12, 0x18]
+    ));
+    assert_eq!(found.len(), 1);
+    assert!(!merge_advertisement(&mut found, 1, -40, &[2, 1, 6]));
+    assert_eq!(found[0].name.as_str(), "KB");
+}
+
+#[test]
+fn name_without_hid_uuid_cannot_enroll_an_unknown_device() {
+    let mut found = heapless::Vec::<_, 2>::new();
+    assert!(!merge_advertisement(
+        &mut found,
+        1u8,
+        -20,
+        &[3, 9, b'K', b'B']
+    ));
+    assert!(found.is_empty());
 }

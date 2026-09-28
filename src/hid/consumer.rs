@@ -11,6 +11,8 @@
 
 /// Consumer control report size (2 bytes for usage ID).
 pub const CONSUMER_REPORT_SIZE: usize = 2;
+/// Maximum usage declared by the USB consumer-control descriptor.
+pub const MAX_CONSUMER_USAGE: u16 = 0x0FFF;
 
 /// Common consumer control usage codes (Usage Page 0x0C).
 #[cfg(test)]
@@ -108,6 +110,9 @@ impl ConsumerReport {
             return None;
         }
         let usage = u16::from_le_bytes([data[0], data[1]]);
+        if usage > MAX_CONSUMER_USAGE {
+            return None;
+        }
         Some(Self { usage })
     }
 

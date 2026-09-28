@@ -8,7 +8,7 @@
 //!
 //! Because this module is free of SoftDevice / Embassy / USB types, it compiles
 //! and runs on the host and is exercised directly by unit tests (the
-//! orchestration layer of the README "Testing Strategy"). It is generic over the
+//! orchestration layer of the docs/TESTING.md). It is generic over the
 //! BLE address type so tests can substitute a trivial stand-in for
 //! `nrf_softdevice::ble::Address`.
 
@@ -28,6 +28,11 @@ pub enum ErrorTag {
     ConnectFailed,
     HidNotFound,
     NotifyFailed,
+    StorageFailed,
+    ManagementFailed,
+    ReportMapReadFailed,
+    ReportMapTooLarge,
+    ReportMapInvalid,
 }
 
 /// Minimal device identity the coordinator needs.
@@ -45,6 +50,36 @@ pub struct DeviceInfo<A> {
     pub address: A,
     pub name: String<32>,
     pub rssi: i8,
+}
+
+/// Merge an advertisement or active-scan response into the bounded result
+/// list. A later name-only response may update an already identified HID peer.
+/// Returns `true` only when a new device was inserted.
+pub fn merge_advertisement<A: PartialEq, const N: usize>(
+    found: &mut Vec<DeviceInfo<A>, N>,
+    address: A,
+    rssi: i8,
+    data: &[u8],
+) -> bool {
+    use crate::ble::adv_parser::{advertised_name, contains_hid_service_uuid, extract_device_name};
+
+    if let Some(existing) = found.iter_mut().find(|d| d.address == address) {
+        if let Some(name) = advertised_name(data) {
+            existing.name = name;
+        }
+        existing.rssi = rssi;
+        return false;
+    }
+    if !contains_hid_service_uuid(data) {
+        return false;
+    }
+    found
+        .push(DeviceInfo {
+            address,
+            name: extract_device_name(data),
+            rssi,
+        })
+        .is_ok()
 }
 
 /// One connection slot.
@@ -107,6 +142,11 @@ impl<A: Clone + PartialEq> ConnManager<A> {
     /// Is the given slot index connected or mid-connect?
     pub fn is_slot_occupied(&self, slot: usize) -> bool {
         slot < MAX_CONNECTIONS && self.slots[slot].is_occupied()
+    }
+
+    /// Identity currently reserved by a slot, including background retries.
+    pub fn slot_address(&self, slot: usize) -> Option<&A> {
+        self.slots.get(slot).and_then(|s| s.address.as_ref())
     }
 
     /// Is this address already in use by an occupied slot?
@@ -234,7 +274,19 @@ pub fn plan_connect<A: Clone + PartialEq>(
     };
 
     if manager.is_connected_address(&device.address) {
-        // Already connected — ignore (no error, no duplicate link).
+        // Selecting an established peer must finish the UI's Connecting state
+        // even though no new worker operation (or flash write) is necessary.
+        if manager
+            .slots
+            .iter()
+            .any(|slot| slot.connected && slot.address.as_ref() == Some(&device.address))
+        {
+            let _ = actions.push(Action::Emit(UiEvent::Connected(connection_summary(
+                manager,
+            ))));
+        }
+        // An in-progress attempt still owns its slot and will publish its own
+        // eventual success/error; never report it as established prematurely.
         return actions;
     }
 

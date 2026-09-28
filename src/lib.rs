@@ -24,22 +24,41 @@ mod ble_coordinator_impl;
 #[path = "ble/reconnect.rs"]
 mod ble_reconnect_impl;
 
+#[path = "ble/long_read.rs"]
+mod ble_long_read_impl;
+#[path = "ble/management.rs"]
+mod ble_management_impl;
+
 // Pure flash-record framing (host-tested independently of the embedded
 // `storage` shell, which is SoftDevice-coupled and not compiled here).
 #[cfg(test)]
 #[path = "storage/framing.rs"]
 mod storage_framing_impl;
 
+#[cfg(test)]
+#[path = "storage/record.rs"]
+mod storage_record_impl;
+
 #[path = "power_logic.rs"]
 mod power_logic_impl;
+#[path = "ui/display_logic.rs"]
+mod ui_display_logic_impl;
 #[path = "ui/input_logic.rs"]
 mod ui_input_logic_impl;
 #[path = "ui/ui_logic.rs"]
 mod ui_ui_logic_impl;
 
 pub mod ble {
+    pub mod long_read {
+        pub use crate::ble_long_read_impl::*;
+    }
+    pub mod management {
+        pub use crate::ble_management_impl::*;
+    }
     pub mod adv_parser {
-        pub use crate::ble_adv_parser_impl::{contains_hid_service_uuid, extract_device_name};
+        pub use crate::ble_adv_parser_impl::{
+            advertised_name, contains_hid_service_uuid, extract_device_name,
+        };
     }
     /// Pure BLE coordination core (connection-slot state machine + reducers).
     pub mod coordinator {
@@ -52,10 +71,13 @@ pub mod ble {
 }
 
 pub mod ui {
+    pub mod display_logic {
+        pub use crate::ui_display_logic_impl::*;
+    }
     pub use crate::ui_ui_logic_impl::{ButtonEvent, Screen};
 
     pub mod input_logic {
-        pub use crate::ui_input_logic_impl::next_scan_dots;
+        pub use crate::ui_input_logic_impl::{device_list_window, next_scan_dots};
     }
 
     /// Pure UI state-machine logic (screen transitions).

@@ -14,6 +14,13 @@ use std::fs;
 use std::path::PathBuf;
 
 fn main() {
+    // These modes have different vector-table origins and critical-section
+    // implementations. Never silently link real firmware with the sim layout.
+    assert!(
+        !(env::var_os("CARGO_FEATURE_SIM").is_some()
+            && env::var_os("CARGO_FEATURE_EMBEDDED").is_some()),
+        "features `embedded` and `sim` are mutually exclusive; build each separately"
+    );
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // The SoftDevice-free `sim` build (Renode) owns the whole device, so it uses

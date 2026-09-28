@@ -23,7 +23,7 @@
 //!   instead of discarding motion.
 //!
 //! This is a pure, hardware-free module (the "functional core"); the async
-//! plumbing that drives it lives in [`crate::ble::hid_client`].
+//! plumbing that drives it lives in the firmware's `crate::ble::hid_client`.
 
 use crate::hid::consumer::ConsumerReport;
 use crate::hid::keyboard::KeyboardReport;

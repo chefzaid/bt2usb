@@ -163,36 +163,38 @@ async fn main(spawner: Spawner) {
         tally.skip("usb hid report", "needs enumeration");
     }
 
-    // 4. OLED. Probe the address first: the display driver ignores I²C errors.
+    // 4. OLED. Probe the address, then check initialization and framebuffer I/O.
     let mut twi_config = twim::Config::default();
     twi_config.sda_pullup = true;
     twi_config.scl_pullup = true;
     static TWI_TX_BUF: static_cell::StaticCell<[u8; 64]> = static_cell::StaticCell::new();
     let twi_tx_buf = TWI_TX_BUF.init([0u8; 64]);
-    let mut twi = twim::Twim::new(
+    let mut twi = ui::display::StopSafeI2c::new(twim::Twim::new(
         p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config, twi_tx_buf,
-    );
+    ));
     // Control byte 0x00 (command stream) + 0xAE (display off): harmless, and
-    // the panel is re-initialised right after.
-    match with_timeout(
-        Duration::from_millis(500),
-        twi.write(OLED_ADDR, &[0x00, 0xAE]),
-    )
-    .await
-    {
-        Ok(Ok(())) => {
+    // the panel is re-initialised right after. A missing panel NACKs here.
+    let probe = embedded_hal_async::i2c::I2c::write(&mut twi, OLED_ADDR, &[0x00, 0xAE]);
+    match ui::display::finish_or_stop(probe).await {
+        Ok(()) => {
             tally.pass("oled i2c", "SSD1306 acknowledged at 0x3C");
-            let mut display = ui::display::init(twi).await;
-            ui::display::draw_home(&mut display, false, "").await;
-            info!("OLED: the Home screen ('bt2usb / Idle') should now be visible");
+            match ui::display::finish_or_stop(ui::display::init(twi)).await {
+                Ok(mut display) => {
+                    if ui::display::finish_or_stop(ui::display::draw_home(&mut display, false, ""))
+                        .await
+                        .is_ok()
+                    {
+                        tally.pass("oled render", "initialization and Home framebuffer sent");
+                    } else {
+                        tally.fail("oled render", "framebuffer transfer failed");
+                    }
+                }
+                Err(_) => tally.fail("oled render", "SSD1306 initialization failed"),
+            }
         }
-        Ok(Err(_)) => tally.fail(
-            "oled i2c",
-            "no ACK at 0x3C: check SDA=P0.26, SCL=P0.27, VCC, GND (or a 0x3D module)",
-        ),
         Err(_) => tally.fail(
             "oled i2c",
-            "bus stuck (500 ms): SDA/SCL shorted or held low",
+            "no ACK at 0x3C: check SDA=P0.26, SCL=P0.27, VCC, GND (or a 0x3D module)",
         ),
     }
 
@@ -230,9 +232,13 @@ async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
     let start = config::STORAGE_FLASH_PAGE_START * PAGE;
     let end = start + config::STORAGE_FLASH_PAGE_COUNT * PAGE;
 
-    let mut flash = nrf_softdevice::Flash::take(sd);
-    let mut map = MapStorage::<u8, _, _>::new(&mut flash, MapConfig::new(start..end), NoCache);
-    let mut buf = [0u8; 64];
+    // Own the flash driver: MultiwriteNorFlash is not implemented for &mut
+    // Flash, and record removal requires that trait.
+    let flash = nrf_softdevice::Flash::take(sd);
+    let mut map = MapStorage::<u8, _, _>::new(flash, MapConfig::new(start..end), NoCache);
+    // The scratch buffer must also fit the existing pairing blob, not just
+    // our 16-byte test record.
+    let mut buf = [0u8; 1024];
 
     match map.fetch_item::<&[u8]>(&mut buf, &0x01).await {
         Ok(Some(saved)) => info!(

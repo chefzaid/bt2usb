@@ -29,8 +29,9 @@ pub async fn button_task(
     let mut btn = Input::new(pin, Pull::Up);
 
     loop {
-        // Wait for falling edge (button press, active-low).
-        btn.wait_for_falling_edge().await;
+        // Level waits also handle a button already pressed at startup, or a
+        // transition that occurred while this task was sending an event.
+        btn.wait_for_low().await;
 
         // Debounce: wait and re-check.
         Timer::after(Duration::from_millis(BUTTON_DEBOUNCE_MS)).await;
@@ -39,9 +40,15 @@ pub async fn button_task(
             info!("Button: {}", event);
             tx.send(event).await;
 
-            // Wait for release to avoid repeat triggers.
-            btn.wait_for_rising_edge().await;
-            Timer::after(Duration::from_millis(BUTTON_DEBOUNCE_MS)).await;
+            // Require a stable released level before re-arming. A release
+            // during channel backpressure must not require another edge.
+            loop {
+                btn.wait_for_high().await;
+                Timer::after(Duration::from_millis(BUTTON_DEBOUNCE_MS)).await;
+                if btn.is_high() {
+                    break;
+                }
+            }
         }
     }
 }

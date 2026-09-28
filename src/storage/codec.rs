@@ -8,9 +8,9 @@ use nrf_softdevice::ble::{Address, AddressType, EncryptionInfo, IdentityKey, Mas
 use nrf_softdevice::raw;
 
 /// Serialized size of a BLE address: 6 address bytes + 1 address-type byte.
-pub(super) const ADDRESS_RECORD_SIZE: usize = 7;
+pub(super) use super::record::ADDRESS_RECORD_SIZE;
 /// Serialized size of a bond record (ediv + rand + ltk + flags + irk + address).
-pub(super) const BOND_RECORD_SIZE: usize = 50;
+pub(super) use super::record::BOND_RECORD_SIZE;
 
 fn address_type_to_byte(address_type: AddressType) -> u8 {
     match address_type {
@@ -22,15 +22,15 @@ fn address_type_to_byte(address_type: AddressType) -> u8 {
     }
 }
 
-fn byte_to_address_type(value: u8) -> AddressType {
-    match value {
+fn byte_to_address_type(value: u8) -> Option<AddressType> {
+    Some(match value {
         0 => AddressType::Public,
         1 => AddressType::RandomStatic,
         2 => AddressType::RandomPrivateResolvable,
         3 => AddressType::RandomPrivateNonResolvable,
         4 => AddressType::Anonymous,
-        _ => AddressType::RandomStatic,
-    }
+        _ => return None,
+    })
 }
 
 pub(super) fn serialize_address(address: Address, buf: &mut [u8]) {
@@ -38,10 +38,13 @@ pub(super) fn serialize_address(address: Address, buf: &mut [u8]) {
     buf[6] = address_type_to_byte(address.address_type());
 }
 
-pub(super) fn deserialize_address(data: &[u8]) -> Address {
+pub(super) fn deserialize_address(data: &[u8]) -> Option<Address> {
+    if data.len() != ADDRESS_RECORD_SIZE {
+        return None;
+    }
     let mut bytes = [0u8; 6];
     bytes.copy_from_slice(&data[0..6]);
-    Address::new(byte_to_address_type(data[6]), bytes)
+    Some(Address::new(byte_to_address_type(data[6])?, bytes))
 }
 
 pub(super) fn serialize_bond(bond: &BondInfo, buf: &mut [u8]) {
@@ -54,7 +57,7 @@ pub(super) fn serialize_bond(bond: &BondInfo, buf: &mut [u8]) {
 }
 
 pub(super) fn deserialize_bond(data: &[u8]) -> Option<BondInfo> {
-    if data.len() < BOND_RECORD_SIZE {
+    if data.len() != BOND_RECORD_SIZE {
         return None;
     }
 
@@ -64,7 +67,7 @@ pub(super) fn deserialize_bond(data: &[u8]) -> Option<BondInfo> {
     ltk.copy_from_slice(&data[10..26]);
     let mut irk = [0u8; 16];
     irk.copy_from_slice(&data[27..43]);
-    let addr = deserialize_address(&data[43..50]);
+    let addr = deserialize_address(&data[43..50])?;
 
     Some(BondInfo {
         master_id: MasterId {

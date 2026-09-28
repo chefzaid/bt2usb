@@ -6,14 +6,14 @@
 use core::cell::RefCell;
 
 use crate::ble::coordinator::{self, Action, ConnManager, UiEvent, MAX_CONNECTIONS};
+use crate::ble::management::Quiescence;
 use crate::ble::scanner::ScanResult;
 use crate::ble::{
     hid_client, reconnect, scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice,
 };
 use crate::config;
 use crate::config::MAX_PAIRED_DEVICES;
-use crate::hid::held::HeldInputs;
-use crate::hid::HidReport;
+use crate::hid::delivery::HidEvent;
 use crate::storage::{BondInfo, PairedDevice, DEVICE_STORE};
 use defmt::{info, warn};
 use embassy_futures::select::{select, Either};
@@ -42,10 +42,16 @@ pub enum SlotCommand {
     /// auto-reconnect). Ends only on success or a new command.
     Reconnect(DiscoveredDevice),
     Disconnect,
+    /// Acknowledge only after the link and automatic retry target are gone.
+    Quiesce(u32),
 }
 
 #[derive(Clone)]
 pub enum SlotEvent {
+    Quiesced {
+        slot: usize,
+        token: u32,
+    },
     Connected {
         slot: usize,
         device: DiscoveredDevice,
@@ -79,7 +85,14 @@ impl Bonder {
         let mut peers = self.peers.borrow_mut();
         peers.clear();
         for bond in bonds {
-            let _ = peers.push(*bond);
+            if let Some(existing) = peers
+                .iter_mut()
+                .find(|p| p.peer_id.addr == bond.peer_id.addr)
+            {
+                *existing = *bond;
+            } else {
+                let _ = peers.push(*bond);
+            }
         }
         info!("Loaded {} BLE bonds into security handler", peers.len());
     }
@@ -90,6 +103,16 @@ impl Bonder {
             .iter()
             .find(|p| p.peer_id.is_match(address))
             .copied()
+    }
+
+    fn forget(&self, address: Address) {
+        self.peers
+            .borrow_mut()
+            .retain(|bond| !bond.peer_id.is_match(address));
+    }
+
+    fn clear(&self) {
+        self.peers.borrow_mut().clear();
     }
 }
 
@@ -104,13 +127,20 @@ impl SecurityHandler for Bonder {
 
     fn on_bonded(
         &self,
-        _conn: &Connection,
+        conn: &Connection,
         master_id: MasterId,
         key: EncryptionInfo,
         peer_id: IdentityKey,
     ) {
         let mut peers = self.peers.borrow_mut();
-        if let Some(existing) = peers.iter_mut().find(|p| p.master_id == master_id) {
+        // MasterId is not a peer identity (LE Secure Connections can use the
+        // same all-zero EDIV/RAND for multiple peers). Re-pairing replaces only
+        // this peer's keys and must not overwrite another keyboard's bond.
+        if let Some(existing) = peers
+            .iter_mut()
+            .find(|p| p.peer_id.addr == peer_id.addr || p.peer_id.is_match(conn.peer_address()))
+        {
+            existing.master_id = master_id;
             existing.key = key;
             existing.peer_id = peer_id;
             return;
@@ -127,11 +157,10 @@ impl SecurityHandler for Bonder {
         });
     }
 
-    fn get_key(&self, _conn: &Connection, master_id: MasterId) -> Option<EncryptionInfo> {
-        self.peers
-            .borrow()
-            .iter()
-            .find_map(|p| (p.master_id == master_id).then_some(p.key))
+    fn get_key(&self, conn: &Connection, master_id: MasterId) -> Option<EncryptionInfo> {
+        self.peers.borrow().iter().find_map(|p| {
+            (p.master_id == master_id && p.peer_id.is_match(conn.peer_address())).then_some(p.key)
+        })
     }
 
     fn get_peripheral_key(&self, conn: &Connection) -> Option<(MasterId, EncryptionInfo)> {
@@ -192,10 +221,16 @@ pub async fn ble_task(
         let mut store = DEVICE_STORE.lock().await;
         store.load_from_flash(&mut flash).await;
         bonder().load_bonds(&store.bonds());
+        if !store.is_writable() {
+            event_tx
+                .send(BleEvent::Error(BleErrorTag::StorageFailed))
+                .await;
+        }
     }
 
     let mut manager = MultiConnectionManager::new();
     let mut last_scan: Option<ScanResult> = None;
+    let mut management_token = 0u32;
 
     // Auto-reconnect the most-recently-used devices (up to the number of
     // connection slots) so a keyboard + mouse pair both come back after a
@@ -283,31 +318,185 @@ pub async fn ble_task(
                         execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
                     }
                 }
+                BleCommand::ListPaired { id } => publish_paired_devices(id, event_tx).await,
+                BleCommand::Forget { id, address } => {
+                    management_token = management_token.wrapping_add(1);
+                    let result = manage_devices(
+                        Some(address),
+                        management_token,
+                        &mut manager,
+                        event_tx,
+                        slot0_tx,
+                        slot1_tx,
+                        slot_event_rx,
+                        &mut flash,
+                    )
+                    .await;
+                    event_tx
+                        .send(BleEvent::ManagementResult { id, result })
+                        .await;
+                }
+                BleCommand::FactoryReset { id } => {
+                    management_token = management_token.wrapping_add(1);
+                    let result = manage_devices(
+                        None,
+                        management_token,
+                        &mut manager,
+                        event_tx,
+                        slot0_tx,
+                        slot1_tx,
+                        slot_event_rx,
+                        &mut flash,
+                    )
+                    .await;
+                    // Explicit reset also invalidates the old discovery snapshot.
+                    last_scan = None;
+                    event_tx
+                        .send(BleEvent::ManagementResult { id, result })
+                        .await;
+                }
             },
-            Either::Second(event) => match event {
-                SlotEvent::Connected { slot, device } => {
-                    for action in coordinator::on_slot_connected(&mut manager, slot, &device) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
-                    }
-                }
-                SlotEvent::Disconnected { slot } => {
-                    for action in coordinator::on_slot_disconnected(&mut manager, slot) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
-                    }
-                }
-                SlotEvent::LinkLost { slot, device } => {
-                    for action in coordinator::on_slot_link_lost(&mut manager, slot, &device) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
-                    }
-                }
-                SlotEvent::Error { slot, tag } => {
-                    for action in coordinator::on_slot_error(&mut manager, slot, tag) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
-                    }
-                }
-            },
+            Either::Second(event) => {
+                handle_slot_event(
+                    event,
+                    &mut manager,
+                    event_tx,
+                    slot0_tx,
+                    slot1_tx,
+                    &mut flash,
+                )
+                .await;
+            }
         }
     }
+}
+
+async fn handle_slot_event(
+    event: SlotEvent,
+    manager: &mut MultiConnectionManager,
+    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
+    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    flash: &mut nrf_softdevice::Flash,
+) {
+    let actions: Vec<Action<Address>, 2> = match event {
+        SlotEvent::Connected { slot, device } => {
+            coordinator::on_slot_connected(manager, slot, &device)
+        }
+        SlotEvent::Disconnected { slot } => coordinator::on_slot_disconnected(manager, slot)
+            .into_iter()
+            .collect(),
+        SlotEvent::LinkLost { slot, device } => {
+            coordinator::on_slot_link_lost(manager, slot, &device)
+                .into_iter()
+                .collect()
+        }
+        SlotEvent::Error { slot, tag } => coordinator::on_slot_error(manager, slot, tag),
+        SlotEvent::Quiesced { .. } => return,
+    };
+    for action in actions {
+        execute_action(action, event_tx, slot0_tx, slot1_tx, flash).await;
+    }
+}
+
+async fn publish_paired_devices(
+    id: u32,
+    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
+) {
+    let devices = {
+        let store = DEVICE_STORE.lock().await;
+        store
+            .iter_recent()
+            .map(|paired| DiscoveredDevice {
+                address: paired.address,
+                name: paired.name.clone(),
+                rssi: paired.last_rssi,
+            })
+            .collect()
+    };
+    event_tx.send(BleEvent::PairedDevices { id, devices }).await;
+}
+
+/// Stop workers before changing persistent identities. Suppress their queued
+/// Connected/LinkLost events until a command-specific barrier confirms that the
+/// BLE link, USB source state and retry target have all been released.
+#[allow(clippy::too_many_arguments)]
+async fn manage_devices(
+    address: Option<Address>,
+    token: u32,
+    manager: &mut MultiConnectionManager,
+    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
+    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
+    flash: &mut nrf_softdevice::Flash,
+) -> Result<(), BleErrorTag> {
+    let paired = if let Some(identity) = address {
+        let store = DEVICE_STORE.lock().await;
+        let Some(paired) = store.find(identity).cloned() else {
+            return Err(BleErrorTag::ManagementFailed);
+        };
+        Some(paired)
+    } else {
+        None
+    };
+    let mut targets = [false; MAX_CONNECTIONS];
+    for (slot, target) in targets.iter_mut().enumerate() {
+        *target = match &paired {
+            None => true,
+            Some(peer) => manager.slot_address(slot).is_some_and(|current| {
+                *current == peer.address
+                    || peer
+                        .bond
+                        .is_some_and(|bond| bond.peer_id.is_match(*current))
+            }),
+        };
+        if *target {
+            send_slot_cmd(slot, SlotCommand::Quiesce(token), slot0_tx, slot1_tx).await;
+        }
+    }
+    let mut barrier = Quiescence::new(targets, token);
+    while !barrier.complete() {
+        let event = slot_event_rx.receive().await;
+        if let SlotEvent::Quiesced { slot, token } = event {
+            if barrier.acknowledge(slot, token) {
+                manager.disconnect_slot(slot);
+            }
+            continue;
+        }
+        let slot = match &event {
+            SlotEvent::Connected { slot, .. }
+            | SlotEvent::Disconnected { slot }
+            | SlotEvent::LinkLost { slot, .. }
+            | SlotEvent::Error { slot, .. } => *slot,
+            SlotEvent::Quiesced { .. } => unreachable!(),
+        };
+        if !barrier.suppresses(slot) {
+            handle_slot_event(event, manager, event_tx, slot0_tx, slot1_tx, flash).await;
+        }
+    }
+    // No targeted worker can reconnect, emit a stale connection save or invoke
+    // a late security callback after its quiescence acknowledgement.
+    let result = {
+        let mut store = DEVICE_STORE.lock().await;
+        match paired.as_ref() {
+            Some(peer) => store.forget(peer.address, flash).await,
+            None => store.factory_reset(flash).await,
+        }
+    };
+    if result.is_ok() {
+        match paired {
+            Some(peer) => bonder().forget(peer.address),
+            None => bonder().clear(),
+        }
+    }
+    let state = if manager.active_count() == 0 {
+        BleEvent::Disconnected
+    } else {
+        BleEvent::Connected(coordinator::connection_summary(manager))
+    };
+    event_tx.send(state).await;
+    result.map_err(|_| BleErrorTag::StorageFailed)
 }
 
 /// Perform the I/O for one coordinator [`Action`]: drive slot workers, persist
@@ -329,15 +518,14 @@ async fn execute_action(
         }
         Action::PersistDevice(device) => {
             let mut store = DEVICE_STORE.lock().await;
-            store.add(PairedDevice::new(
-                device.address,
-                device.name.as_str(),
-                device.rssi,
-            ));
-            if let Some(bond) = bonder().bond_for_address(device.address) {
-                store.set_bond_for_address(device.address, bond);
+            let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
+            paired.bond = bonder().bond_for_address(device.address);
+            store.add(paired);
+            if store.save_to_flash(flash).await.is_err() {
+                event_tx
+                    .send(BleEvent::Error(BleErrorTag::StorageFailed))
+                    .await;
             }
-            store.save_to_flash(flash).await;
         }
         Action::Emit(ui) => {
             let event = match ui {
@@ -361,12 +549,17 @@ enum SlotOutcome {
     Superseded(SlotCommand),
 }
 
+struct ConnectionRequest<'a> {
+    device: &'a DiscoveredDevice,
+    allow_pairing: bool,
+}
+
 pub async fn connection_slot_task(
     slot: usize,
     sd: &'static Softdevice,
     cmd_rx: &Receiver<'static, CriticalSectionRawMutex, SlotCommand, 2>,
     slot_event_tx: &Sender<'static, CriticalSectionRawMutex, SlotEvent, 8>,
-    report_tx: &Sender<'static, CriticalSectionRawMutex, HidReport, 16>,
+    report_tx: &Sender<'static, CriticalSectionRawMutex, HidEvent, 16>,
 ) -> ! {
     let mut pending_cmd: Option<SlotCommand> = None;
     // A paired device this slot keeps trying to reach: set after its link
@@ -398,15 +591,51 @@ pub async fn connection_slot_task(
             }
         };
 
-        let (device, silent) = match cmd {
+        let (mut device, silent) = match cmd {
             SlotCommand::Connect(device) => (device, false),
             SlotCommand::Reconnect(device) => (device, true),
-            SlotCommand::Disconnect => continue,
+            SlotCommand::Disconnect => {
+                slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                continue;
+            }
+            SlotCommand::Quiesce(token) => {
+                slot_event_tx
+                    .send(SlotEvent::Quiesced { slot, token })
+                    .await;
+                continue;
+            }
         };
+
+        if silent {
+            if let Some(bond) = bonder().bond_for_address(device.address) {
+                // RPA rotation can happen at any time, not just at boot. A
+                // whitelist retry against the previous address never recovers.
+                match select(
+                    cmd_rx.receive(),
+                    scanner::resolve_bonded_peer(sd, &bond.peer_id),
+                )
+                .await
+                {
+                    Either::First(next) => {
+                        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                        pending_cmd = Some(next);
+                        continue;
+                    }
+                    Either::Second(Some(address)) => device.address = address,
+                    Either::Second(None) => {
+                        retry = Some(device);
+                        continue;
+                    }
+                }
+            }
+        }
 
         match connect_and_run_secure(
             sd,
-            &device,
+            ConnectionRequest {
+                device: &device,
+                allow_pairing: !silent,
+            },
             report_tx,
             slot_event_tx,
             slot,
@@ -460,13 +689,25 @@ async fn send_slot_cmd(
     }
 }
 
+/// Await the GAP disconnect event before publishing quiescence. Merely queuing
+/// sd_ble_gap_disconnect does not stop in-flight security callbacks.
+async fn close_connection(conn: &Connection) {
+    let _ = conn.disconnect();
+    while conn.handle().is_some() {
+        Timer::after(Duration::from_millis(10)).await;
+    }
+}
+
 async fn wait_for_secure_link(conn: &Connection) -> bool {
     for _ in 0..25 {
+        if conn.handle().is_none() {
+            return false;
+        }
         match conn.security_mode() {
-            SecurityMode::NoAccess | SecurityMode::Open => {
-                Timer::after(Duration::from_millis(200)).await
-            }
-            _ => return true,
+            SecurityMode::JustWorks | SecurityMode::Mitm | SecurityMode::LescMitm => return true,
+            // Signed modes authenticate individual writes but do not encrypt
+            // the link, so they cannot protect incoming HID notifications.
+            _ => Timer::after(Duration::from_millis(200)).await,
         }
     }
     false
@@ -474,13 +715,14 @@ async fn wait_for_secure_link(conn: &Connection) -> bool {
 
 async fn connect_and_run_secure(
     sd: &'static Softdevice,
-    device: &DiscoveredDevice,
-    report_tx: &Sender<'_, CriticalSectionRawMutex, HidReport, 16>,
+    request: ConnectionRequest<'_>,
+    report_tx: &Sender<'_, CriticalSectionRawMutex, HidEvent, 16>,
     slot_event_tx: &Sender<'_, CriticalSectionRawMutex, SlotEvent, 8>,
     slot: usize,
     cmd_rx: &Receiver<'_, CriticalSectionRawMutex, SlotCommand, 2>,
     led_rx: Option<&mut crate::usb::hid_device::LedReceiver>,
 ) -> SlotOutcome {
+    let device = request.device;
     info!("slot {} connecting to {}", slot, device.name.as_str());
 
     let whitelist = [&device.address];
@@ -501,10 +743,8 @@ async fn connect_and_run_secure(
         ..Default::default()
     };
 
-    // Establishment phase. This is intentionally not raced against incoming
-    // commands: until `connect_with_security` returns there is no live
-    // `Connection` to disconnect, so cancelling the future here is leak-free,
-    // and once a link exists we must own it so we can explicitly disconnect it.
+    // `connect_with_security` also performs MTU exchange after the GAP
+    // connection is created, so keep ownership of its future until it returns.
     let conn = {
         // One GAP procedure at a time: the other slot or the scanner may be
         // mid-procedure, and a concurrent connect would fail immediately.
@@ -515,28 +755,37 @@ async fn connect_and_run_secure(
         }
     };
 
-    let secure_ok = match conn.encrypt() {
-        Ok(()) => wait_for_secure_link(&conn).await,
-        Err(EncryptError::PeerKeysNotFound) => {
-            if conn.request_pairing().is_ok() {
-                wait_for_secure_link(&conn).await
-            } else {
-                false
+    let prepare = async {
+        let secure_ok = match conn.encrypt() {
+            Ok(()) => wait_for_secure_link(&conn).await,
+            // A background reconnect must never initiate a replacement pairing.
+            // Fresh pairing is restricted to an explicit user connection.
+            Err(EncryptError::PeerKeysNotFound) if request.allow_pairing => {
+                if conn.request_pairing().is_ok() {
+                    wait_for_secure_link(&conn).await
+                } else {
+                    false
+                }
             }
+            Err(_) => false,
+        };
+        if !secure_ok {
+            warn!("slot {} failed to secure BLE link", slot);
+            return Err(BleErrorTag::ConnectFailed);
         }
-        Err(_) => false,
+        hid_client::discover_and_subscribe(&conn).await
     };
 
-    if !secure_ok {
-        warn!("slot {} failed to secure BLE link", slot);
-        let _ = conn.disconnect();
-        return SlotOutcome::Failed(BleErrorTag::ConnectFailed);
-    }
-
-    let (client, descriptor) = match hid_client::discover_and_subscribe(&conn).await {
-        Ok(v) => v,
-        Err(tag) => {
-            let _ = conn.disconnect();
+    // Once a link is owned, disconnect promptly when the user cancels during
+    // security or GATT discovery, not only after notifications start flowing.
+    let (client, descriptor) = match select(cmd_rx.receive(), prepare).await {
+        Either::First(next_cmd) => {
+            close_connection(&conn).await;
+            return SlotOutcome::Superseded(next_cmd);
+        }
+        Either::Second(Ok(value)) => value,
+        Either::Second(Err(tag)) => {
+            close_connection(&conn).await;
             return SlotOutcome::Failed(tag);
         }
     };
@@ -552,12 +801,11 @@ async fn connect_and_run_secure(
     // against incoming commands. If a command supersedes us, explicitly tear
     // the link down (dropping the future alone does NOT disconnect the radio
     // link in the SoftDevice, which would leak a central connection slot).
-    let mut held = HeldInputs::new();
     let run_fut =
-        hid_client::run_notification_loop(&conn, &client, descriptor, report_tx, led_rx, &mut held);
+        hid_client::run_notification_loop(&conn, &client, descriptor, report_tx, led_rx, slot);
     let outcome = match select(cmd_rx.receive(), run_fut).await {
         Either::First(next_cmd) => {
-            let _ = conn.disconnect();
+            close_connection(&conn).await;
             SlotOutcome::Superseded(next_cmd)
         }
         Either::Second(()) => SlotOutcome::Closed,
@@ -566,8 +814,8 @@ async fn connect_and_run_secure(
     // Whatever this link was holding down on the host (a key, a mouse button)
     // would otherwise stay pressed — and auto-repeat — since its release can
     // no longer arrive over BLE.
-    for release in held.releases() {
-        report_tx.send(release).await;
-    }
+    report_tx
+        .send(HidEvent::Disconnected { source: slot })
+        .await;
     outcome
 }

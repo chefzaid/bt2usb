@@ -114,7 +114,7 @@ artifact hash with this record when preparing a release.
 | Headless Renode scenario | Renode 1.16.1 through WSL | Passed: 1 scenario |
 | Dependency audit | Current locked dependency graph | No vulnerability errors; 2 unmaintained dependency warnings below |
 | Release helper policy/integrity tests | Windows Python 3.14 and WSL Python 3.12 | Passed: 12 tests on each platform |
-| Workflow syntax and expressions | actionlint 1.7.12 (checksum-verified) | Passed locally without the shellcheck integration; the published-release guard's `gh --jq` filter was not executed locally |
+| Workflow syntax and expressions | actionlint 1.7.12 (checksum-verified) with ShellCheck 0.11.0 | Passed locally; the published-release guard's `gh --jq` filter was not executed locally |
 | Clippy with warnings denied | Host tests, embedded, simulation | Passed |
 | Release bridge and self-test builds | Rust 1.95.0, ARM target | Passed |
 | Simulation build | Rust 1.95.0, ARM target | Passed |

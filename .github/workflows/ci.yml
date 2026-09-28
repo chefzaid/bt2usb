@@ -46,11 +46,21 @@ jobs:
         run: cargo fmt --package bt2usb -- --check
       - name: Test release consistency and artifact integrity helpers
         run: python -m unittest discover -s scripts -p "release_test.py" -v
+      # install-action has no actionlint manifest; its cargo-binstall fallback
+      # looks for a nonexistent crate. Fetch the upstream release, pinned by digest.
       - name: Install workflow linter
         if: runner.os == 'Linux'
-        uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
-        with:
-          tool: actionlint@1.7.12
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
+          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/actionlint" actionlint
+          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
       - name: Validate GitHub Actions workflow
         if: runner.os == 'Linux'
         run: actionlint

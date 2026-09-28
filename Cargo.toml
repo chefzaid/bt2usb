@@ -66,7 +66,7 @@ sim = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
 [dependencies]
 # - Embassy async runtime & HAL (embedded only) ---------------
 embassy-executor  = { version = "0.10", features = ["platform-cortex-m", "executor-thread", "defmt"], optional = true }
-embassy-nrf       = { version = "0.7", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac"], optional = true }
+embassy-nrf       = { version = "0.11", features = ["defmt", "nrf52840", "time-driver-rtc1", "gpiote", "unstable-pac"], optional = true }
 embassy-time      = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"], optional = true }
 embassy-usb       = { version = "0.6", features = ["defmt"], optional = true }
 embassy-sync      = { version = "0.7", features = ["defmt"], optional = true }

@@ -41,7 +41,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Check formatting
         run: cargo fmt --package bt2usb -- --check
       - name: Test release consistency and artifact integrity helpers
@@ -95,7 +95,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain + ARM target
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Clippy (embedded, deny warnings)
         run: cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
       - name: Build release firmware
@@ -130,7 +130,7 @@ jobs:
           persist-credentials: false
       - name: Install pinned Rust toolchain + ARM target
         run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: Clippy (simulation, deny warnings)
         run: cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
       - name: Build simulation firmware

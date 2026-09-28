@@ -18,6 +18,8 @@
 // are only compiled into the real firmware (`embedded` feature).
 pub mod adv_parser;
 pub mod coordinator;
+pub mod long_read;
+pub mod management;
 pub mod reconnect;
 
 #[cfg(feature = "embedded")]
@@ -50,6 +52,12 @@ mod softdevice_types {
         Connect(usize),
         /// Disconnect the currently connected peripheral.
         Disconnect,
+        /// Read the current saved-device list for explicit management.
+        ListPaired { id: u32 },
+        /// Forget this stable identity (never a mutable list index).
+        Forget { id: u32, address: Address },
+        /// Deliberately remove all peers, including recovery of unreadable flash.
+        FactoryReset { id: u32 },
     }
 
     /// Events the BLE task publishes for the UI / main loop.
@@ -67,6 +75,15 @@ mod softdevice_types {
         Disconnected,
         /// An error occurred (human-readable tag).
         Error(super::BleErrorTag),
+        PairedDevices {
+            id: u32,
+            devices: heapless::Vec<DiscoveredDevice, { crate::config::MAX_PAIRED_DEVICES }>,
+        },
+        /// Correlated completion; success means the change reached persistent storage.
+        ManagementResult {
+            id: u32,
+            result: Result<(), super::BleErrorTag>,
+        },
     }
 }
 

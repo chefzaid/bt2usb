@@ -30,7 +30,7 @@ pub fn next_power_state(
     ble_connected: bool,
     idle_timeout_secs: u64,
 ) -> PowerState {
-    if usb_suspended || (elapsed_secs > idle_timeout_secs * 2 && !ble_connected) {
+    if usb_suspended || (elapsed_secs > idle_timeout_secs.saturating_mul(2) && !ble_connected) {
         PowerState::LowPower
     } else if elapsed_secs > idle_timeout_secs {
         PowerState::Idle
@@ -84,6 +84,14 @@ mod tests {
     fn usb_suspend_forces_low_power_immediately() {
         // PC asleep → deepest idle regardless of elapsed time or BLE link.
         assert_eq!(next_power_state(0, true, true, IDLE), PowerState::LowPower);
+    }
+
+    #[test]
+    fn large_timeout_does_not_overflow_into_low_power() {
+        assert_eq!(
+            next_power_state(u64::MAX, false, false, u64::MAX),
+            PowerState::Active
+        );
     }
 
     #[test]

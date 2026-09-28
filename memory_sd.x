@@ -1,7 +1,7 @@
 /* Linker script for nRF52840 with SoftDevice S140 v7.3.0
  *
  * The SoftDevice occupies the first 0x27000 bytes of flash and
- * the first 0x20000 bytes of RAM. Application code and data
+ * the first 0x6000 bytes of RAM. Application code and data
  * start after those regions.
  *
  * nRF52840 totals:

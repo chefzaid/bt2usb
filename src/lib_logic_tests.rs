@@ -124,9 +124,7 @@ fn ble_adv_parser_name_is_truncated_to_capacity() {
     let mut ad_data = [0u8; 40];
     ad_data[0] = 35;
     ad_data[1] = 0x09;
-    for i in 2..37 {
-        ad_data[i] = b'X';
-    }
+    ad_data[2..37].fill(b'X');
     let name = crate::ble::adv_parser::extract_device_name(&ad_data);
     assert_eq!(name.len(), 32);
 }

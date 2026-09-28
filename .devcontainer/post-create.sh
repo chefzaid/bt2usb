@@ -14,16 +14,16 @@ rustup target add thumbv7em-none-eabihf
 
 # - Install cargo tools for embedded development ---------------
 echo "→ Installing probe-rs (flashing & debugging)..."
-cargo install --locked probe-rs-tools || true
+cargo install --locked probe-rs-tools
 
 echo "→ Installing mask task runner..."
-cargo install --locked mask || true
+cargo install --locked mask
 
 echo "→ Installing cargo-llvm-cov (coverage)..."
-cargo install --locked cargo-llvm-cov || true
+cargo install --locked cargo-llvm-cov
 
 echo "→ Installing cargo-binutils (objcopy, nm, size)..."
-cargo install --locked cargo-binutils || true
+cargo install --locked cargo-binutils
 rustup component add llvm-tools llvm-tools-preview
 
 # - Setup udev rules for probe access (requires privileged container) ----
@@ -71,10 +71,11 @@ echo "cargo-llvm-cov:   $(cargo llvm-cov --version 2>/dev/null || echo 'not foun
 # `cargo test` builds for the host by default (no global build.target is set).
 echo ""
 echo "- Host test smoke check (no hardware needed) -----------------------------"
-if cargo test --lib --tests >/dev/null 2>&1; then
+if cargo test --locked --lib --tests; then
     echo "   ✓ host unit + integration tests pass"
 else
-    echo "   ⚠ host tests did not pass (run 'mask test' to see details)"
+    echo 'Host tests failed; setup is incomplete.' >&2
+    exit 1
 fi
 
 echo ""
@@ -95,5 +96,5 @@ echo ""
 echo "  Full end-to-end (BLE SoftDevice + USB) requires a real nRF52840-DK:"
 echo "    mask run --release   # flash + RTT logs over a probe (WSL: usbipd-win)"
 echo ""
-echo "  See the README 'Testing Strategy' section for the layered approach."
+echo "  See the docs/TESTING.md for the layered approach."
 echo "══════════════════════════════════════════════════════════════════════════"

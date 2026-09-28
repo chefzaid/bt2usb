@@ -23,3 +23,6 @@ maskfile.md text eol=lf
 *.x     text eol=lf
 *.md    text eol=lf
 *.json  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+Cargo.lock text eol=lf

@@ -15,8 +15,7 @@
 //!   synthetic BLE scenario, with `Address` substituted by a `u32` stand-in.
 //!
 //! Output is written to **UART0** (Renode's `uart0`), which Renode shows on its
-//! console / analyzer with no probe or decoder. See the README "Renode
-//! simulation" guide.
+//! console / analyzer with no probe or decoder. See docs/TESTING.md.
 
 #![no_std]
 #![no_main]
@@ -228,6 +227,7 @@ async fn main(spawner: Spawner) {
                     Redraw::Scanning => slog!(&mut uart, "  redraw: Scanning"),
                     Redraw::DeviceList => slog!(&mut uart, "  redraw: DeviceList"),
                     Redraw::Home => slog!(&mut uart, "  redraw: Home"),
+                    Redraw::Current => slog!(&mut uart, "  redraw: Current"),
                     Redraw::None => {}
                 }
                 if let Some(cmd) = outcome.command {
@@ -246,6 +246,14 @@ async fn main(spawner: Spawner) {
                         }
                         UiCommand::Connect(i) => slog!(&mut uart, "  cmd: Connect({})", i),
                         UiCommand::Disconnect => slog!(&mut uart, "  cmd: Disconnect"),
+                        UiCommand::ListPaired => {
+                            slog!(&mut uart, "  cmd: ListPaired");
+                            screen = Screen::SavedDevices;
+                            selected = 0;
+                        }
+                        UiCommand::Forget(i) => slog!(&mut uart, "  cmd: Forget({})", i),
+                        UiCommand::FactoryReset => slog!(&mut uart, "  cmd: FactoryReset"),
+                        UiCommand::Dismiss => slog!(&mut uart, "  cmd: Dismiss"),
                     }
                 }
             }

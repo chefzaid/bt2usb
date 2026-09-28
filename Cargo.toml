@@ -2,11 +2,12 @@
 name = "bt2usb"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.95"
 authors = ["bt2usb contributors"]
 description = "Bluetooth-to-USB HID bridge for nRF52840 - converts BLE keyboard/mouse input to USB HID output"
-license = "MIT"
+license = "GPL-3.0-only"
 readme = "README.md"
-keywords = ["bluetooth", "usb", "hid", "kvm", "embedded", "nrf52840"]
+keywords = ["bluetooth", "usb", "hid", "embedded", "nrf52840"]
 categories = ["embedded", "no-std", "hardware-support"]
 
 # Library for host-based unit tests (HID parsing logic)
@@ -30,7 +31,7 @@ required-features = ["embedded"]
 
 # SoftDevice-free simulation binary for Renode (Layer 3 testing).
 # Boots on a simulated nRF52840 and runs the real UI + coordinator logic
-# (no BLE radio / SoftDevice / USB). See README "Renode simulation".
+# (no BLE radio / SoftDevice / USB). See docs/TESTING.md.
 [[bin]]
 name = "bt2usb-sim"
 path = "src/sim.rs"
@@ -72,8 +73,8 @@ embassy-sync      = { version = "0.7", features = ["defmt"], optional = true }
 embassy-futures   = { version = "0.1", optional = true }
 
 # - BLE (Nordic SoftDevice S140) (embedded only) ---------------
-nrf-softdevice    = { git = "https://github.com/embassy-rs/nrf-softdevice", features = ["defmt", "nrf52840", "s140", "ble-central", "ble-gatt-client", "ble-sec", "critical-section-impl"], optional = true }
-nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", optional = true }
+nrf-softdevice    = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", features = ["defmt", "nrf52840", "s140", "ble-central", "ble-gatt-client", "ble-sec", "critical-section-impl"], optional = true }
+nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", optional = true }
 
 # - Display (SSD1306 OLED) (embedded only) ------------------
 ssd1306           = { version = "0.10", optional = true }
@@ -99,6 +100,10 @@ static_cell       = { version = "2", optional = true }
 heapless          = { version = "0.8" }
 
 [dev-dependencies]
+
+[patch.'https://github.com/embassy-rs/nrf-softdevice']
+# Minimal audited extension for bounded offset reads of long GATT values.
+nrf-softdevice = { path = "vendor/nrf-softdevice" }
 
 [profile.release]
 codegen-units = 1

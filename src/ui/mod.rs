@@ -10,6 +10,7 @@
 
 pub mod buttons;
 pub mod display;
+pub mod display_logic;
 pub mod input_logic;
 pub mod ui_logic;
 

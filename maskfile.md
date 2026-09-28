@@ -15,9 +15,9 @@ Common development tasks for the bt2usb Bluetooth-to-USB HID bridge.
 
 ```bash
 if [[ "${release}" == "true" ]]; then
-    ./scripts/run-tool.sh cargo build --features embedded --target thumbv7em-none-eabihf --release
+    ./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 else
-    ./scripts/run-tool.sh cargo build --features embedded --target thumbv7em-none-eabihf
+    ./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf
 fi
 ```
 
@@ -26,7 +26,7 @@ fi
 > Build the firmware for nRF52840 (release mode, optimized for size)
 
 ```bash
-./scripts/run-tool.sh cargo build --features embedded --target thumbv7em-none-eabihf --release
+./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 ```
 
 ## run
@@ -40,9 +40,9 @@ fi
 
 ```bash
 if [[ "${release}" == "true" ]]; then
-    ./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
+    ./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
 else
-    ./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --bin bt2usb
+    ./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --bin bt2usb
 fi
 ```
 
@@ -51,7 +51,7 @@ fi
 > Build and flash firmware to the connected nRF52840 board
 
 ```bash
-./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
+./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
 ```
 
 ## flash-debug
@@ -59,7 +59,7 @@ fi
 > Flash debug build with RTT logging enabled
 
 ```bash
-./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --bin bt2usb
+./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --bin bt2usb
 ```
 
 ## selftest
@@ -72,7 +72,7 @@ Needs the SoftDevice flashed once. Flash the real firmware afterwards with
 `mask run --release`.
 
 ```bash
-./scripts/run-tool.sh cargo run --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest
+./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest
 ```
 
 ## test
@@ -86,7 +86,7 @@ and inside the WSL2 devcontainer because `.cargo/config.toml` no longer pins a
 global `build.target` (embedded tasks pass `--target` explicitly instead).
 
 ```bash
-./scripts/run-tool.sh cargo test --lib --tests
+./scripts/run-tool.sh cargo test --locked --lib --tests
 ```
 
 ## test-verbose
@@ -94,7 +94,7 @@ global `build.target` (embedded tasks pass `--target` explicitly instead).
 > Run unit + integration tests with output shown
 
 ```bash
-./scripts/run-tool.sh cargo test --lib --tests -- --nocapture
+./scripts/run-tool.sh cargo test --locked --lib --tests -- --nocapture
 ```
 
 ## coverage
@@ -117,23 +117,23 @@ global `build.target` (embedded tasks pass `--target` explicitly instead).
 # Try cargo-llvm-cov first (cross-platform), fallback to tarpaulin
 if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
     if [[ "${html:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo llvm-cov --lib --tests --html --output-dir coverage-html
+        ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html
         echo "Coverage report: coverage-html/html/index.html"
     elif [[ "${json:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo llvm-cov --lib --tests --json --output-path coverage.json
+        ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests --json --output-path coverage.json
         echo "Coverage report: coverage.json"
     else
-        ./scripts/run-tool.sh cargo llvm-cov --lib --tests
+        ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests
     fi
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
     if [[ "${html:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo tarpaulin --lib --out Html --output-dir coverage
+        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Html --output-dir coverage
         echo "Coverage report: coverage/tarpaulin-report.html"
     elif [[ "${json:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo tarpaulin --lib --out Json --output-dir coverage
+        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Json --output-dir coverage
         echo "Coverage report: coverage/coverage.json"
     else
-        ./scripts/run-tool.sh cargo tarpaulin --lib --out Stdout
+        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Stdout
     fi
 else
     echo "No coverage tool found. Install one of:"
@@ -149,10 +149,10 @@ fi
 
 ```bash
 if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo llvm-cov --lib --tests --html --output-dir coverage-html
+    ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html
     echo "Coverage report: coverage-html/html/index.html"
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo tarpaulin --lib --out Html --output-dir coverage
+    ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Html --output-dir coverage
     echo "Coverage report: coverage/tarpaulin-report.html"
 else
     echo "No coverage tool found. Install one of:"
@@ -168,10 +168,10 @@ fi
 
 ```bash
 if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo llvm-cov --lib --tests --json --output-path coverage.json
+    ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests --json --output-path coverage.json
     echo "Coverage report: coverage.json"
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo tarpaulin --lib --out Json --output-dir coverage
+    ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Json --output-dir coverage
     echo "Coverage report: coverage/coverage.json"
 else
     echo "No coverage tool found. Install one of:"
@@ -197,7 +197,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 > Type-check the embedded build without compiling
 
 ```bash
-./scripts/run-tool.sh cargo check --features embedded --target thumbv7em-none-eabihf
+./scripts/run-tool.sh cargo check --locked --features embedded --target thumbv7em-none-eabihf
 ```
 
 ## clippy
@@ -205,7 +205,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 > Run clippy lints on embedded build
 
 ```bash
-./scripts/run-tool.sh cargo clippy --features embedded --target thumbv7em-none-eabihf -- -D warnings
+./scripts/run-tool.sh cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
 ```
 
 ## fmt
@@ -237,7 +237,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 > Show firmware binary size breakdown
 
 ```bash
-./scripts/run-tool.sh cargo size --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -- -A
+./scripts/run-tool.sh cargo size --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -- -A
 ```
 
 ## bloat
@@ -245,7 +245,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 > Analyze what's contributing to binary size (requires cargo-bloat)
 
 ```bash
-./scripts/run-tool.sh cargo bloat --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -n 30
+./scripts/run-tool.sh cargo bloat --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -n 30
 ```
 
 ## rtt
@@ -273,7 +273,7 @@ bash scripts/install-renode.sh
 > Build the SoftDevice-free simulation firmware for Renode (Layer 3, no hardware)
 
 ```bash
-./scripts/run-tool.sh cargo build --features sim --target thumbv7em-none-eabihf
+./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf
 echo "Sim ELF: target/thumbv7em-none-eabihf/debug/bt2usb-sim"
 ```
 
@@ -283,10 +283,10 @@ echo "Sim ELF: target/thumbv7em-none-eabihf/debug/bt2usb-sim"
 
 Boots the SoftDevice-free firmware on a simulated nRF52840; UART0 output (the
 coordinator + UI logic running on the target) appears in the Renode terminal
-window. No probe or board needed. See README "Renode simulation".
+window. No probe or board needed. See docs/TESTING.md.
 
 ```bash
-./scripts/run-tool.sh cargo build --features sim --target thumbv7em-none-eabihf
+./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf
 if command -v renode >/dev/null 2>&1; then
     renode renode/bt2usb-sim.resc
 else
@@ -305,7 +305,7 @@ both pure cores (`ble::coordinator` and `ui::ui_logic`) run on the simulated MCU
 CI. Requires `renode-test` on PATH (ships with Renode).
 
 ```bash
-./scripts/run-tool.sh cargo build --features sim --target thumbv7em-none-eabihf
+./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf
 if command -v renode-test >/dev/null 2>&1; then
     renode-test renode/bt2usb-sim.robot
 else
@@ -319,15 +319,17 @@ fi
 
 > Flash the Nordic SoftDevice S140 (required once per board)
 
-Downloads and flashes the SoftDevice if not present.
+Downloads and flashes the SoftDevice if not present. Verify the vendor image
+and production provenance requirements in docs/OPERATIONS.md before release use.
 
 ```bash
+set -euo pipefail
 SD_URL="https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/softdevices/s140/s140_nrf52_7.3.0.zip"
 SD_HEX="s140_nrf52_7.3.0_softdevice.hex"
 
 if [ ! -f "$SD_HEX" ]; then
     echo "Downloading SoftDevice S140 v7.3.0..."
-    curl -L "$SD_URL" -o softdevice.zip
+    curl -fL --retry 3 "$SD_URL" -o softdevice.zip
     unzip -o softdevice.zip "$SD_HEX"
     rm softdevice.zip
 fi
@@ -350,7 +352,7 @@ code --folder-uri "vscode-remote://dev-container+$(printf '%s' "$PWD" | xxd -p -
 > Build the devcontainer image
 
 ```bash
-docker build -t bt2usb-dev -f .devcontainer/Dockerfile .devcontainer
+devcontainer build --workspace-folder .
 ```
 
 ## probe-list
@@ -366,23 +368,26 @@ docker build -t bt2usb-dev -f .devcontainer/Dockerfile .devcontainer
 > Generate and open documentation
 
 ```bash
-./scripts/run-tool.sh cargo doc --features embedded --target thumbv7em-none-eabihf --open
+./scripts/run-tool.sh cargo doc --locked --features embedded --target thumbv7em-none-eabihf --open
 ```
 
 ## ci
 
-> Run all CI checks (fmt, clippy, test, build)
+> Run local formatting, lint, host tests, and firmware builds
 
 ```bash
 set -e
 echo "=== Checking format ==="
 ./scripts/run-tool.sh cargo fmt -- --check
 echo "=== Running clippy ==="
-./scripts/run-tool.sh cargo clippy --features embedded --target thumbv7em-none-eabihf -- -D warnings
+./scripts/run-tool.sh cargo clippy --locked --lib --tests -- -D warnings
+./scripts/run-tool.sh cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
+./scripts/run-tool.sh cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
 echo "=== Running tests ==="
-./scripts/run-tool.sh cargo test --lib --tests
+./scripts/run-tool.sh cargo test --locked --lib --tests
 echo "=== Building release ==="
-./scripts/run-tool.sh cargo build --features embedded --target thumbv7em-none-eabihf --release
+./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
+./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf
 echo "=== All checks passed! ==="
 ```
 

@@ -48,7 +48,6 @@ pub const USB_PID: u16 = 0x0001;
 /// USB device strings.
 pub const USB_MANUFACTURER: &str = "bt2usb";
 pub const USB_PRODUCT: &str = "BT-to-USB HID Bridge";
-pub const USB_SERIAL_NUMBER: &str = "000001";
 
 /// USB HID polling interval (ms). 1 ms = 1000 Hz for lowest latency.
 pub const USB_HID_POLL_MS: u8 = 1;

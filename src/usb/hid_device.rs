@@ -4,22 +4,32 @@
 //! peripheral and exposes keyboard, mouse, and consumer-control HID endpoints.
 
 use crate::config;
-use crate::hid::consumer::CONSUMER_REPORT_DESCRIPTOR;
-use crate::hid::keyboard::{KeyboardLeds, KEYBOARD_REPORT_DESCRIPTOR};
-use crate::hid::mouse::MOUSE_REPORT_DESCRIPTOR;
+use crate::hid::aggregate::InputAggregator;
+use crate::hid::consumer::{ConsumerReport, CONSUMER_REPORT_DESCRIPTOR};
+use crate::hid::delivery::{
+    run_endpoint, DeliveryQueue, EndpointDelivery, HidEvent, PendingReport, ReportSink, RetryClock,
+};
+use crate::hid::keyboard::{KeyboardLeds, KeyboardReport, KEYBOARD_REPORT_DESCRIPTOR};
+use crate::hid::mouse::{MouseReport, MOUSE_REPORT_DESCRIPTOR};
 use crate::hid::HidReport;
+use core::cell::RefCell;
+use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, warn};
+use embassy_futures::join::join4;
 use embassy_futures::select::{select, Either};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::usb::Driver;
 use embassy_nrf::{self, bind_interrupts, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Receiver;
 use embassy_sync::signal::Signal;
 use embassy_sync::watch::{Receiver as WatchReceiver, Watch};
+use embassy_time::{Duration, Timer};
 use embassy_usb::class::hid::{
-    Config as HidConfig, HidBootProtocol, HidSubclass, HidWriter, ReportId, RequestHandler, State,
+    Config as HidConfig, HidBootProtocol, HidProtocolMode, HidSubclass, HidWriter, ReportId,
+    RequestHandler, State,
 };
 use embassy_usb::control::OutResponse;
 use embassy_usb::{Builder, Config, UsbDevice};
@@ -43,30 +53,63 @@ pub fn keyboard_led_receiver() -> Option<LedReceiver> {
     KEYBOARD_LEDS.receiver()
 }
 
-/// USB control handler that captures the host's keyboard LED **output** report
-/// (sent via SET_REPORT on the control pipe) and republishes it for the BLE
-/// side. Installed only on the keyboard interface.
-struct LedRequestHandler;
+/// Boot-protocol negotiation for keyboard/mouse, plus keyboard LED output.
+struct BootRequestHandler {
+    keyboard: bool,
+}
 
-impl RequestHandler for LedRequestHandler {
-    fn set_report(&mut self, _id: ReportId, data: &[u8]) -> OutResponse {
+impl BootRequestHandler {
+    fn boot_state(&self) -> &'static AtomicBool {
+        if self.keyboard {
+            &KEYBOARD_BOOT_PROTOCOL
+        } else {
+            &MOUSE_BOOT_PROTOCOL
+        }
+    }
+}
+
+impl RequestHandler for BootRequestHandler {
+    fn get_protocol(&self) -> HidProtocolMode {
+        if self.boot_state().load(Ordering::Relaxed) {
+            HidProtocolMode::Boot
+        } else {
+            HidProtocolMode::Report
+        }
+    }
+
+    fn set_protocol(&mut self, protocol: HidProtocolMode) -> OutResponse {
+        self.boot_state()
+            .store(protocol == HidProtocolMode::Boot, Ordering::Relaxed);
+        if self.keyboard {
+            KEYBOARD_DELIVERY.replay();
+        } else {
+            MOUSE_DELIVERY.replay();
+        }
+        OutResponse::Accepted
+    }
+
+    fn set_report(&mut self, id: ReportId, data: &[u8]) -> OutResponse {
         // Our keyboard descriptor declares no report IDs, so the output report
         // payload is the single LED bitfield byte.
-        if let Some(&byte) = data.first() {
-            let leds = KeyboardLeds::from_byte(byte);
-            info!(
-                "Host LEDs: num={} caps={} scroll={}",
-                leds.num_lock(),
-                leds.caps_lock(),
-                leds.scroll_lock()
-            );
-            KEYBOARD_LEDS.sender().send(leds);
+        if !self.keyboard || id != ReportId::Out(0) || data.len() != 1 {
+            return OutResponse::Rejected;
         }
+        let leds = KeyboardLeds::from_byte(data[0]);
+        info!(
+            "Host LEDs: num={} caps={} scroll={}",
+            leds.num_lock(),
+            leds.caps_lock(),
+            leds.scroll_lock()
+        );
+        KEYBOARD_LEDS.sender().send(leds);
         OutResponse::Accepted
     }
 }
 
-static LED_HANDLER: StaticCell<LedRequestHandler> = StaticCell::new();
+static KEYBOARD_HANDLER: StaticCell<BootRequestHandler> = StaticCell::new();
+static MOUSE_HANDLER: StaticCell<BootRequestHandler> = StaticCell::new();
+static KEYBOARD_BOOT_PROTOCOL: AtomicBool = AtomicBool::new(false);
+static MOUSE_BOOT_PROTOCOL: AtomicBool = AtomicBool::new(false);
 
 bind_interrupts!(struct Irqs {
     USBD => embassy_nrf::usb::InterruptHandler<peripherals::USBD>;
@@ -100,6 +143,128 @@ static USB_SUSPENDED: AtomicBool = AtomicBool::new(false);
 /// task answers it with a remote wakeup so a key press wakes the PC.
 static REMOTE_WAKE: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 static SOFTWARE_VBUS: StaticCell<SoftwareVbusDetect> = StaticCell::new();
+static USB_SERIAL: StaticCell<heapless::String<16>> = StaticCell::new();
+
+/// Each endpoint has its own bounded queue, current held state, and worker.
+/// No USB write or timer is awaited while this short critical section is held.
+struct EndpointMailbox {
+    state: Mutex<CriticalSectionRawMutex, RefCell<EndpointDelivery>>,
+    pending: Signal<CriticalSectionRawMutex, ()>,
+    lifecycle: Signal<CriticalSectionRawMutex, ()>,
+}
+
+impl EndpointMailbox {
+    const fn new(initial: HidReport) -> Self {
+        Self {
+            state: Mutex::new(RefCell::new(EndpointDelivery::new(initial))),
+            pending: Signal::new(),
+            lifecycle: Signal::new(),
+        }
+    }
+
+    fn publish(&self, report: HidReport) {
+        self.state
+            .lock(|state| state.borrow_mut().publish(report, usb_available()));
+        self.pending.signal(());
+    }
+
+    fn replay(&self) {
+        self.state.lock(|state| state.borrow_mut().replay());
+        self.lifecycle.signal(());
+        self.pending.signal(());
+    }
+}
+
+impl DeliveryQueue for EndpointMailbox {
+    fn available(&self) -> bool {
+        usb_available()
+    }
+
+    fn take(&self) -> Option<PendingReport> {
+        self.state.lock(|state| state.borrow_mut().take())
+    }
+
+    fn start(&self, epoch: u32) -> bool {
+        self.lifecycle.reset();
+        self.state.lock(|state| state.borrow().is_current(epoch)) && usb_available()
+    }
+
+    fn failed(&self, epoch: u32, first_failure: bool) {
+        self.state.lock(|state| state.borrow_mut().failed(epoch));
+        if first_failure {
+            warn!("USB HID endpoint unavailable; retaining current input state");
+        }
+    }
+
+    fn succeeded(&self, epoch: u32) {
+        self.state.lock(|state| state.borrow_mut().succeeded(epoch));
+    }
+
+    async fn pending(&self) {
+        self.pending.wait().await;
+    }
+    async fn lifecycle(&self) {
+        self.lifecycle.wait().await;
+    }
+}
+
+struct UsbReportSink {
+    writer: HidWriter<'static, UsbDriver, 8>,
+    mouse: bool,
+}
+
+impl ReportSink for UsbReportSink {
+    async fn write(&mut self, report: &HidReport) -> Result<(), ()> {
+        let mut buf = [0u8; 8];
+        let len = match report {
+            HidReport::Mouse(mouse)
+                if self.mouse && MOUSE_BOOT_PROTOCOL.load(Ordering::Relaxed) =>
+            {
+                mouse.serialize_boot(&mut buf)
+            }
+            _ => report.serialize(&mut buf),
+        };
+        // Cancellation is safe for these single-packet reports with the pinned
+        // embassy-nrf 0.7 HAL: EndpointIn::write only awaits wait_data_ready;
+        // afterwards DMA copies synchronously and returns without another
+        // suspension point. Recheck this invariant when upgrading the driver.
+        self.writer.write(&buf[..len]).await.map_err(|_| ())
+    }
+}
+
+struct UsbRetryClock;
+
+impl RetryClock for UsbRetryClock {
+    async fn after_ms(&self, milliseconds: u64) {
+        Timer::after(Duration::from_millis(milliseconds)).await;
+    }
+}
+
+static KEYBOARD_DELIVERY: EndpointMailbox =
+    EndpointMailbox::new(HidReport::Keyboard(KeyboardReport {
+        modifier: 0,
+        reserved: 0,
+        keycodes: [0; 6],
+    }));
+static MOUSE_DELIVERY: EndpointMailbox = EndpointMailbox::new(HidReport::Mouse(MouseReport {
+    buttons: 0,
+    x: 0,
+    y: 0,
+    wheel: 0,
+    pan: 0,
+}));
+static CONSUMER_DELIVERY: EndpointMailbox =
+    EndpointMailbox::new(HidReport::Consumer(ConsumerReport { usage: 0 }));
+
+fn usb_available() -> bool {
+    USB_CONFIGURED.load(Ordering::Relaxed) && !USB_SUSPENDED.load(Ordering::Relaxed)
+}
+
+fn replay_endpoints() {
+    KEYBOARD_DELIVERY.replay();
+    MOUSE_DELIVERY.replay();
+    CONSUMER_DELIVERY.replay();
+}
 
 struct UsbPowerHandler;
 
@@ -114,14 +279,36 @@ pub fn is_configured() -> bool {
 }
 
 impl embassy_usb::Handler for UsbPowerHandler {
+    fn reset(&mut self) {
+        USB_CONFIGURED.store(false, Ordering::Relaxed);
+        USB_SUSPENDED.store(false, Ordering::Relaxed);
+        KEYBOARD_BOOT_PROTOCOL.store(false, Ordering::Relaxed);
+        MOUSE_BOOT_PROTOCOL.store(false, Ordering::Relaxed);
+        REMOTE_WAKE.reset();
+        KEYBOARD_LEDS.sender().send(KeyboardLeds::default());
+        USB_SUSPEND_SIGNAL.signal(false);
+        replay_endpoints();
+    }
+
+    fn enabled(&mut self, enabled: bool) {
+        if !enabled {
+            embassy_usb::Handler::reset(self);
+        }
+    }
+
     fn configured(&mut self, configured: bool) {
         USB_CONFIGURED.store(configured, Ordering::Relaxed);
+        replay_endpoints();
         info!("USB configured by host: {}", configured);
     }
 
     fn suspended(&mut self, suspended: bool) {
+        // Start each suspend interval with no stale request. Only new press
+        // edges observed after USB_SUSPENDED becomes true can request wake.
+        REMOTE_WAKE.reset();
         USB_SUSPENDED.store(suspended, Ordering::Relaxed);
         USB_SUSPEND_SIGNAL.signal(suspended);
+        replay_endpoints();
     }
 }
 
@@ -166,7 +353,20 @@ pub fn init(
     let mut usb_config = Config::new(config::USB_VID, config::USB_PID);
     usb_config.manufacturer = Some(config::USB_MANUFACTURER);
     usb_config.product = Some(config::USB_PRODUCT);
-    usb_config.serial_number = Some(config::USB_SERIAL_NUMBER);
+    // FICR is factory-programmed and read-only. Both words identify this
+    // physical unit consistently across firmware updates and USB ports.
+    let serial = USB_SERIAL.init_with(|| {
+        let mut serial = heapless::String::<16>::new();
+        write!(
+            serial,
+            "{:08X}{:08X}",
+            embassy_nrf::pac::FICR.deviceid(1).read(),
+            embassy_nrf::pac::FICR.deviceid(0).read()
+        )
+        .expect("two u32 hex words fit in 16 characters");
+        serial
+    });
+    usb_config.serial_number = Some(serial.as_str());
     usb_config.max_power = 100; // mA
     usb_config.max_packet_size_0 = 64;
     // Advertise remote-wakeup capability so a host that has suspended the bus
@@ -197,7 +397,7 @@ pub fn init(
         report_descriptor: KEYBOARD_REPORT_DESCRIPTOR,
         // Capture the host's LED (Caps/Num/Scroll) output report so we can mirror
         // it onto the BLE keyboard.
-        request_handler: Some(LED_HANDLER.init(LedRequestHandler)),
+        request_handler: Some(KEYBOARD_HANDLER.init(BootRequestHandler { keyboard: true })),
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
         // Advertise the Boot Interface subclass so the keyboard works in BIOS /
@@ -211,10 +411,10 @@ pub fn init(
     let mouse_state = MOUSE_STATE.init(State::new());
     let mouse_config = HidConfig {
         report_descriptor: MOUSE_REPORT_DESCRIPTOR,
-        request_handler: None,
+        request_handler: Some(MOUSE_HANDLER.init(BootRequestHandler { keyboard: false })),
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
-        // Boot mouse subclass for pre-OS use; our 3-byte report is boot compatible.
+        // SET_PROTOCOL selects three-byte reports for a boot/BIOS host.
         hid_subclass: HidSubclass::Boot,
         hid_boot_protocol: HidBootProtocol::Mouse,
     };
@@ -253,9 +453,6 @@ pub async fn run_usb_device(mut device: UsbDevice<'static, UsbDriver>) -> ! {
     info!("USB device task started");
     loop {
         device.run_until_suspend().await;
-        // Drop a wake request left over from before the suspend, so input that
-        // arrived while the PC was still awake can't wake it right back up.
-        REMOTE_WAKE.reset();
         match select(device.wait_resume(), REMOTE_WAKE.wait()).await {
             Either::First(()) => {}
             Either::Second(()) => match device.remote_wakeup().await {
@@ -268,39 +465,57 @@ pub async fn run_usb_device(mut device: UsbDevice<'static, UsbDriver>) -> ! {
     }
 }
 
-/// HID report forwarding task - reads from the BLE→USB channel and
-/// writes to the appropriate USB HID endpoint.
+/// Dispatch never waits for an endpoint. The three concurrent workers can
+/// each wait for host polling without holding up either of the other two.
 pub async fn hid_writer_task(
-    mut keyboard: HidWriter<'static, UsbDriver, 8>,
-    mut mouse: HidWriter<'static, UsbDriver, 8>,
-    mut consumer: HidWriter<'static, UsbDriver, 8>,
-    report_rx: &Receiver<'static, CriticalSectionRawMutex, HidReport, 16>,
+    keyboard: HidWriter<'static, UsbDriver, 8>,
+    mouse: HidWriter<'static, UsbDriver, 8>,
+    consumer: HidWriter<'static, UsbDriver, 8>,
+    report_rx: &Receiver<'static, CriticalSectionRawMutex, HidEvent, 16>,
 ) -> ! {
-    info!("HID writer task started - waiting for reports");
+    info!("HID dispatcher and three endpoint workers started");
+    join4(
+        dispatch_reports(report_rx),
+        endpoint_worker(keyboard, &KEYBOARD_DELIVERY, false),
+        endpoint_worker(mouse, &MOUSE_DELIVERY, true),
+        endpoint_worker(consumer, &CONSUMER_DELIVERY, false),
+    )
+    .await;
+    unreachable!()
+}
 
-    let mut buf = [0u8; 8];
-
+async fn dispatch_reports(
+    report_rx: &Receiver<'static, CriticalSectionRawMutex, HidEvent, 16>,
+) -> ! {
+    let mut aggregate = InputAggregator::default();
     loop {
-        let report = report_rx.receive().await;
-        if USB_SUSPENDED.load(Ordering::Relaxed) {
-            // The write below waits for the bus to resume; ask the host to wake.
+        let event = report_rx.receive().await;
+        if matches!(event, HidEvent::Report { .. }) {
+            crate::power::note_hid_activity();
+        }
+        let update = aggregate.apply(event);
+        if update.wake && USB_SUSPENDED.load(Ordering::Relaxed) {
             REMOTE_WAKE.signal(());
         }
-        // Count live HID traffic as activity so the OLED stays on while the user
-        // is actually typing/mousing (these reports never reach the UI loop).
-        crate::power::note_hid_activity();
-        let n = report.serialize(&mut buf);
-        let bytes = &buf[..n];
-
-        // The variant only selects which USB endpoint receives the report; the
-        // wire bytes are produced once by `HidReport::serialize` above.
-        let result = match &report {
-            HidReport::Keyboard(_) => keyboard.write(bytes).await,
-            HidReport::Mouse(_) => mouse.write(bytes).await,
-            HidReport::Consumer(_) => consumer.write(bytes).await,
-        };
-        if result.is_err() {
-            warn!("USB HID write failed");
+        for report in update.reports {
+            match &report {
+                HidReport::Keyboard(_) => KEYBOARD_DELIVERY.publish(report),
+                HidReport::Mouse(_) => MOUSE_DELIVERY.publish(report),
+                HidReport::Consumer(_) => CONSUMER_DELIVERY.publish(report),
+            }
         }
     }
+}
+
+async fn endpoint_worker(
+    writer: HidWriter<'static, UsbDriver, 8>,
+    mailbox: &'static EndpointMailbox,
+    mouse: bool,
+) -> ! {
+    run_endpoint(
+        mailbox,
+        &mut UsbReportSink { writer, mouse },
+        &UsbRetryClock,
+    )
+    .await
 }

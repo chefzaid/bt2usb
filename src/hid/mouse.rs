@@ -1,17 +1,16 @@
 //! USB HID mouse report.
 //!
-//! Boot-mouse compatible: a boot host reads only bytes 0–2 (buttons, X, Y) and
-//! ignores the rest, so the extra wheel/pan/buttons are spec-safe to append.
+//! Report protocol carries five bytes; boot protocol carries buttons/X/Y only.
 //!
 //! Layout (5 bytes):
 //! ```text
 //! Byte 0: Button bitfield
 //!         Bit 0 = Left, Bit 1 = Right, Bit 2 = Middle,
 //!         Bit 3 = Back (4), Bit 4 = Forward (5)
-//! Byte 1: X displacement (signed, -127..127)
-//! Byte 2: Y displacement (signed, -127..127)
-//! Byte 3: Vertical scroll wheel  (signed, -127..127)
-//! Byte 4: Horizontal scroll / AC Pan (signed, -127..127)
+//! Byte 1: X displacement (signed, -128..127)
+//! Byte 2: Y displacement (signed, -128..127)
+//! Byte 3: Vertical scroll wheel  (signed, -128..127)
+//! Byte 4: Horizontal scroll / AC Pan (signed, -128..127)
 //! ```
 
 /// Mouse report size in bytes.
@@ -50,14 +49,14 @@ impl MouseReport {
     ///
     /// Accepts boot-style 3-byte (no wheel) and 4-byte (with wheel) reports as
     /// well as extended 5-byte reports that add a horizontal-scroll (pan) byte.
-    /// Absent trailing fields default to 0; all button bits are preserved so
-    /// 4- and 5-button mice work.
+    /// Absent trailing fields default to 0; the five supported button bits are
+    /// preserved and the USB descriptor's padding bits are cleared.
     pub fn from_ble_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < 3 {
             return None;
         }
         Some(Self {
-            buttons: data[0],
+            buttons: data[0] & 0x1F,
             x: data[1] as i8,
             y: data[2] as i8,
             wheel: if data.len() >= 4 { data[3] as i8 } else { 0 },
@@ -71,12 +70,24 @@ impl MouseReport {
         if buf.len() < MOUSE_REPORT_SIZE {
             return 0;
         }
-        buf[0] = self.buttons;
+        buf[0] = self.buttons & 0x1F;
         buf[1] = self.x as u8;
         buf[2] = self.y as u8;
         buf[3] = self.wheel as u8;
         buf[4] = self.pan as u8;
         MOUSE_REPORT_SIZE
+    }
+
+    /// Serialize the three-byte, three-button boot-mouse report requested by
+    /// a BIOS/boot host through SET_PROTOCOL.
+    pub fn serialize_boot(&self, buf: &mut [u8]) -> usize {
+        if buf.len() < 3 {
+            return 0;
+        }
+        buf[0] = self.buttons & 0x07;
+        buf[1] = self.x.max(-127) as u8;
+        buf[2] = self.y.max(-127) as u8;
+        3
     }
 
     /// Combine an older pending report with a `newer` one into a single report,
@@ -132,7 +143,7 @@ pub const MOUSE_REPORT_DESCRIPTOR: &[u8] = &[
     0x05, 0x01, //     Usage Page (Generic Desktop)
     0x09, 0x30, //     Usage (X)
     0x09, 0x31, //     Usage (Y)
-    0x15, 0x81, //     Logical Minimum (-127)
+    0x15, 0x80, //     Logical Minimum (-128)
     0x25, 0x7F, //     Logical Maximum (127)
     0x75, 0x08, //     Report Size (8)
     0x95, 0x02, //     Report Count (2)
@@ -140,7 +151,7 @@ pub const MOUSE_REPORT_DESCRIPTOR: &[u8] = &[
     //
     //   - Vertical scroll wheel -
     0x09, 0x38, //     Usage (Wheel)
-    0x15, 0x81, //     Logical Minimum (-127)
+    0x15, 0x80, //     Logical Minimum (-128)
     0x25, 0x7F, //     Logical Maximum (127)
     0x75, 0x08, //     Report Size (8)
     0x95, 0x01, //     Report Count (1)
@@ -149,7 +160,7 @@ pub const MOUSE_REPORT_DESCRIPTOR: &[u8] = &[
     //   - Horizontal scroll (AC Pan) -
     0x05, 0x0C, //     Usage Page (Consumer)
     0x0A, 0x38, 0x02, // Usage (AC Pan)
-    0x15, 0x81, //     Logical Minimum (-127)
+    0x15, 0x80, //     Logical Minimum (-128)
     0x25, 0x7F, //     Logical Maximum (127)
     0x75, 0x08, //     Report Size (8)
     0x95, 0x01, //     Report Count (1)

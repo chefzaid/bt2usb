@@ -24,6 +24,24 @@ pub fn is_versioned(data: &[u8]) -> bool {
     data.len() >= 3 && data[0] == MAGIC && data[1] == VERSION
 }
 
+/// Identify the versioned format even when the header is truncated or uses a
+/// future version. Such blobs must never be interpreted as legacy records.
+pub fn has_magic(data: &[u8]) -> bool {
+    data.first() == Some(&MAGIC)
+}
+
+/// Validate the entire frame before loading any security-sensitive records.
+/// A partial prefix is useful for inspection, but must not become a new store
+/// that overwrites a damaged or unsupported record on the next save.
+pub fn is_complete(data: &[u8]) -> bool {
+    if !is_versioned(data) {
+        return false;
+    }
+    let mut reader = records(data);
+    while reader.next().is_some() {}
+    reader.remaining == 0 && reader.offset == data.len()
+}
+
 /// Builds a versioned blob into a caller-provided buffer.
 pub struct Writer<'a> {
     buf: &'a mut [u8],
@@ -107,7 +125,9 @@ impl<'a> Iterator for Records<'a> {
         let len = self.data[self.offset] as usize;
         let body = self.offset + 1;
         if len == 0 || body + len > self.data.len() {
-            self.remaining = 0; // truncated/corrupt → stop
+            // Keep a nonzero remaining count to expose malformed framing to
+            // `is_complete`, but make the iterator permanently exhausted.
+            self.offset = self.data.len();
             return None;
         }
         let record = &self.data[body..body + len];
@@ -203,5 +223,25 @@ mod tests {
     fn reader_stops_on_zero_length_record() {
         let data = [MAGIC, VERSION, 2, 0x00, 0x01];
         assert_eq!(records(&data).count(), 0);
+    }
+
+    #[test]
+    fn complete_frame_requires_exact_record_count_and_length() {
+        assert!(is_complete(&[MAGIC, VERSION, 0]));
+        assert!(is_complete(&[MAGIC, VERSION, 1, 1, 42]));
+        assert!(!is_complete(&[MAGIC, VERSION, 2, 1, 42]));
+        assert!(!is_complete(&[MAGIC, VERSION, 1, 2, 42]));
+        assert!(!is_complete(&[MAGIC, VERSION, 0, 42]));
+        assert!(!is_complete(&[MAGIC, VERSION, 1, 0]));
+    }
+
+    #[test]
+    fn future_or_truncated_versioned_headers_cannot_be_legacy() {
+        for data in [&[MAGIC][..], &[MAGIC, VERSION], &[MAGIC, VERSION + 1, 0]] {
+            assert!(has_magic(data));
+            assert!(!is_complete(data));
+        }
+        assert!(!has_magic(&[]));
+        assert!(!has_magic(&[1, 2, 3]));
     }
 }

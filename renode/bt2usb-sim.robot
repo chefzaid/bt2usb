@@ -73,7 +73,7 @@ Sim Boots And Runs Coordinator And UI Logic
     Press Button              ${PIN_UP}        button Up -> screen DeviceList (selected 0)
     Wait For Line On Uart     redraw: DeviceList
     # Connect the highlighted device.
-    Press Button              ${PIN_SELECT}    button Select -> screen Scanning (selected 0)
+    Press Button              ${PIN_SELECT}    button Select -> screen Connecting (selected 0)
     Wait For Line On Uart     cmd: Connect(0)
 
     # ble::coordinator: second device connects -> two active links.

@@ -4,7 +4,9 @@
 //! are filtered by the presence of the HID Service UUID (0x1812) in
 //! their advertisement data, then pushed into the UI event channel.
 
+#[cfg(test)]
 use crate::ble::adv_parser::{contains_hid_service_uuid, extract_device_name};
+use crate::ble::coordinator::merge_advertisement;
 use crate::ble::{BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::{BLE_MAX_DISCOVERED, BLE_SCAN_DURATION_SECS};
 use defmt::info;
@@ -14,6 +16,28 @@ use embassy_time::{with_timeout, Duration};
 use heapless::Vec;
 use nrf_softdevice::ble::central;
 use nrf_softdevice::Softdevice;
+
+/// Resolve a bonded peer's current advertising address on every reconnect,
+/// including after it wakes with a new RPA. This scan does not alter UI scan
+/// results and accepts matching peers even when HID UUIDs are omitted.
+pub async fn resolve_bonded_peer(
+    sd: &Softdevice,
+    identity: &nrf_softdevice::ble::IdentityKey,
+) -> Option<nrf_softdevice::ble::Address> {
+    let _gap = crate::ble::GAP_PROCEDURE.lock().await;
+    let config = central::ScanConfig::default();
+    let scan = central::scan(sd, &config, |params| {
+        let address = nrf_softdevice::ble::Address::from_raw(params.peer_addr);
+        identity.is_match(address).then_some(address)
+    });
+    with_timeout(
+        Duration::from_secs(crate::config::BLE_CONNECT_TIMEOUT_SECS as u64),
+        scan,
+    )
+    .await
+    .ok()?
+    .ok()
+}
 
 /// Result of a single scan pass.
 pub struct ScanResult {
@@ -32,12 +56,13 @@ pub async fn scan(
     sd: &Softdevice,
     event_tx: &Sender<'_, CriticalSectionRawMutex, BleEvent, 8>,
 ) -> Result<ScanResult, BleErrorTag> {
-    // Wait for any in-flight connection attempt to finish (bounded by
-    // BLE_CONNECT_TIMEOUT_SECS); the SoftDevice can't scan while one is pending.
+    // Publish UI state before acquiring the radio lock: a full UI channel
+    // must not prevent another slot's radio procedure from making progress.
+    event_tx.send(BleEvent::ScanStarted).await;
+    // Wait for in-flight scan/connection procedures from other slots.
     let _gap = crate::ble::GAP_PROCEDURE.lock().await;
 
     info!("BLE scan starting ({} s window)", BLE_SCAN_DURATION_SECS);
-    event_tx.send(BleEvent::ScanStarted).await;
 
     let mut found: Vec<DiscoveredDevice, BLE_MAX_DISCOVERED> = Vec::new();
 
@@ -61,35 +86,14 @@ pub async fn scan(
             return Some(()); // Signal scan to stop
         }
 
-        // Parse advertisement data looking for the HID Service UUID.
-        let has_hid_service = contains_hid_service_uuid(data);
+        let address = nrf_softdevice::ble::Address::from_raw(params.peer_addr);
+        // Merge name-only scan responses by peer address; buffer events because
+        // this synchronous SoftDevice callback cannot await UI backpressure.
+        merge_advertisement(&mut found, address, params.rssi, data);
 
-        if has_hid_service {
-            // Extract device name from advertisement or scan response.
-            let name = extract_device_name(data);
-
-            let device = DiscoveredDevice {
-                address: nrf_softdevice::ble::Address::from_raw(params.peer_addr),
-                name,
-                rssi: params.rssi,
-            };
-
-            // Avoid duplicates (same address).
-            let already_seen = found.iter().any(|d| d.address == device.address);
-            if !already_seen && !found.is_full() {
-                info!("Found: {} (RSSI {})", device.name.as_str(), device.rssi);
-                // We can't await inside this closure, so the event_tx send
-                // happens after scan completes.  Instead, buffer here.
-                let _ = found.push(device);
-            }
-        }
-
-        // Return None to keep scanning, Some(()) to stop.
-        if found.is_full() {
-            Some(()) // Buffer full - stop early
-        } else {
-            None
-        }
+        // Continue through the window even when full so scan responses can
+        // still supply names for the devices already in the bounded list.
+        None
     });
 
     // Hard backstop: the deadline above is only evaluated when an advertisement
@@ -97,8 +101,11 @@ pub async fn scan(
     // and `central::scan` would otherwise run forever. Cap the whole scan with a
     // wall-clock timeout (slightly beyond the window) so the UI can never hang.
     let timeout = Duration::from_secs(BLE_SCAN_DURATION_SECS) + Duration::from_secs(2);
-    match with_timeout(timeout, scan_fut).await {
-        // Scan stopped itself (deadline reached or buffer full).
+    let result = with_timeout(timeout, scan_fut).await;
+    // Release on both success and failure before awaiting any UI event send.
+    drop(_gap);
+    match result {
+        // Scan stopped itself after the deadline.
         Ok(Ok(())) => {}
         // SoftDevice reported a scan error.
         Ok(Err(_e)) => {

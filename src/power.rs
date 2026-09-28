@@ -59,10 +59,8 @@ impl PowerManager {
     /// Record activity (keypress, mouse move, button press).
     pub fn activity(&mut self) {
         self.last_activity = Instant::now();
-        if self.state != PowerState::Active {
-            info!("Power: waking from {:?}", self.state);
-            self.state = PowerState::Active;
-        }
+        // Activity never overrides a USB suspend; only the resume event does.
+        self.update_state_with_elapsed(0);
     }
 
     /// Update BLE connection state.

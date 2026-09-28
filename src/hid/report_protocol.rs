@@ -1,10 +1,9 @@
 //! HID Report Protocol parser.
 //!
-//! Parses HID Report Descriptors to understand the structure of
-//! non-boot-protocol HID reports. This enables support for:
-//! - Devices that don't support Boot Protocol
-//! - Extended reports (NKRO keyboards, high-resolution mice)
-//! - Consumer control reports embedded in keyboard descriptors
+//! Classifies input report IDs using HID usage pages and application
+//! collections. This is metadata for routing, not a field-layout decoder:
+//! NKRO keyboards, packed fields and high-resolution axes still require a
+//! descriptor-driven translator before their payloads can be forwarded.
 //!
 //! ## HID Report Descriptor Structure
 //!
@@ -20,9 +19,11 @@
 //! ## Limitations
 //!
 //! This implementation handles common cases but not the full HID spec:
-//! - Nested collections are flattened
-//! - Push/Pop state is not supported
-//! - Delimiter tags are ignored
+//! - At most one report ID is retained for each supported kind
+//! - Collection and global-state nesting are bounded to 16 levels
+//! - Delimiter alternatives are unsupported and rejected
+
+use heapless::Vec;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -69,7 +70,7 @@ pub struct ReportReference {
 impl ReportReference {
     /// Parse the 2-byte descriptor value (`[report_id, report_type]`).
     pub fn parse(data: &[u8]) -> Option<Self> {
-        if data.len() < 2 {
+        if data.len() != 2 {
             return None;
         }
         Some(Self {
@@ -167,16 +168,22 @@ impl HidDescriptor {
     }
 
     pub fn report_kind_for_id(&self, report_id: u8) -> Option<ReportKind> {
-        if self.keyboard_report_id == Some(report_id) {
-            return Some(ReportKind::Keyboard);
+        // A report containing fields for multiple kinds cannot be translated
+        // by any one of the fixed-layout decoders. Never choose one by order.
+        let mut found = None;
+        for (id, kind) in [
+            (self.keyboard_report_id, ReportKind::Keyboard),
+            (self.mouse_report_id, ReportKind::Mouse),
+            (self.consumer_report_id, ReportKind::Consumer),
+        ] {
+            if id == Some(report_id) {
+                if found.is_some() {
+                    return None;
+                }
+                found = Some(kind);
+            }
         }
-        if self.mouse_report_id == Some(report_id) {
-            return Some(ReportKind::Mouse);
-        }
-        if self.consumer_report_id == Some(report_id) {
-            return Some(ReportKind::Consumer);
-        }
-        None
+        found
     }
 }
 
@@ -192,17 +199,26 @@ impl HidDescriptor {
             consumer_report_id: None,
         };
 
-        // Parser state.
-        let mut usage_page: UsagePage = UsagePage::Unknown(0);
-        let mut usage: u16 = 0;
-        let mut report_id: u8 = 0;
-        let mut report_size: u16 = 0;
-        let mut report_count: u16 = 0;
-        let mut _bit_offset: u16 = 0;
+        // Only routing metadata is retained. In particular, do not multiply
+        // untrusted Report Size/Count values: no field offsets are used here.
+        let mut globals = GlobalState::default();
+        let mut global_stack: Vec<GlobalState, 16> = Vec::new();
+        let mut collections: Vec<Application, 16> = Vec::new();
+        let mut application = Application::default();
+        let mut usage = None;
 
         let mut i = 0;
         while i < data.len() {
             let prefix = data[i];
+            // Long items have a length and tag byte before their payload. The
+            // payload must never be interpreted as a sequence of short items.
+            if prefix == 0xFE {
+                let length = *data.get(i + 1)? as usize;
+                let end = i.checked_add(3)?.checked_add(length)?;
+                data.get(i..end)?;
+                i = end;
+                continue;
+            }
             let tag = (prefix >> 4) & 0x0F;
             let item_type = (prefix >> 2) & 0x03;
             let size = match prefix & 0x03 {
@@ -214,7 +230,7 @@ impl HidDescriptor {
             };
 
             if i + 1 + size > data.len() {
-                break;
+                return None;
             }
 
             let value: u32 = match size {
@@ -231,79 +247,88 @@ impl HidDescriptor {
                     match tag {
                         // Input
                         0x08 => {
-                            let _is_array = (value & 0x02) == 0;
-                            let total_bits = report_size * report_count;
-
-                            // Detect usage types.
-                            match usage_page {
-                                UsagePage::Keyboard => {
-                                    desc.has_keyboard = true;
-                                    if report_id != 0 && desc.keyboard_report_id.is_none() {
-                                        desc.keyboard_report_id = Some(report_id);
-                                    }
-                                }
-                                UsagePage::GenericDesktop => {
-                                    if matches!(
-                                        DesktopUsage::from(usage),
-                                        DesktopUsage::Mouse | DesktopUsage::Pointer
-                                    ) {
-                                        desc.has_mouse = true;
-                                        if report_id != 0 && desc.mouse_report_id.is_none() {
-                                            desc.mouse_report_id = Some(report_id);
-                                        }
-                                    }
-                                }
-                                UsagePage::Consumer => {
-                                    desc.has_consumer = true;
-                                    if report_id != 0 && desc.consumer_report_id.is_none() {
-                                        desc.consumer_report_id = Some(report_id);
-                                    }
-                                }
-                                _ => {}
+                            if size == 0 {
+                                return None;
                             }
-
-                            _bit_offset += total_bits;
+                            // Constant padding does not identify an input.
+                            if value & 0x01 == 0 {
+                                let kind = if application.present {
+                                    application.kind
+                                } else {
+                                    field_kind(globals.usage_page, usage)
+                                };
+                                if let Some(kind) = kind {
+                                    desc.note_input(kind, globals.report_id);
+                                }
+                            }
                         }
                         // Collection
                         0x0A => {
-                            // Start of collection - track depth if needed.
+                            if size != 1 {
+                                return None;
+                            }
+                            collections.push(application).ok()?;
+                            if value == 0x01 {
+                                application = Application {
+                                    present: true,
+                                    kind: usage.and_then(application_kind),
+                                };
+                            }
                         }
                         // End Collection
                         0x0C => {
-                            // End of collection.
+                            if size != 0 {
+                                return None;
+                            }
+                            application = collections.pop()?;
                         }
                         _ => {}
                     }
                     // Per HID spec, Local items (Usage, Usage Min/Max, etc.) only
                     // apply to the next Main item. Reset after each Main item to
                     // prevent stale usage values from affecting subsequent items.
-                    usage = 0;
+                    usage = None;
                 }
                 // Global items
                 1 => {
                     match tag {
                         // Usage Page
-                        0x00 => usage_page = UsagePage::from(value as u16),
+                        0x00 => globals.usage_page = u16::try_from(value).ok()?,
                         // Report ID
                         0x08 => {
-                            report_id = value as u8;
-                            _bit_offset = 0;
+                            if size != 1 || value == 0 {
+                                return None;
+                            }
+                            globals.report_id = value as u8;
                         }
-                        // Report Size
-                        0x07 => report_size = value as u16,
-                        // Report Count
-                        0x09 => report_count = value as u16,
+                        // Push/Pop restore the global metadata, including ID.
+                        0x0A if size == 0 => global_stack.push(globals).ok()?,
+                        0x0B if size == 0 => globals = global_stack.pop()?,
+                        0x0A | 0x0B => return None,
                         _ => {}
                     }
                 }
                 // Local items: Usage (tag 0x00).
-                2 if tag == 0x00 => {
-                    usage = value as u16;
+                2 if tag == 0x00 && usage.is_none() => {
+                    // A 32-bit Usage carries its own page in the upper half.
+                    // Keep the first Usage for a Collection's identity.
+                    let page = if size == 4 {
+                        (value >> 16) as u16
+                    } else {
+                        globals.usage_page
+                    };
+                    usage = Some((page, value as u16));
                 }
+                // Alternative usage sets need a field-layout decoder.
+                2 if tag == 0x0A => return None,
                 _ => {}
             }
 
             i += 1 + size;
+        }
+
+        if !collections.is_empty() || !global_stack.is_empty() {
+            return None;
         }
 
         if desc.has_keyboard || desc.has_mouse || desc.has_consumer {
@@ -313,5 +338,58 @@ impl HidDescriptor {
             defmt::debug!("HID descriptor: no recognized usages found");
             None
         }
+    }
+
+    fn note_input(&mut self, kind: ReportKind, report_id: u8) {
+        let (present, id) = match kind {
+            ReportKind::Keyboard => (&mut self.has_keyboard, &mut self.keyboard_report_id),
+            ReportKind::Mouse => (&mut self.has_mouse, &mut self.mouse_report_id),
+            ReportKind::Consumer => (&mut self.has_consumer, &mut self.consumer_report_id),
+        };
+        *present = true;
+        if report_id != 0 && id.is_none() {
+            *id = Some(report_id);
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+struct GlobalState {
+    usage_page: u16,
+    report_id: u8,
+}
+
+#[derive(Clone, Copy, Default)]
+struct Application {
+    present: bool,
+    kind: Option<ReportKind>,
+}
+
+fn application_kind((page, usage): (u16, u16)) -> Option<ReportKind> {
+    match (UsagePage::from(page), usage) {
+        (UsagePage::GenericDesktop, usage) => match DesktopUsage::from(usage) {
+            DesktopUsage::Mouse => Some(ReportKind::Mouse),
+            DesktopUsage::Keyboard => Some(ReportKind::Keyboard),
+            _ => None,
+        },
+        (UsagePage::Consumer, 0x01) => Some(ReportKind::Consumer),
+        _ => None,
+    }
+}
+
+fn field_kind(page: u16, usage: Option<(u16, u16)>) -> Option<ReportKind> {
+    let (page, usage) = usage.unwrap_or((page, 0));
+    match UsagePage::from(page) {
+        UsagePage::Keyboard => Some(ReportKind::Keyboard),
+        UsagePage::Consumer => Some(ReportKind::Consumer),
+        UsagePage::GenericDesktop
+            if matches!(
+                DesktopUsage::from(usage),
+                DesktopUsage::Pointer | DesktopUsage::Mouse
+            ) =>
+        {
+            Some(ReportKind::Mouse)
+        }
+        _ => None,
     }
 }

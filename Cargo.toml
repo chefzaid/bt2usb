@@ -22,7 +22,7 @@ path = "src/main.rs"
 required-features = ["embedded"]
 
 # On-board bring-up check: flash this before the real firmware on a new board
-# (`mask selftest`, see docs/FIRST_FLASH.md). Same SoftDevice/USB/pin setup as
+# (`mask selftest`, see docs/first-flash.md). Same SoftDevice/USB/pin setup as
 # the firmware, one PASS/FAIL line per hardware stage over RTT.
 [[bin]]
 name = "bt2usb-selftest"
@@ -31,7 +31,7 @@ required-features = ["embedded"]
 
 # SoftDevice-free simulation binary for Renode (Layer 3 testing).
 # Boots on a simulated nRF52840 and runs the real UI + coordinator logic
-# (no BLE radio / SoftDevice / USB). See docs/TESTING.md.
+# (no BLE radio / SoftDevice / USB). See docs/testing.md.
 [[bin]]
 name = "bt2usb-sim"
 path = "src/sim.rs"

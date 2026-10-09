@@ -3,7 +3,7 @@
 This is the single project backlog. Open work is separate from implemented work
 below. A checked item records code/documentation present in the repository; it
 does not certify hardware compatibility or a production deployment. Validation
-evidence belongs with its commit/release and [test record](docs/TESTING.md).
+evidence belongs with its commit/release and [test record](docs/testing.md).
 
 Priorities: **P0** blocks a managed production deployment; **P1** improves
 reliability, interoperability, and maintainability; **P2** is a future feature.
@@ -39,7 +39,7 @@ Each open item includes a completion criterion so it can be closed with evidence
   input, queue saturation, suspend, unplug, and a simultaneous BLE disconnect.
   Accept when final releases reach a recovered host within a measured bound,
   neither slot starves, and any intentional loss policy is documented.
-- [ ] **Hardware compatibility baseline.** Run [FIRST_FLASH.md](docs/FIRST_FLASH.md)
+- [ ] **Hardware compatibility baseline.** Run [first-flash.md](docs/first-flash.md)
   on declared keyboard/mouse models, Windows/Linux/macOS hosts, monitor hubs,
   and BIOS/UEFI or KVM targets. Accept when the matrix identifies exact versions,
   pass/fail results, known limitations, and the artifact hash.
@@ -155,7 +155,7 @@ Each open item includes a completion criterion so it can be closed with evidence
 - [ ] **Additional MCU/board targets.** Select a concrete target, isolate board
   configuration, and implement its radio/USB/storage integration. Accept when it
   has a maintained build and hardware acceptance record; alternatives listed in
-  [Hardware](docs/HARDWARE.md) are not supported ports today.
+  [Hardware](docs/hardware.md) are not supported ports today.
 
 ## Done — implemented baseline
 
@@ -182,7 +182,7 @@ validation remains separate even for a feature whose implementation is complete.
 - [x] SoftDevice-free Renode build, custom GPIO/GPIOTE models, and a headless
   GPIO/UI/coordinator scenario (`src/sim.rs`, `renode/`).
 - [x] Board self-test and reusable first-flash checklist (`src/selftest.rs`,
-  [FIRST_FLASH.md](docs/FIRST_FLASH.md)).
+  [first-flash.md](docs/first-flash.md)).
 - [x] Separate application and pairing flash regions, linker assertions, and
   stack high-water instrumentation (`memory_sd.x`, `src/stack.rs`).
 - [x] GitHub Actions build/test/simulation workflow and tag-based firmware
@@ -192,6 +192,10 @@ validation remains separate even for a feature whose implementation is complete.
 - [x] Reorganized setup/use, hardware, architecture, development, testing,
   operations, and security documentation; separated this backlog from completed
   work and removed unqualified compatibility/coverage claims (2026-09-28).
+- [x] Restructured documentation by reader: lower-case guides in `docs/`, a
+  short README, a security reference separate from the reporting policy, a
+  data-model reference, eight ADRs in `docs/adr/`, and GitHub issue templates
+  (2026-10-09; see [ADR 0001](docs/adr/0001-documentation-structure.md)).
 
 ## Done — hardening changes
 
@@ -283,7 +287,7 @@ remain open.
   directory instead of the Rust-cached `target/`. Fail the release job before
   upload when the tag's release is already published; reruns may update only a
   draft. Action pin comments name the exact upstream tag each SHA resolves to
-  (`.github/workflows/ci.yml`, [Releasing](docs/RELEASING.md)).
+  (`.github/workflows/ci.yml`, [Deployment](docs/deployment.md)).
 
 ## Closing an item
 

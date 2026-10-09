@@ -1,4 +1,4 @@
-# First flash: bring-up checklist
+# First Flash: Bring-Up Checklist
 
 Work through this top to bottom the first time bt2usb goes onto a new board.
 Each step says what to look for, so a problem shows up at the stage that
@@ -7,7 +7,7 @@ causes it instead of as "the keyboard doesn't work".
 Host tests (`mask test`), embedded build/lint checks, and the Renode simulation
 (`mask sim-test`) cover shared logic and selected simulated paths. Real radio,
 USB, flash behavior, I2C wiring, power, timing, and interoperability still need
-this board checklist. See [Testing](TESTING.md) for the coverage boundaries.
+this board checklist. See [Testing](testing.md) for the coverage boundaries.
 
 Tick each box as you go. Write down the numbers the log gives you (SoftDevice
 RAM, stack high-water); they feed back into the configuration.
@@ -203,4 +203,11 @@ These are logical management checks; they do not establish physical key erasure.
 - [ ] Note anything that didn't behave as described here in an issue, with
       the sanitized RTT log around it. Do not include bond keys or private input.
 - [ ] Archive the completed result record; leave this template unchecked for
-      the next board or release. Review remaining [release gates](OPERATIONS.md).
+      the next board or release. Review remaining [release gates](deployment.md#release-gates).
+
+## Related Guides
+
+- [Hardware](hardware.md)
+- [Testing](testing.md)
+- [Operations](operations.md)
+- [Deployment](deployment.md)

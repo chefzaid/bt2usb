@@ -1,10 +1,10 @@
-# Hardware and configuration
+# Hardware And Configuration Reference
 
 The implemented board target is the nRF52840 with native USB, using the DK pin
 mapping below. Other boards require a review of their pin routing, clocks, power
 supplies, and flash layout. There are no implemented ESP32, RP2040, or STM32 ports.
 
-## Parts and wiring
+## Parts And Wiring
 
 | Component | Development example | Purpose |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ During bring-up, connect native USB directly to the PC. Then move it to the
 monitor hub and connect the monitor's USB upstream cable to the PC. A USB
 extension or USB-C/USB-A adapter may make the controls easier to reach.
 
-## Configuration defaults
+## Configuration Defaults
 
 These are compile-time settings from [config.rs](../src/config.rs).
 
@@ -57,7 +57,7 @@ The USB serial is generated from the two factory `FICR.DEVICEID` words as a
 16-character uppercase hexadecimal value in `usb/hid_device.rs`. It is stable
 across firmware updates and USB ports; there is no shared serial constant.
 
-## Memory layout
+## Memory Layout
 
 The nRF52840 has 1 MiB internal flash and 256 KiB RAM. The configured reservations
 in [memory_sd.x](../memory_sd.x) are:
@@ -76,14 +76,22 @@ These are reservations, not measured firmware usage. Measure release size with
 when SoftDevice is enabled before changing its reservation. No bootloader or DFU
 region is currently allocated.
 
-The linker excludes the pairing pages from application flash. Keep the storage
+The linker excludes the pairing pages from application flash; their contents
+are defined in the [data model](data-model.md#pairing-store). Keep the storage
 constants and linker map consistent when changing either. SoftDevice uses
 `__sdata` as its application RAM boundary, so `.data` must begin at the RAM origin
 and the stack must remain at the top; the linker asserts this relationship.
 
-## Possible future ports
+## Possible Future Ports
 
 ESP32-S3, RP2040 with an external BLE module, and STM32 with an external BLE module
 were previously listed as alternatives. They remain design ideas requiring
 separate HAL, BLE, USB, pin, memory, and validation work. Only the nRF52840 build
 is maintained here.
+
+## Related Guides
+
+- [First flash](first-flash.md)
+- [Architecture and ADRs](architecture.md)
+- [Data model](data-model.md)
+- [Development](development.md)

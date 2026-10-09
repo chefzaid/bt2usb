@@ -64,7 +64,7 @@ fi
 
 ## selftest
 
-> Flash and run the on-board self-test (new-board bring-up, see docs/FIRST_FLASH.md)
+> Flash and run the on-board self-test (new-board bring-up, see docs/first-flash.md)
 
 Checks the SoftDevice, flash storage, USB enumeration, OLED, buttons and BLE
 radio on the connected board and prints one PASS/FAIL/SKIP line per stage.
@@ -283,7 +283,7 @@ echo "Sim ELF: target/thumbv7em-none-eabihf/debug/bt2usb-sim"
 
 Boots the SoftDevice-free firmware on a simulated nRF52840; UART0 output (the
 coordinator + UI logic running on the target) appears in the Renode terminal
-window. No probe or board needed. See docs/TESTING.md.
+window. No probe or board needed. See docs/testing.md.
 
 ```bash
 ./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf
@@ -320,7 +320,7 @@ fi
 > Flash the Nordic SoftDevice S140 (required once per board)
 
 Downloads and flashes the SoftDevice if not present. Verify the vendor image
-and production provenance requirements in docs/OPERATIONS.md before release use.
+and production provenance requirements in docs/deployment.md before release use.
 
 ```bash
 set -euo pipefail

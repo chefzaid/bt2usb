@@ -1,4 +1,35 @@
-# Development
+# Development Guide
+
+This guide covers the toolchain, build and check commands, the devcontainer,
+and how to make a change. Verification layers are in [testing](testing.md);
+the reasons behind the structure are in the [ADRs](architecture.md#accepted-adrs).
+
+## Repository Layout
+
+```text
+.
+├── src/
+│   ├── main.rs            bridge firmware entry point (feature `embedded`)
+│   ├── selftest.rs        board bring-up image (feature `embedded`)
+│   ├── sim.rs             Renode entry point (feature `sim`)
+│   ├── lib.rs             host-test library of hardware-free modules
+│   ├── config.rs          compile-time pins, timing, USB, and storage constants
+│   ├── ble/               scanning, connection workers, coordinator, GATT HID client
+│   ├── hid/               report types, descriptors, aggregation, delivery, wake
+│   ├── usb/               composite USB HID device
+│   ├── storage.rs, storage/  pairing store and its framing/codec
+│   └── ui/                display, buttons, UI state machine
+├── tests/                 host integration tests
+├── renode/                platform description, GPIO/GPIOTE models, Robot test
+├── scripts/               release helper and tests, Renode installer, WSL tool shim
+├── vendor/nrf-softdevice/ pinned upstream crate with a small reviewed patch
+├── memory_sd.x            linker memory map for SoftDevice builds
+├── memory_sim.x           linker memory map for the simulation
+├── build.rs               linker-script selection and feature guards
+├── maskfile.md            task recipes (`mask <task>`)
+├── docs/                  guides and architecture decision records
+└── TODO.md                backlog and completed work
+```
 
 ## Toolchain
 
@@ -19,7 +50,7 @@ Only the compiler is needed for host tests. ARM builds need the target; flashing
 needs `probe-rs` and a probe; coverage and size analysis need the corresponding
 optional Cargo tools. Tool installation may require system libraries on the host.
 
-## Build and check
+## Build And Check
 
 Commands run from the repository root. The project deliberately has no global
 Cargo target, so host tests use the native platform. Firmware commands select ARM
@@ -42,7 +73,7 @@ critical-section implementation and excludes SoftDevice, USB, and flash drivers;
 
 Release-helper tests require Python 3.11 or newer. When changing GitHub Actions,
 run `actionlint` as well; CI uses actionlint 1.7.12. The
-[release guide](RELEASING.md) explains version and provenance checks.
+[deployment guide](deployment.md) explains version and provenance checks.
 
 Format only the application package. The vendored SoftDevice source carries a
 small reviewed patch and should retain upstream formatting; do not run
@@ -66,11 +97,11 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask doc` | Generate embedded API documentation |
 
 Flashing the bridge requires S140 to have been installed. Complete
-[First flash](FIRST_FLASH.md) before treating a successful download as a working
+[First flash](first-flash.md) before treating a successful download as a working
 device. `mask run --release` updates the application; a full-chip erase also
 removes SoftDevice and stored bonds.
 
-## Devcontainer and WSL2
+## Devcontainer And WSL2
 
 The VS Code [.devcontainer](../.devcontainer/) installs Rust embedded tools and
 uses a privileged container for probe access. It does not require a
@@ -84,13 +115,17 @@ development host.
 The probe and the board's native USB HID connection are separate. Keep the native
 USB port attached to the PC whose enumeration/input behavior you are testing.
 
-## Making a change
+## Making A Change
 
 Keep hardware-free decisions in the shared pure modules and asynchronous I/O in
 the task layer. Add regression tests for behavior changes, particularly malformed
 reports, bounded-buffer handling, reconnect transitions, and releases of held
 inputs. Do not introduce dynamic allocation into firmware paths without an
 explicit design review.
+
+Changes that cross an [ADR process](architecture.md#adr-process) trigger
+(task boundaries, persisted formats, USB descriptors, BLE security, memory map,
+release flow) add or supersede an ADR in the same commit.
 
 Run the relevant commands above and record which passed. Changes to pins, timing,
 BLE security, flash, USB descriptors, or power also need the applicable hardware
@@ -99,4 +134,12 @@ separation between open and completed work in [TODO.md](../TODO.md), and update
 the specific guide when behavior or commands change.
 
 Do not include private bond keys, raw memory dumps, or unsanitized input capture
-in a public issue. See [SECURITY.md](../SECURITY.md).
+in a public issue. See the [security policy](../SECURITY.md).
+
+## Related Guides
+
+- [Architecture and ADRs](architecture.md)
+- [Testing](testing.md)
+- [Hardware](hardware.md)
+- [Deployment](deployment.md)
+- [Task reference](../maskfile.md)

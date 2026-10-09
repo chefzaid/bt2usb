@@ -15,7 +15,7 @@
 //!   synthetic BLE scenario, with `Address` substituted by a `u32` stand-in.
 //!
 //! Output is written to **UART0** (Renode's `uart0`), which Renode shows on its
-//! console / analyzer with no probe or decoder. See docs/TESTING.md.
+//! console / analyzer with no probe or decoder. See docs/testing.md.
 
 #![no_std]
 #![no_main]

@@ -1,10 +1,28 @@
-# Release consistency and provenance
+# Deployment Guide
 
-The release workflow prepares a draft for review. It does not establish hardware
-qualification or provide secure boot on the device. See
-[Operations](OPERATIONS.md) for deployment acceptance gates.
+This guide covers how a bt2usb build becomes firmware on a board: the release
+pipeline, provenance verification, flashing, and the gates a deployment release
+must pass. The release workflow prepares a draft for review
+([ADR 0008](adr/0008-attested-draft-releases.md)). It does not establish
+hardware qualification or provide secure boot on the device.
 
-## Version and build policy
+## Delivery Flow
+
+```mermaid
+flowchart LR
+    tag[Tag vX.Y.Z = Cargo version] --> checks[CI: host, audit, embedded, Renode]
+    checks --> package[Verify and attest checked firmware]
+    package --> draft[Draft GitHub release]
+    draft --> verify[Verify provenance and checksums]
+    verify --> flash[Flash with probe-rs]
+    flash --> accept[Hardware acceptance record]
+    accept --> publish[Publish after release-gate review]
+```
+
+Every push and pull request runs the same checks without packaging. Only tags
+produce a draft, and only a person publishes it.
+
+## Version And Build Policy
 
 A release tag must equal `v` followed by the exact `package.version` in
 `Cargo.toml`. For example, version `0.2.0-rc.1` requires tag `v0.2.0-rc.1`; tagging
@@ -22,7 +40,7 @@ python -B -m unittest discover -s scripts -p release_test.py -v
 The helper requires Python 3.11 or newer and uses only the standard library.
 It never creates a tag, uploads an artifact, or publishes a release.
 
-## Artifact flow
+## Artifact Flow
 
 1. The `embedded` job builds and lints the ARM firmware. It converts that ELF to
    Intel HEX and stages the application, self-test, build inputs, and metadata.
@@ -66,7 +84,7 @@ is obtained separately. `SHA256SUMS` covers package payloads, not itself or the
 attestation bundle; the manifest itself is an attested subject, and the bundle's
 signature is checked by the verifier.
 
-## Verify before flashing
+## Verify Before Flashing
 
 Use a GitHub CLI version supporting `gh attestation verify`. Obtain the approved
 release tag and full commit SHA through your review process; a checksum file
@@ -112,7 +130,59 @@ the CLI checks the artifact digest and attestation signature. See the official
 [verification reference](https://cli.github.com/manual/gh_attestation_verify) and
 [artifact attestation guide](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
-## Validation limits
+## Flash A Development Unit
+
+On a new board, complete [first flash](first-flash.md) first: it installs
+SoftDevice S140 v7.3.0 and runs the self-test. To update a board that already
+has SoftDevice:
+
+1. Record the installed version/commit, board revision, and known-working
+   SoftDevice version. Keep the previous ELF and its checksum for recovery.
+2. Review changed pin assignments, memory reservations, and storage format.
+3. Build from the intended revision using the pinned toolchain and `--locked`,
+   or verify a release package as above.
+4. Flash with `mask run --release`, keeping the debugger and native USB paths
+   connected appropriately.
+5. Check boot logs, enumeration, reconnect, input release, and the relevant
+   hardware acceptance cases. Preserve the results with the artifact checksum.
+
+The application image does not include SoftDevice. Install S140 v7.3.0 separately
+on a blank board or after a full-chip erase. Normal application flashing should
+preserve the reserved pairing region; verify the flashing tool's erase settings
+and test this assumption for the selected workflow before relying on it. If an
+update fails, follow the [operations runbook](operations.md#recovery-and-diagnostics).
+
+## Release Gates
+
+The workflow builds on pushes/pull requests and runs scheduled dependency checks.
+Tags matching the exact Cargo package version produce a **draft** release after
+checks pass. Packaging reuses the successful embedded job's firmware rather than
+rebuilding it. The package contains application ELF/HEX, a self-test ELF,
+manifest/lockfile/toolchain inputs, `BUILD-INFO.json`, `SHA256SUMS`, and a signed
+provenance bundle. The draft keeps hardware/release review explicit; it is not
+evidence that those reviews passed.
+
+An automated tag build alone is not production approval. Before publishing a
+deployment release, reviewers should confirm:
+
+- Reproducible source revision, pinned toolchain/dependencies, passing host,
+  embedded, and Renode checks, and recorded build/size results.
+- Hardware results for the supported peripheral/host/hub matrix, including
+  sleep/wake, USB reconnect, link loss with held inputs, and both active slots.
+- Security policy, pairing authentication/enrollment decision, key deletion and
+  physical-access policy, and resolved or explicitly accepted security findings.
+- Assigned USB identity, unit-unique identification, documented production
+  hardware, memory and power margins, and a tested recovery procedure.
+- Release notes listing supported versions, compatibility limits, migrations,
+  rollback constraints, checksums, and the exact SoftDevice prerequisite.
+- Dependency/license review, provenance/signing strategy, a security contact,
+  ownership of support, and an update/support lifetime.
+
+Open implementation and validation tasks live in [TODO.md](../TODO.md). Move an
+item to completed only when its acceptance criteria are met; attach hardware or
+release evidence rather than inferring it from compilation.
+
+## Validation Limits
 
 Local helper tests cover version mismatch/prerelease handling, tampered or missing
 files, build/source identity mismatch, input drift, and unchanged firmware bytes.
@@ -125,3 +195,10 @@ Attestations establish the producing workflow/source identity and artifact bytes
 They do not prove hardware compatibility, absence of vulnerabilities, byte-for-byte
 reproducible builds, or enforcement of signatures by firmware. Production secure
 boot, signed device updates, and rollback policy remain separate work.
+
+## Related Guides
+
+- [First flash](first-flash.md)
+- [Operations](operations.md)
+- [Testing](testing.md)
+- [Security](security.md)

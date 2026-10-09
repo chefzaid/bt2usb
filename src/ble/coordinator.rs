@@ -8,7 +8,7 @@
 //!
 //! Because this module is free of SoftDevice / Embassy / USB types, it compiles
 //! and runs on the host and is exercised directly by unit tests (the
-//! orchestration layer of the docs/TESTING.md). It is generic over the
+//! orchestration layer of the docs/testing.md). It is generic over the
 //! BLE address type so tests can substitute a trivial stand-in for
 //! `nrf_softdevice::ble::Address`.
 

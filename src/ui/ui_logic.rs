@@ -5,7 +5,7 @@
 //! the side effects to perform (which BLE command to send, what to redraw) as
 //! data. The `main.rs` loop is the imperative shell that applies the outcome
 //! (channel send + OLED draw). Being I/O-free, this is host-unit-tested
-//! (the orchestration layer of the docs/TESTING.md).
+//! (the orchestration layer of the docs/testing.md).
 
 /// Screens (views) the UI can be in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

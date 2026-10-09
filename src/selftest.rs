@@ -1,7 +1,7 @@
 //! # bt2usb-selftest — on-board bring-up check
 //!
 //! A separate firmware image to flash **before** the real one on a new board
-//! (see `docs/FIRST_FLASH.md`). It brings up each piece of hardware the way
+//! (see `docs/first-flash.md`). It brings up each piece of hardware the way
 //! the real firmware does — same SoftDevice config, same USB composite device,
 //! same pins — and reports one PASS / FAIL / SKIP line per stage over RTT:
 //!

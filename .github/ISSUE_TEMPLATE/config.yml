@@ -2,4 +2,7 @@ blank_issues_enabled: true
 contact_links:
   - name: Security vulnerability
     url: https://github.com/chefzaid/bt2usb/blob/main/SECURITY.md
-    about: Report suspected vulnerabilities privately, not as a public issue.
+    about: How to report a suspected vulnerability without disclosing details publicly.
+  - name: Recovery and diagnostics
+    url: https://github.com/chefzaid/bt2usb/blob/main/docs/operations.md#recovery-and-diagnostics
+    about: Check the operations runbook for common symptoms before filing a bug.

@@ -1,33 +1,164 @@
 # ADR 0007: Vendor A Minimal nrf-softdevice Patch At A Pinned Revision
 
 - Status: Accepted
-- Date: 2026-10-09
+- Date: 2026-09-28
 
 ## Context
 
-HID Report Maps can be longer than one ATT MTU, which needs ATT Read Blob.
-The pinned upstream `nrf-softdevice` exposed no offset read, panicked on some
-GATT timeouts, and could panic or loop on peer-controlled discovery responses.
-A peripheral in range must not be able to crash the bridge.
+bt2usb reaches the SoftDevice through the `nrf-softdevice` crates
+([ADR 0002](0002-nrf52840-softdevice-embassy.md)). Until 2026-09-28 they were
+git dependencies on `https://github.com/embassy-rs/nrf-softdevice` with no
+`rev`, and `Cargo.lock` was listed in `.gitignore`, so every fresh build could
+resolve a different upstream commit.
+
+Three problems in the GATT client made the pinned upstream unsuitable as is:
+
+- **No offset reads.** A HID Report Map can be longer than one ATT payload.
+  Reading it whole needs ATT Read Blob requests at increasing offsets, and the
+  crate exposed only `gatt_client::read` at offset zero. The firmware of
+  2026-09-26 read the map once into a 128-byte buffer, so a longer map was
+  truncated, and a truncated map can classify reports wrongly.
+- **Timeouts.** A GATT timeout event during discovery or MTU exchange
+  panicked instead of returning an error, and a read could keep waiting after
+  the SoftDevice had abandoned the request, so an unresponsive peer could halt
+  the bridge or hang a connection worker.
+- **Peer-controlled discovery.** Discovery could panic on counts or handles a
+  peer chose, or loop forever when handle arithmetic wrapped at `0xFFFF`.
+
+Anything in radio range can act as a peripheral, so none of these may be able to
+crash or hang the bridge. The application cannot work around them on its own:
+the crate routes every GATT client response through its own event portal
+(`gatt_client::on_evt` and `util::portal`, both `pub(crate)`), so an
+application that issued `sd_ble_gattc_read` itself would never see the reply.
 
 ## Decision
 
-Copy the `nrf-softdevice` crate at a pinned upstream commit into
-`vendor/nrf-softdevice`, apply a small reviewed patch in `gatt_client.rs`
-(offset reads, timeout errors, bounded discovery), and wire it in with a root
-Cargo `[patch]`. Sibling crates stay git dependencies at the same commit. The
-[vendor notes](../../vendor/nrf-softdevice/README.bt2usb.md) record the exact
-changes.
+- Pin `nrf-softdevice` and `nrf-softdevice-s140` to upstream commit
+  `47d6121c6e823120e8b883a7ac75f44ce7daa3aa` in `Cargo.toml`, and commit
+  `Cargo.lock`.
+- Copy the `nrf-softdevice` crate at that commit into `vendor/nrf-softdevice`,
+  under its original MIT and Apache-2.0 licenses, and point the git dependency
+  at the copy with a root `[patch.'https://github.com/embassy-rs/nrf-softdevice']`
+  entry. The sibling crates (`nrf-softdevice-s140`, `nrf-softdevice-macro`)
+  stay git dependencies at the same commit.
+- Keep every functional change in `src/ble/gatt_client.rs` of the vendored
+  crate, and keep it minimal:
+  - add `read_by_offset`, which issues one ATT Read or Read Blob at a given
+    offset, checks that the response handle and offset match the request
+    (`ReadError::InvalidResponse` otherwise), and keeps upstream's
+    `ReadError::Truncated` when the value does not fit the buffer; `read`
+    delegates to it with offset zero
+  - return `Timeout` errors from discovery and MTU exchange instead of
+    panicking on the timeout event, and from reads instead of waiting forever
+  - bound discovery: keep the first six characteristic declarations of a
+    response and resume after the last kept handle, return
+    `DiscoverError::TooManyAttributes` when descriptors overflow the fixed
+    buffer, return `DiscoverError::InvalidResponse` for an empty, out-of-range,
+    out-of-order, or non-advancing response, and saturate handle arithmetic
+- Assemble and bound long values in bt2usb, not in the vendored crate.
+- Record the base commit, every change, and the removal condition in
+  [vendor/nrf-softdevice/README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md).
+- Remove the patch only when the pinned upstream provides equivalent offset
+  reads, timeout errors, and bounded discovery. Never deploy a change by editing
+  Cargo's git checkout.
+
+## Alternatives Considered
+
+- **Wait for upstream.** The panics were reachable by any peripheral in range,
+  so the fix could not wait for an upstream release. Offering the changes
+  upstream remains worthwhile; no upstream pull request is recorded in this
+  repository.
+- **A fork on GitHub, pinned by `rev`.** This works with Cargo, but the patch
+  would live in a second repository with its own history and access control,
+  and reviewing a bt2usb change would mean reviewing a commit somewhere else.
+  Vendoring keeps the patch in the same history as the code that relies on it.
+- **Edit the Cargo git checkout.** It is quick, but the change exists only on
+  one machine and disappears on the next fetch. The vendor notes forbid it.
+- **Issue raw SoftDevice calls from the application.** The response events are
+  consumed by the crate's private portal, so the application cannot receive
+  them without changing the crate anyway.
+- **Read only the first fragment of the Report Map.** That was the 2026-09-26
+  behavior. A truncated map can make a report look like a supported layout when
+  it is not.
+- **Replace the BLE stack.** Moving to Nordic's SoftDevice Controller with a
+  pure-Rust host would remove this patch, but it would also replace the
+  scanner, connection workers, GATT HID client, and bonder; see
+  [ADR 0002](0002-nrf52840-softdevice-embassy.md#alternatives-considered).
+- **Vendor every dependency with `cargo vendor`.** Only one crate needs
+  changes, and `Cargo.lock` with the pinned revision already makes the rest
+  reproducible.
 
 ## Rationale
 
-A committed patch keeps builds reproducible and reviewable, unlike editing a
-Cargo checkout. Keeping the patch minimal keeps rebasing on upstream cheap.
+A committed patch is reproducible and reviewable: anyone building the same
+commit gets the same BLE code, and every changed line went through the same
+review as the rest of the firmware. Keeping the patch to one file and to API
+additions and error paths keeps rebasing on a newer upstream cheap and makes it
+easy to compare with upstream later.
+
+Splitting the work between the crate and the application keeps the crate change
+small. The crate only exposes one ATT fragment per call; bt2usb's
+`LongRead` decides how fragments add up, when a value is complete, and when it
+is too large. That policy is pure and host-tested
+([ADR 0003](0003-pure-core-and-task-shell.md)), while the vendored code is not.
 
 ## Consequences
 
-- The vendored crate keeps upstream formatting; run `cargo fmt` on the bt2usb
-  package only.
-- Upgrading `nrf-softdevice` means re-applying or dropping the patch; drop it
-  only when upstream provides equivalent offset reads, timeout errors, and
-  bounded discovery.
+Positive:
+
+- A peripheral can no longer panic the bridge or hang discovery through these
+  paths, and Report Maps up to 512 bytes are read whole.
+- Builds resolve the same BLE code everywhere, and release packages identify it
+  through the source commit ([ADR 0008](0008-attested-draft-releases.md)).
+
+Negative:
+
+- bt2usb carries a copy of an upstream crate. It keeps upstream formatting, is
+  outside `cargo fmt --package bt2usb`, and has no host tests.
+- The vendored crate depends on `heapless` 0.9 and `embassy-sync` 0.8, while
+  bt2usb itself uses 0.8 and 0.7. `embassy-usb` pulls in the same newer
+  versions, so `Cargo.lock` carries two versions of each either way; the patch
+  does not add to that.
+- Upgrading `nrf-softdevice` means re-applying or dropping the patch and
+  re-reading the upstream changes in between.
+- The patched discovery and read paths are software-reviewed but have no
+  real-peripheral evidence yet.
+
+Follow-up obligations, tracked in [TODO.md](../../TODO.md):
+
+- "Report Map interoperability and legacy policy": capture long Report Map reads
+  and error handling from real peripherals at different MTUs, and decide whether
+  the absent-map fallback stays allowed.
+- "Parser fuzzing and property tests": fuzz the descriptor and long-read paths.
+- "Supply-chain and tooling maintenance": include the vendored crate in license
+  and SBOM checks.
+- Offer the changes upstream, and drop the patch once an upstream release
+  provides the same guarantees.
+
+## Implementation
+
+| Concern | Where |
+| --- | --- |
+| Pin and patch | `nrf-softdevice` and `nrf-softdevice-s140` with `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"` and the `[patch]` entry in [Cargo.toml](../../Cargo.toml); the resolved graph in `Cargo.lock` |
+| Vendored crate | `vendor/nrf-softdevice/` with `LICENSE-MIT`, `LICENSE-APACHE`, and its own `Cargo.toml`, which differs from upstream only in turning the sibling crates' `path` dependencies into git dependencies at the same `rev` |
+| Patched functions | `read_by_offset` (new), `read`, the new variants `ReadError::{Timeout, InvalidResponse}`, `DiscoverError::{Timeout, InvalidResponse, TooManyAttributes}`, and `MtuExchangeError::Timeout` (`ReadError::Truncated` is upstream's), in `vendor/nrf-softdevice/src/ble/gatt_client.rs` |
+| Fragment assembly | `LongRead` in [long_read.rs](../../src/ble/long_read.rs): `MAX_ATTRIBUTE_LEN = 512`, MTU accepted only in `23..=517`, completion only on a short final fragment or a valid end-of-value response |
+| Report Map read | `read_report_map` in [hid_client.rs](../../src/ble/hid_client.rs) maps failures to `BleErrorTag::ReportMapReadFailed`, `ReportMapTooLarge`, or `ReportMapInvalid`, shown as "HID map read failed", "HID map too large", and "Unsupported HID map" |
+| Absent map | Only a missing Report Map characteristic allows legacy classification, logged as `HID report map absent; using legacy report classification` |
+| Discovery failures | `HID discovery failed: {:?}` in `hid_client.rs` |
+| ATT MTU | `att_mtu: 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
+| Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
+
+Host tests cover `LongRead`, including exact-MTU endings and oversized values.
+The vendored functions run only on the board.
+
+## Related
+
+- [Vendor notes](../../vendor/nrf-softdevice/README.bt2usb.md)
+- [Architecture: HID path and limits](../architecture.md#hid-path-and-limits)
+- [Security: supply chain](../security.md#supply-chain)
+- [Development: toolchain](../development.md#toolchain)
+- [ADR 0002: nRF52840, SoftDevice S140, and Embassy](0002-nrf52840-softdevice-embassy.md)
+- [ADR 0003: Hardware-free decision modules](0003-pure-core-and-task-shell.md)
+- [ADR 0008: Attested draft releases](0008-attested-draft-releases.md)
+- [ADR 0013: Pinned toolchain and mask tasks](0013-pinned-toolchain-and-mask-tasks.md)

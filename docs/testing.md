@@ -202,7 +202,10 @@ the firmware's [ble/mod.rs](../src/ble/mod.rs), behind the `embedded` feature;
 built for the host test harness, so these tests are never compiled or run.
 Similar advertisement cases (HID UUID detection, malformed lengths, name
 extraction and truncation) do run through `lib_logic_tests.rs` and
-`ble/adv_parser.rs`, but not case for case. Move or delete them rather than counting them as coverage.
+`ble/adv_parser.rs`, but not case for case. Move or delete them rather than
+counting them as coverage;
+[Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality)
+tracks this.
 
 ### Modules Without Host Tests
 
@@ -434,6 +437,29 @@ Artifacts:
 CI installs the toolchain pinned in `rust-toolchain.toml`, so a local run with
 the same toolchain reproduces its results. `mask ci` runs the local subset.
 
+### Hosted CI Runs
+
+Runs of [ci.yml](../.github/workflows/ci.yml) on `main`, read with
+`gh run list` and `gh run view` on 2026-10-09. The five check jobs are the two
+host-test jobs, the dependency audit, the embedded build, and the Renode test.
+Dependabot pull-request runs are not listed.
+
+| Run ID | Trigger | Commit | Date (UTC) | Result | Jobs |
+| --- | --- | --- | --- | --- | --- |
+| 36441384244 | Push | `2479c79` | 2026-09-28 | Failed | Host tests (ubuntu-latest) failed; the other four check jobs passed |
+| 36441995385 | Push | `8a04b25` | 2026-09-28 | Passed | All five check jobs passed |
+| 37338711407 | Weekly schedule | `8a04b25` | 2026-10-05 | Passed | All five check jobs passed |
+| 37932436721 | Push | `7fc99d6` | 2026-10-09 | Passed | All five check jobs passed |
+| 37967375873 | Push | `802bbf1` | 2026-10-09 | Passed | All five check jobs passed |
+
+The `2479c79` failure was the earlier actionlint installation step, which
+`8a04b25` replaced (see its commit message). In every run, "Verify and attest
+release package" and "Prepare draft firmware release" were skipped, because
+they run only on `v*` tag pushes. No `v*` tag or GitHub release exists, so the
+tag, attestation, and release path has never run on hosted runners;
+[Hosted provenance and release recovery acceptance](../TODO.md#release-provenance-and-supply-chain)
+tracks it.
+
 ### Local And CI Coverage Compared
 
 | Check | `mask ci` | CI |
@@ -456,27 +482,18 @@ jobs reuse the embedded job's bytes.
 
 Complete [first-flash.md](first-flash.md) for a new board and after changes to
 the BLE/USB/storage boundary. Save a separate result record so the template
-remains reusable. Include:
-
-- Commit/tag, ELF SHA-256, Rust version, SoftDevice version, and build profile.
-- Board revision, pin changes, supply arrangement, and debug probe.
-- Peripheral make/model/firmware, host OS version, BIOS/UEFI, monitor and hub.
-- Each checklist result as pass, fail, or skipped with a reason.
-- SoftDevice RAM requirement, stack high-water, timings, and sanitized RTT logs.
+remains reusable: file it with the GitHub "Hardware acceptance result" issue
+template, [hardware-result.md](../.github/ISSUE_TEMPLATE/hardware-result.md),
+labelled `hardware-evidence`. The build, setup, and measurement fields, the
+per-section result tables, and the sanitization checks it asks for are listed
+in [Recording The Result](first-flash.md#recording-the-result).
 
 An unchecked or skipped item is unverified, not a pass. For deployment, also run
 the stress, corruption, and security cases in [TODO.md](../TODO.md). Release
-review uses the [release gates](deployment.md#release-gates).
-
-File the record with the GitHub "Hardware acceptance result" issue template,
-[hardware-result.md](../.github/ISSUE_TEMPLATE/hardware-result.md), labelled
-`hardware-evidence`. It asks for the build, setup, and measurement fields
-above, has one results table per checklist section 0–7 with a `pass`, `fail`,
-or `skip: <reason>` cell per check, and ends with sanitization checkboxes (no
-bond keys, raw flash, or private keystrokes; identifying names, addresses, and
-serials masked; no log from a `trace`-level build).
-[Recording The Result](first-flash.md#recording-the-result)
-walks through it.
+review uses the [release gates](deployment.md#release-gates). A hardware item
+in TODO.md stays unchecked until a record like this covers it, and the record
+names the commit and artifact hash it covers
+([Updating This Checklist](../TODO.md#updating-this-checklist)).
 
 ## Test Design Rules
 
@@ -571,13 +588,20 @@ Specific to the current workflow and test tree:
   firmware build.
 - `cargo audit` runs without a deny option, so unmaintained-crate warnings do
   not fail the job; see the [validation record](#validation-record--2026-09-28).
-- The ten `scanner.rs` tests are never compiled
-  ([details](#tests-that-do-not-run)).
+- The ten `scanner.rs` tests are never compiled, so they are not in the 219
+  host unit tests ([details](#tests-that-do-not-run)); tracked as
+  [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality).
 - Connection workers, the GATT HID client, the storage shell and codec, the USB
   device, and the display driver have no host tests
   ([details](#modules-without-host-tests)).
-- The packaging and draft-release jobs run only on `v*` tag pushes, and the
-  repository records no successful hosted run.
+- `DeviceStore` in `storage.rs` and the address and bond-record encoding in
+  `storage/codec.rs` have no host tests, so the legacy-format parser, the
+  identity merge in `DeviceStore::add`, and bond-record round trips are checked
+  only by the embedded build and on hardware; tracked as
+  [Host tests for the device store](../TODO.md#verification-and-code-quality).
+- The packaging and draft-release jobs run only on `v*` tag pushes. No `v*` tag
+  exists, so they have never run; the check jobs have passed on hosted
+  runners ([Hosted CI Runs](#hosted-ci-runs)).
 
 Track these in [TODO.md](../TODO.md), not as existing coverage.
 
@@ -684,7 +708,7 @@ artifact hash with this record when preparing a release.
 | Formatting and host API documentation | Rustfmt; rustdoc with warnings denied | Passed |
 | Invalid combined feature selection | Cargo check with `--keep-going` | Rejected by the explicit firmware/simulation build guard |
 | Tooling and documentation | Workflow YAML, action pins, shell scripts, 31 mask recipes, local links | Validated; every action SHA resolves to its commented upstream tag (`git ls-remote`); WSL-to-Windows Cargo fallback smoke check passed |
-| GitHub Actions workflow | Remote CI | Not yet verified by a workflow run |
+| GitHub Actions workflow | Remote CI | Not run in this session; later hosted runs passed (see below) |
 | Board/radio/USB acceptance | Physical hardware | Not performed in this validation session |
 
 The dependency audit reports `bare-metal 0.2.5` (`RUSTSEC-2026-0110`) and
@@ -696,10 +720,14 @@ Later history: the record was written before the hardening changes were
 committed as `2479c79` and last edited in `8a04b25` (both 2026-09-28). Since
 `2479c79`, Rust sources, tests, Renode files, and scripts have changed only in
 comments that name renamed documents, so the counts above still describe the
-tree (see [Test Map](#test-map)); the checks were not re-run for those changes.
-The `8a04b25` commit message records that a hosted run failed at the earlier
-actionlint installation step, which that commit replaced; no successful hosted
-run is recorded in the repository.
+tree (see [Test Map](#test-map)); the checks were not re-run locally for those
+changes. The 219 unit tests do not include the ten `scanner.rs` tests, which
+are never compiled ([Tests That Do Not Run](#tests-that-do-not-run)). The
+hosted run on `2479c79` failed at the earlier actionlint installation step,
+which `8a04b25` replaced. Hosted runs later passed all five check jobs on
+`8a04b25` (run 36441995385, 2026-09-28) and on later commits; see
+[Hosted CI Runs](#hosted-ci-runs). The tag-only packaging and release jobs
+have still never run.
 
 ## Related Guides
 

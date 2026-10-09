@@ -53,6 +53,36 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 The [architecture source map](architecture.md#source-map) describes what each
 module is responsible for.
 
+## Getting Started
+
+Pick the path that matches what you have. Each one builds on the one before
+it, and every command runs from the repository root.
+
+1. **No hardware: host tests.** Needs rustup on Linux, macOS, or Windows.
+   rustup reads [rust-toolchain.toml](../rust-toolchain.toml) and selects Rust
+   1.95.0 with rustfmt, Clippy, and the ARM target; if that toolchain is
+   missing, install it as shown under [Toolchain](#toolchain). Then run
+   `mask test`, or without mask (for example in PowerShell)
+   `cargo test --locked --lib --tests`. `mask ci` adds formatting, the three
+   Clippy configurations, and the firmware and simulation builds. The
+   release-helper tests also need Python 3.11 or newer.
+2. **Simulation on Linux or WSL2.** Needs path 1, mask, Bash, `curl`, and
+   `python3`. Run `mask sim-setup` once: it installs portable Renode and the
+   Robot Framework packages under your home directory without root, and
+   prints the line to add when `~/.local/bin` is not on `PATH`. Then run
+   `mask sim-test` for the headless Renode scenario, or `mask sim` for the
+   interactive window. No probe or board is needed
+   ([Renode simulation](testing.md#renode-simulation)).
+3. **A board.** Needs path 1, mask, `probe-rs` (`probe-rs-tools`), `curl`,
+   `unzip`, an nRF52840-DK with its debug probe, and the OLED and buttons
+   wired as in [hardware](hardware.md#parts-and-wiring). Run
+   `mask probe-list` to see the probe, `mask softdevice` once per board to
+   install S140 v7.3.0, `mask selftest` to check the board stage by stage, and
+   `mask run --release` to flash the bridge and stream its logs. Then work
+   through the [first-flash checklist](first-flash.md) and record the result.
+   From WSL2, attach the probe first
+   ([probe access](#probe-access-from-wsl2)).
+
 ## Toolchain
 
 Use Rust through rustup. [rust-toolchain.toml](../rust-toolchain.toml) pins the
@@ -243,7 +273,7 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | `mask flash` | Same command as `mask run --release` | Also stays attached for logs |
 | `mask flash-debug` | Same command as `mask run` | Every profile has RTT logging; this only selects the dev profile |
 | `mask selftest` | `cargo run --locked --features embedded --target <arm> --release --bin bt2usb-selftest` | Needs S140; prints one `[PASS]`, `[FAIL]`, or `[SKIP]` line per stage. Flash the bridge afterwards |
-| `mask softdevice` | Downloads `s140_nrf52_7.3.0.zip` from Nordic with `curl` unless `s140_nrf52_7.3.0_softdevice.hex` already exists, extracts the hex, then `probe-rs download s140_nrf52_7.3.0_softdevice.hex --chip nRF52840_xxAA --format hex` | Stops on download or extraction failure. Checks no digest. The hex stays in the repository root, untracked and not ignored: do not commit it |
+| `mask softdevice` | Downloads `s140_nrf52_7.3.0.zip` from Nordic with `curl` only when `s140_nrf52_7.3.0_softdevice.hex` is missing, extracts the hex, then always runs `probe-rs download s140_nrf52_7.3.0_softdevice.hex --chip nRF52840_xxAA --format hex` | Stops on download or extraction failure. Checks no digest, of a download or of an existing hex. The hex stays in the repository root, excluded by `.gitignore`; do not commit it ([SoftDevice installation](deployment.md#softdevice-installation)) |
 | `mask rtt` | `probe-rs attach --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/bt2usb` | Attaches to a running board without flashing. The ELF must be the release bridge that is on the board |
 | `mask probe-list` | `probe-rs list` | First check for any probe problem |
 
@@ -267,15 +297,16 @@ compares it with CI.
 | Task | Runs | Notes |
 | --- | --- | --- |
 | `mask coverage` | `cargo llvm-cov --locked --lib --tests` when `cargo llvm-cov --version` succeeds; otherwise `cargo tarpaulin --locked --lib --out Stdout` | Prints `No coverage tool found.` and exits 1 if neither tool runs |
-| `mask coverage --html` | llvm-cov: `--html --output-dir coverage-html`; tarpaulin: `--out Html --output-dir coverage` | The recipe prints `coverage-html/html/index.html` for llvm-cov and `coverage/tarpaulin-report.html` for tarpaulin. It does not open a browser, although the recipe's option text says it does |
+| `mask coverage --html` | llvm-cov: `--html --output-dir coverage-html`; tarpaulin: `--out Html --output-dir coverage` | Prints the report path; does not open a browser |
 | `mask coverage --json` | llvm-cov: `--json --output-path coverage.json`; tarpaulin: `--out Json --output-dir coverage` | If both flags are given, `--html` wins |
 | `mask coverage-html` | Same as `mask coverage --html` | |
 | `mask coverage-json` | Same as `mask coverage --json` | |
 | `mask coverage-install` | `cargo install cargo-llvm-cov`, then `rustup component add llvm-tools-preview` | Installs without `--locked` |
 
-The tarpaulin fallback omits `--tests`, so it does not measure
-`tests/integration.rs`. Report coverage as described in
-[code quality](code-quality.md#coverage).
+The report files each tool writes are listed under
+[coverage in the testing guide](testing.md#coverage). What coverage measures,
+why a tarpaulin figure is not comparable with an llvm-cov one, and how to
+report a figure are in [code quality](code-quality.md#coverage).
 
 ### Simulation
 
@@ -366,14 +397,17 @@ The Robot test accepts `--variable ELF:/abs/path` and
 `DEFMT_LOG` is read when the firmware is compiled; changing it requires a
 rebuild, not a reflash with different settings. The levels are `trace`,
 `debug`, `info`, `warn`, `error`, and `off`, and defmt also accepts
-per-module filters such as `info,bt2usb::ble=debug`.
+per-module filters such as `info,bt2usb::ble=debug`. This section covers how
+the level is chosen; what each level reveals about peers and typing is in
+[logging and privacy](security.md#logging-and-privacy), which also says why
+`trace` must never be used on a unit for real typing.
 
 | Level | Use |
 | --- | --- |
 | `debug` | Local default from `.cargo/config.toml`. Adds the application's two `debug!` sites and debug output from dependencies built with their `defmt` feature |
 | `info` | CI and release builds. `release.py package` rejects build metadata whose `defmt_log` is not `info` |
 | `warn` | Hides the self-test's `[PASS]` lines, which are `info`; avoid for bring-up |
-| `trace` | Never on a unit used for real typing: the vendored `nrf-softdevice` logs raw notification bytes at trace |
+| `trace` | Never on a unit used for real typing ([why](security.md#logging-and-privacy)) |
 
 Cargo's `[env]` does not override a variable that is already set, so an
 exported `DEFMT_LOG` wins over the config file:
@@ -385,8 +419,7 @@ DEFMT_LOG=info cargo build --locked --features embedded --target thumbv7em-none-
 `release.py stage` records `DEFMT_LOG` from its own environment and assumes
 `info` when it is unset; it cannot see the value Cargo applied from the config
 file. Set `DEFMT_LOG` explicitly for both the build and the staging command
-when you reproduce the CI staging step locally. Which strings are logged at
-each level is in [security](security.md#logging-and-privacy).
+when you reproduce the CI staging step locally.
 
 ## Devcontainer And WSL2
 

@@ -16,7 +16,7 @@ Three kinds of rule appear below, and the guide says which kind each one is:
 - **Review rule**: a reviewer checks it; no tool does.
 - **Gap**: the rule is wanted but not in place. Gaps are listed under
   [Known Gaps](#known-gaps), with the [TODO.md](../TODO.md) item that tracks
-  each one where an item exists.
+  each one.
 
 Facts in this guide were read from the repository at commit `7fc99d6` plus
 the documentation changes in the working tree, and counts say how they were
@@ -267,7 +267,8 @@ that file with the same rules as application `unsafe`.
 
 **Review rule; not enforced by a lint.** Clippy's
 `undocumented_unsafe_blocks` lint and `#![forbid(unsafe_code)]` are not
-enabled.
+enabled; enabling the lint is the open item
+[Enforce SAFETY comments on unsafe blocks](../TODO.md#verification-and-code-quality).
 
 1. Use `unsafe` only where no safe API does the job. Prefer `StaticCell`,
    Embassy channels and signals, and the safe wrappers in `nrf-softdevice`.
@@ -311,7 +312,8 @@ file's `#[cfg(test)] mod`:
 That table covers the panic macros only. Slice indexing, `RefCell` borrows,
 and `StaticCell` initialization can also panic; Clippy's `indexing_slicing`,
 `unwrap_used`, and `panic` lints are not enabled, so no tool lists those
-sites.
+sites; listing them is the open item
+[Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality).
 
 **Review rule.** Data from a BLE peer, the USB host, or flash must never reach
 a panic. Validate lengths and bounds first and return an error or drop the
@@ -416,7 +418,8 @@ The action pins and their comments are:
 | `softprops/action-gh-release` | `v2.6.2` |
 
 Two comments name a major-version tag rather than an exact release, so they do
-not say which release the SHA was taken from.
+not say which release the SHA was taken from. Replacing them with exact tags
+is part of the open item [CI runtime maintenance](../TODO.md#release-provenance-and-supply-chain).
 
 ### Auditing
 
@@ -577,25 +580,26 @@ for pairing, storage, and input handling.
 ## Known Gaps
 
 The right-hand column names the [TODO.md](../TODO.md) item that tracks each
-gap, where one exists; this list does not repeat the acceptance criteria.
+gap and its priority; this list does not repeat the acceptance criteria.
 
 | Gap | Where it is tracked |
 | --- | --- |
-| CI measures no coverage, no threshold or baseline exists, and firmware rustdoc is not built with warnings denied | [Verification and code quality](../TODO.md#verification-and-code-quality) |
-| No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Verification and code quality](../TODO.md#verification-and-code-quality) |
-| The ten `scanner.rs` tests never compile | [Verification and code quality](../TODO.md#verification-and-code-quality) |
-| The connection workers, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Verification and code quality](../TODO.md#verification-and-code-quality) |
-| No lint enforces `SAFETY` comments, and block 2 in the [unsafe inventory](#inventory) has none | No TODO item |
-| Panic-prone indexing and borrows are not inventoried by any lint | No TODO item |
-| No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Platform, memory and recovery](../TODO.md#platform-memory-and-recovery) |
-| The pairing flash range is defined in both `config.rs` and `memory_sd.x`, with no check that they agree | [Platform, memory and recovery](../TODO.md#platform-memory-and-recovery) ("Single source for the pairing flash range") |
-| The two-connection count is written as separate literals (`MAX_CONNECTIONS`, `SOURCES`, `LED_CONSUMERS`, the `sd_setup.rs` role counts), and the `UiState` capacities 8 and 4 repeat `BLE_MAX_DISCOVERED` and `MAX_PAIRED_DEVICES`, with no compile-time check that they agree | No TODO item |
-| `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain) |
-| No license check, SBOM, or digest check for SoftDevice and Renode downloads; two action pin comments name only a major tag | [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain) |
-| Developer tools install without versions, and `mask deps` omits `--locked` | [Developer experience](../TODO.md#developer-experience) |
-| No automated check of documentation links or documented constants | [Documentation](../TODO.md#documentation) ("Automated documentation checks") |
-| No linter for the Python release helper or the shell scripts | No TODO item |
-| Four source files are over 500 lines again after the split in commit `e3bc620` (`wc -l`: `multi_conn.rs`, `ui_logic.rs`, `hid_device.rs`, `lib_tests.rs`); no tool limits file length | Noted in the completed module-split item under [Verification and code quality](../TODO.md#verification-and-code-quality); no open item |
+| CI measures no coverage, no threshold or baseline exists, and firmware rustdoc is not built with warnings denied | [Coverage and firmware documentation in CI](../TODO.md#verification-and-code-quality) (P1) |
+| No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
+| The ten `scanner.rs` tests never compile | [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality) (P1) |
+| The connection workers, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
+| No lint enforces `SAFETY` comments, and block 2 in the [unsafe inventory](#inventory) has none | [Enforce SAFETY comments on unsafe blocks](../TODO.md#verification-and-code-quality) (P1) |
+| Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
+| No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| The pairing flash range is defined in both `config.rs` and `memory_sd.x`, with no check that they agree | [Single source for the pairing flash range](../TODO.md#platform-memory-and-recovery) (P1) |
+| The two-connection count is written as separate literals (`MAX_CONNECTIONS`, `SOURCES`, `LED_CONSUMERS`, the `sd_setup.rs` role counts), and the `UiState` capacities 8 and 4 repeat `BLE_MAX_DISCOVERED` and `MAX_PAIRED_DEVICES`, with no compile-time check that they agree | [Single source for the link count and UI capacities](../TODO.md#verification-and-code-quality) (P1) |
+| `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| Two action pin comments (`Swatinem/rust-cache`, `taiki-e/install-action`) say `# v2` instead of an exact release | [CI runtime maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| Developer tools install without versions, and `mask deps` omits `--locked` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
+| No automated check of documentation links or documented constants | [Automated documentation checks](../TODO.md#documentation) (P1) |
+| No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
+| Four source files are over 500 lines again after the split in commit `e3bc620` (`wc -l`: `multi_conn.rs`, `ui_logic.rs`, `hid_device.rs`, `lib_tests.rs`); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |
 
 ## Related Guides
 

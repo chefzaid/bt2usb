@@ -214,8 +214,12 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   against `memory_sim.x`. The
   [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
   reports the release bridge, self-test, and simulation builds passing
-  locally, and the combined-feature build being rejected by the guard. No
-  successful hosted CI run is recorded.
+  locally, and the combined-feature build being rejected by the guard. On
+  GitHub-hosted runners, the embedded and simulation jobs linked both layouts
+  successfully in push runs 36441995385 (`8a04b25`, 2026-09-28) and
+  37932436721 (`7fc99d6`, 2026-10-09) and scheduled run 37338711407
+  (2026-10-05). No CI job builds the combined feature set, so the guard is
+  checked only locally.
 - **Hardware-verified:** not yet. The SoftDevice RAM value, the stack
   high-water mark, and the self-test flash stage have no board record in the
   repository; [first flash](../first-flash.md#2-self-test-image) asks for them.

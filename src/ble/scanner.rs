@@ -78,6 +78,9 @@ pub async fn scan(
     // The SoftDevice scan callback receives each advertisement.
     // We use a closure that captures our state.
     let scan_fut = central::scan(sd, &config, |params| {
+        // SAFETY: the SoftDevice guarantees `p_data`/`len` describe the report,
+        // valid for the duration of this callback; `data` does not outlive it
+        // (`merge_advertisement` copies what it keeps).
         let data =
             unsafe { core::slice::from_raw_parts(params.data.p_data, params.data.len as usize) };
 

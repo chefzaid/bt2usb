@@ -232,7 +232,7 @@ pub async fn ble_task(
     let mut last_scan: Option<ScanResult> = None;
     let mut management_token = 0u32;
 
-    // Auto-reconnect the most-recently-used devices (up to the number of
+    // Auto-reconnect the most recently added devices (up to the number of
     // connection slots) so a keyboard + mouse pair both come back after a
     // reboot without manual re-selection.
     let peers: Vec<(DiscoveredDevice, Option<BondInfo>), MAX_CONNECTIONS> = {

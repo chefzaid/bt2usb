@@ -47,20 +47,20 @@ chosen by who reads it:
 | File | Reader and purpose |
 | --- | --- |
 | `README.md` | Everyone: what the device is, its status, the documentation map, a quick start, the roadmap pointer, and the license |
-| `TODO.md` | Everyone tracking progress: the complete work plan, with done tasks checked off and their source references, and open tasks unchecked with a priority and an acceptance criterion |
+| `TODO.md` | Everyone tracking progress: the complete checklist of work, with done tasks checked off and their source references, and open tasks unchecked with a priority and an "Accept when" criterion; it is not a remaining-work list |
 | `SECURITY.md` | Someone reporting a vulnerability: the short policy GitHub links from its security tab |
 | `maskfile.md` | Contributors: the executable task reference (`mask <task>`) |
 | `docs/features.md` | Evaluators and users: the catalog of implemented capabilities, the controls, and the current technical boundaries |
 | `docs/architecture.md` | Design reviewers: runtime architecture, constraints, the ADR process, and the ADR index |
-| `docs/data-model.md` | Anyone changing a persisted format or a wire contract: the pairing store, HID reports, task channels, and data ownership |
-| `docs/hardware.md` | Builders: parts, wiring, compile-time configuration, and the memory map |
-| `docs/development.md` | Contributors: toolchain, commands, devcontainer and WSL, and how to make a change |
-| `docs/code-quality.md` | Contributors and reviewers: the quality gates every change passes and the conventions they enforce |
-| `docs/testing.md` | Contributors and release reviewers: verification layers, CI, and dated validation records |
+| `docs/data-model.md` | Anyone changing a persisted format or a contract: the pairing store, the USB device identity, the HID report contracts, task channels and internal message contracts, error tags and the UI messages they map to, the UI state model, data ownership, and schema change rules |
+| `docs/hardware.md` | Builders: parts and wiring, buttons, OLED, USB, power, clocks and radio, compile-time configuration, the memory map, and porting to another nRF52840 board |
+| `docs/development.md` | Contributors: toolchain, build configurations and log levels, commands, devcontainer and WSL, and how to make a change |
+| `docs/code-quality.md` | Contributors and reviewers: the quality gates every change passes, lint and unsafe-code policy, coverage policy, dependency hygiene, size budgets, and the review checklist |
+| `docs/testing.md` | Contributors and release reviewers: verification layers, how to run tests and coverage, CI, and dated validation records |
 | `docs/first-flash.md` | Whoever brings up a board: the self-test and the hardware acceptance checklist |
 | `docs/deployment.md` | Whoever ships a build: the release pipeline, provenance verification, flashing, and release gates |
 | `docs/operations.md` | Whoever runs or debugs a unit: the recovery and diagnostics runbook |
-| `docs/security.md` | Security reviewers: trust boundaries, implemented controls, and limitations |
+| `docs/security.md` | Security reviewers: trust boundaries, implemented controls, what each log level reveals, and limitations |
 | `docs/adr/NNNN-*.md` | Design reviewers: one architecture decision record per decision |
 
 Two supporting documents keep their place next to what they describe:
@@ -78,10 +78,19 @@ Writing rules for all of them:
   software-verified (host tests, builds, Renode), or hardware-verified (a
   recorded [first-flash](../first-flash.md) result), as defined in
   [ADR 0004](0004-layered-verification.md).
-- **One home per fact.** Constants and the memory map live in
-  `hardware.md`, byte layouts in `data-model.md`, commands in `development.md`
-  and `maskfile.md`, decisions in ADRs. Other documents link to that home
-  instead of repeating it.
+- **One home per fact.** Every fact is written in full in one place, and
+  other documents link to that home instead of repeating it. A document that
+  needs the fact for context keeps the heading and a short paragraph with a
+  link. The homes are:
+  - constants, pins, and the memory map: `hardware.md`
+  - byte layouts, message contracts, error tags and the UI messages they
+    map to: `data-model.md`
+  - commands: `development.md` and `maskfile.md`
+  - log levels: `development.md` for how `DEFMT_LOG` selects them, and
+    `security.md` for what each level reveals
+  - coverage: `testing.md` for how to run it, and `code-quality.md` for the
+    policy: what it measures and how a figure is reported
+  - decisions and their reasons: ADRs
 - **Names and links.** Guides use lower-case kebab-case file names and Title
   Case headings, link to each other with relative paths, and end with a
   "Related Guides" list. Headings are link targets: they may be added or
@@ -199,9 +208,19 @@ Follow-up obligations:
   `hardware-result.md` (labelled `hardware-evidence`, it asks for the commit,
   ELF hash, SoftDevice version, and every checklist result); `config.yml` links
   vulnerability reports to `SECURITY.md`.
-- There is no automated link or constant check yet. The 2026-09-28 validation
-  record in [testing](../testing.md) lists local links as validated in that
-  session; nothing checks them on later commits.
+
+### Verification Status
+
+- **Implemented:** the documents in the table above, the issue templates, and
+  the ADR log.
+- **Software-verified:** by a manual, repository-wide check that every
+  relative link between Markdown files, including its `#anchor`, resolves.
+  The 2026-10-09 check of the restructured documents found no broken link.
+  The [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  also lists local links as validated for the earlier layout. No CI job checks
+  links or documented constants, so nothing catches a link or constant that
+  goes stale on a later commit.
+- **Hardware-verified:** not applicable.
 
 ## Related
 

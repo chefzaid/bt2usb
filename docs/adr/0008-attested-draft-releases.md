@@ -130,11 +130,10 @@ Negative:
   compatibility, the absence of vulnerabilities, reproducibility, or anything
   the device enforces: there is no secure boot, signed update, or rollback
   protection.
-- The release path is configured but unproven. The check jobs it depends on
-  pass on GitHub-hosted runners (push runs for `8a04b25` and `7fc99d6`, and the
-  2026-10-05 scheduled run), but no tag has been pushed, so `release-package`
-  and `release` have never run. Local tests cannot issue OIDC credentials or
-  call the release API.
+- The release path is configured but unproven: no tag has been pushed, so
+  packaging, attestation, and publication have never run (see
+  [Verification Status](#verification-status)). Local tests cannot issue OIDC
+  credentials or call the release API.
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
@@ -167,6 +166,22 @@ Error messages are specific, for example
 `build compiler does not match the pinned Rust toolchain`. A rerun against a
 published release fails with
 `$RELEASE_TAG is already published ($published). Tag a new version instead of re-running.`
+
+### Verification Status
+
+- **Implemented:** everything in the table above.
+- **Software-verified:** the 12 release-helper tests and actionlint pass in
+  the CI host-test job, and the `embedded` job stages and uploads the checked
+  firmware on every run. Those check jobs passed on GitHub-hosted runners in
+  push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`,
+  2026-10-09) and scheduled run 37338711407 (2026-10-05). The tag-only
+  `release-package` and `release` jobs have never run, and no `v*` tag or
+  release exists, so tag validation in CI, packaging against a real run,
+  attestation, the published-release guard, and draft creation are
+  unverified.
+- **Hardware-verified:** not applicable to the pipeline. A release still
+  needs the hardware review in
+  [deployment](../deployment.md#release-gates) before a person publishes it.
 
 ## Related
 

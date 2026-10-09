@@ -226,7 +226,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   `deadlines_saturate_and_wait_never_underflows`). The
   [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
   reports embedded Clippy and the release bridge and self-test builds passing
-  locally; no successful hosted CI run is recorded. No automated test
+  locally. The CI "Embedded build & clippy" job runs the same checks and
+  passed on GitHub-hosted runners in push runs 36441995385 (`8a04b25`,
+  2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and scheduled run
+  37338711407 (2026-10-05). No automated test
   exercises the TWIM stop sequence: host tests cannot reach the driver, and
   the Renode simulation does not run the display.
 - **Hardware-verified:** not yet. The repository holds no board record for the

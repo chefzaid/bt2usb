@@ -121,8 +121,8 @@ bind_interrupts!(struct Irqs {
 /// interrupt, so the application may **not** use `HardwareVbusDetect` (which
 /// would register a conflicting `CLOCK_POWER` handler and touch POWER
 /// registers reserved by the SoftDevice). Instead we use a software detector
-/// fed by SoftDevice SoC power events (see `software_vbus()` and the
-/// `softdevice_task` callback in `main.rs`).
+/// fed by SoftDevice SoC power events (see `SOFTWARE_VBUS` and [`init`] below,
+/// and the `softdevice_task` callback in `main.rs`).
 pub type Vbus = &'static SoftwareVbusDetect;
 
 /// Concrete USB driver type used throughout the firmware.
@@ -334,7 +334,7 @@ pub struct UsbHidDevice {
 ///
 /// `vbus_detected` / `power_ready` seed the software VBUS detector with the
 /// USB regulator state read from the SoftDevice at boot (see
-/// `enable_usb_power_events` in `main.rs`); the SoftDevice's USB power SoC
+/// `enable_usb_power_events` in `sd_setup.rs`); the SoftDevice's USB power SoC
 /// events keep it accurate afterwards, across unplug/replug.
 ///
 /// Must be called exactly once.  All static buffers are consumed here.

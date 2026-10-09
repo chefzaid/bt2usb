@@ -19,6 +19,11 @@ robot_output.xml
 *.robot.log
 snapshots/
 
+# Nordic SoftDevice download written to the repo root by `mask softdevice`
+# (vendor binary; the zip is left behind only if the unzip step fails)
+/s140_nrf52_7.3.0_softdevice.hex
+/softdevice.zip
+
 # Coverage reports (mask coverage)
 coverage-html/
 coverage/

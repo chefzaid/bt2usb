@@ -121,8 +121,9 @@ Negative:
   does not add to that.
 - Upgrading `nrf-softdevice` means re-applying or dropping the patch and
   re-reading the upstream changes in between.
-- The patched discovery and read paths are software-reviewed but have no
-  real-peripheral evidence yet.
+- The patched discovery and read paths have no host tests and no
+  real-peripheral evidence yet (see
+  [Verification Status](#verification-status)).
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
@@ -149,8 +150,20 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | ATT MTU | `att_mtu: 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
 | Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
 
-Host tests cover `LongRead`, including exact-MTU endings and oversized values.
-The vendored functions run only on the board.
+### Verification Status
+
+- **Implemented:** the pin, the vendored crate, and every change listed above.
+- **Software-verified:** host tests cover `LongRead`, including exact-MTU
+  endings and oversized values. The vendored crate compiles into every
+  embedded build; the CI "Embedded build & clippy" job, which builds it,
+  passed on GitHub-hosted runners in push runs 36441995385 (`8a04b25`,
+  2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and scheduled run
+  37338711407 (2026-10-05). The CI format check covers only the application
+  package, and no test exercises the patched functions; they were reviewed,
+  not tested.
+- **Hardware-verified:** not yet. The vendored functions run only on the
+  board, and the repository holds no record of long Report Map reads,
+  discovery, or timeouts against real peripherals.
 
 ## Related
 

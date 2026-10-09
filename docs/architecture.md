@@ -279,8 +279,11 @@ runs, then plans boot reconnects:
 3. If the store is not writable, sends `BleEvent::Error(StorageFailed)`; the UI
    shows "Storage failed". The store stays read-only
    ([ADR 0006](adr/0006-fail-closed-pairing-store.md)).
-4. Takes up to `MAX_CONNECTIONS` (2) records from `iter_recent()`, which yields
-   the most recently added record first.
+4. Takes up to `MAX_CONNECTIONS` (2) records from `iter_recent()`, which
+   reverses insertion order and so yields the most recently added record
+   first. Updating a record does not move it, so "recent" means most recently
+   added, not most recently connected (see the
+   [in-memory cache](data-model.md#in-memory-cache)).
 5. If there is at least one, runs an 8-second scan whose events reach the UI,
    maps each stored peer to a distinct scan result by IRK or by address with
    `reconnect::resolve_reconnect_targets`, reserves slot *i* for target *i*, and
@@ -797,7 +800,8 @@ store disables writes instead of being silently replaced.
 
 Bonded records use stable peer identities. Background reconnects resolve a peer's
 current advertising address on each attempt, including when its private address
-rotates after boot. Up to two recent stored devices are selected at boot. New
+rotates after boot. Up to two stored devices are selected at boot, the most
+recently added first ([in-memory cache](data-model.md#in-memory-cache)). New
 pairing is initiated for explicit user connections; background reconnects use
 existing keys. HID discovery waits for an encrypted link, and commands can cancel
 security/discovery once the connection is owned. Pairing is unauthenticated
@@ -948,31 +952,21 @@ Ownership of the data behind them is listed in the
 
 ### How Errors Surface
 
-BLE and storage failures reach the UI as `BleErrorTag` values (re-exported from
-`coordinator::ErrorTag`). `main` maps each to a fixed message:
+BLE and storage failures reach the UI as `BleErrorTag` values (re-exported
+from `coordinator::ErrorTag`), carried by `BleEvent::Error` or a
+`ManagementResult`; `main` maps each tag to one fixed OLED message in
+`ble_error_message`, and the UI adds a few messages of its own. `DeviceStore`
+returns `StoreError::{Unreadable, Serialization, Flash, NotFound}`, and the
+coordinator collapses every one of them into `StorageFailed`; a load failure
+produces no `StoreError` but disables writes and raises `StorageFailed` once at
+boot. A silent reconnect attempt that fails with `ConnectFailed` is retried
+without telling the UI. Display faults never become tags: `display_task` logs
+them and retries with backoff while the rest of the bridge keeps running.
 
-| Tag | Raised when | UI message |
-| --- | --- | --- |
-| `ScanFailed` | The SoftDevice reports a scan error | "Scan failed" |
-| `ConnectFailed` | Stale index or no free slot; connect attempt timed out or failed; link not encrypted in time, or no keys during a background reconnect | "Connect failed" |
-| `HidNotFound` | HID service discovery failed or found no Report characteristic | "No HID service" |
-| `NotifyFailed` | No input report could be subscribed | "Notify failed" |
-| `StorageFailed` | Store unreadable at boot; saving a new device failed; a Forget or Factory reset could not be persisted, including Forget on a read-only store | "Storage failed" |
-| `ManagementFailed` | Forget named a peer the store no longer holds | "Action failed; retry" |
-| `ReportMapReadFailed` | Report Map read error, unsupported MTU, or a malformed fragment or ending | "HID map read failed" |
-| `ReportMapTooLarge` | Report Map longer than 512 bytes | "HID map too large" |
-| `ReportMapInvalid` | Report Map is malformed, exceeds the parser's nesting bounds, or declares no supported usage | "Unsupported HID map" |
-
-The UI also raises three messages of its own: "Busy; try again" when the
-command channel is full, "Device changed; retry" when a saved-device row no
-longer exists, and "No devices found" after an empty scan. An error stays on
-screen until acknowledged: SELECT starts a scan, DOWN dismisses, and UP opens
-saved devices. Background status changes do not replace it.
-
-`DeviceStore` returns `StoreError::{Unreadable, Serialization, Flash,
-NotFound}`. The coordinator reports every one of them as `StorageFailed`. A
-load failure does not produce a `StoreError`; it disables writes, and the
-coordinator shows `StorageFailed` once at boot.
+The tag, every cause that raises it, and its OLED text are defined in one
+place, the [data model](data-model.md#error-tags-and-ui-messages); what a user
+should do about each message is in
+[features](features.md#notices-and-errors).
 
 ### Retries, Deadlines And Backoff
 
@@ -1036,87 +1030,50 @@ panic.
 
 ## Execution And Power Choices
 
-Tasks yield on I/O; there are no per-task stacks or a dynamic allocator. Blocking
-work in one task can still delay the whole executor. `defmt` supplies compact RTT
-diagnostics. `probe-rs` flashes and runs firmware through a debug probe.
+The design rules are:
 
-The bus-powered design keeps BLE links responsive rather than entering
-System-OFF ([ADR 0012](adr/0012-bus-powered-no-system-off.md)). Input activity
-informs display power policy; the OLED can turn off
-without disconnecting devices. USB remote wakeup requires a newly pressed
-key/modifier, consumer usage, or mouse button during suspend. Motion, scroll,
-releases, repeated held state, and recovery replay do not wake the host.
+- Tasks yield on I/O on one cooperative executor with no per-task stacks and
+  no allocator, so blocking work in any task delays all of them
+  ([what may block](#what-may-block)).
+- The bridge is bus-powered and stays connected: it never enters System-OFF,
+  and power states only decide whether the OLED is on
+  ([ADR 0012](adr/0012-bus-powered-no-system-off.md)).
+- Only a new press during USB suspend may wake the host; motion, releases, held
+  state, and replays never do
+  ([remote wakeup](#usb-suspend-remote-wakeup-and-resume)).
+- The display is isolated: the UI publishes its latest state and never waits
+  for I2C, and a stuck transfer degrades only the display task
+  ([ADR 0009](adr/0009-isolated-display-task.md),
+  [display update](#display-update)).
 
-UI errors and completion notices remain until acknowledged; incoming background
-status changes do not silently replace them. Display updates use the latest
-state. A failed OLED operation retries with bounded exponential backoff. A 500 ms
-operation deadline requests TWIM STOP but retains the DMA future until completion;
-cancelling that future is unsafe in the pinned HAL. If the hardware never reports
-completion, the isolated display task stays degraded while the bridge and UI
-continue ([ADR 0009](adr/0009-isolated-display-task.md)). There is no general
-watchdog recovery guarantee yet.
+Power states, timeouts, and the declared USB current are listed in
+[hardware](hardware.md#power).
 
 ## Configuration
 
-There is no runtime settings store. Behavior is fixed at build time, and the
-pairing store is the only state that survives a reset.
+All configuration is fixed at build time; there is no runtime settings store,
+and the pairing store is the only state that survives a reset. Changing a
+setting means rebuilding and reflashing.
 
-**Constants.** Timing, scan, connection, USB identity, button, display, and
-storage constants live in [src/config.rs](../src/config.rs); their defaults are
-listed in [hardware](hardware.md#configuration-defaults). Pins are not taken
-from `config.rs`: they are chosen where each binary claims its peripherals in
-`main.rs`, `selftest.rs`, and `sim.rs`. Some limits are local to the module
-that enforces them:
-
-| Constant or setting | Value | Defined in |
-| --- | --- | --- |
-| SoftDevice links, ATT MTU, LF clock | 2 central links, 64 bytes, internal RC at 500 ppm | [sd_setup.rs](../src/sd_setup.rs) |
-| `MAX_CONNECTIONS` | 2 | [ble/coordinator.rs](../src/ble/coordinator.rs) |
-| `MAX_REPORTS`, `MAX_REPORT_LEN` | 8 characteristics, 32 bytes | [ble/hid_client.rs](../src/ble/hid_client.rs) |
-| `MAX_ATTRIBUTE_LEN` | 512 bytes | [ble/long_read.rs](../src/ble/long_read.rs) |
-| `ENDPOINT_QUEUE_CAPACITY` | 16 reports | [hid/delivery.rs](../src/hid/delivery.rs) |
-| USB write deadline and retry backoff | 100 ms; 20 ms doubling to 1 s | [hid/delivery.rs](../src/hid/delivery.rs) |
-| `IDLE_TIMEOUT_SECS` | 60 s (Idle; low power after twice that without a link) | [power.rs](../src/power.rs) |
-| `FLASH_WRITE_ATTEMPTS`, `FLASH_RETRY_BACKOFF_MS`, `MAX_RECORD_SIZE` | 3, 20 ms, 512 bytes | [storage.rs](../src/storage.rs) |
-| OLED deadline and retry backoff | 500 ms; 1 s doubling to 30 s | [ui/display.rs](../src/ui/display.rs), [ui/display_logic.rs](../src/ui/display_logic.rs) |
-| USB max power, control packet size | 100 mA, 64 bytes | [usb/hid_device.rs](../src/usb/hid_device.rs) |
-
-**Cargo features.** Each binary declares `required-features`; the library
-builds with none.
-
-| Feature | Enables | Used by |
-| --- | --- | --- |
-| None | `heapless` only; `lib.rs` compiles the pure core | `cargo test --lib --tests`, host Clippy, rustdoc |
-| `embedded` | Embassy executor, nRF HAL, time, USB, sync, futures; `nrf-softdevice` and S140 bindings; SSD1306 async and `embedded-graphics`; `cortex-m-rt` with `paint-stack`; `sequential-storage`; `defmt`, `defmt-rtt`, `panic-probe`; `static_cell` | `bt2usb`, `bt2usb-selftest` |
-| `sim` | The same MCU, Embassy, and display stack without `nrf-softdevice`, USB, or flash storage; `cortex-m/critical-section-single-core` | `bt2usb-sim` |
-| `defmt` | `defmt` formatting derives and log macros in the pure core | Turned on by `embedded` and `sim` |
-
-**Build script.** [build.rs](../build.rs) refuses to build with both
-`embedded` and `sim` (``"features `embedded` and `sim` are mutually exclusive;
-build each separately"``). It copies [memory_sd.x](../memory_sd.x),
-or [memory_sim.x](../memory_sim.x) for `sim`, into `OUT_DIR` as `memory.x`,
-and reruns when either layout or the `sim` feature changes. The sources are not
-named `memory.x` so that the linker cannot pick up a stale copy from the crate
-root.
-
-**Target and linking.** [.cargo/config.toml](../.cargo/config.toml) sets no
-global target, so host tests build natively and the mask tasks pass
-`--target thumbv7em-none-eabihf`. For the ARM target it sets the runner
-`probe-rs run --chip nRF52840_xxAA`, links with `link.x` and `defmt.x` and
-`--nmagic`, does not use flip-link, and sets `DEFMT_LOG = "debug"`. The release
-profile optimizes for size with fat LTO, one codegen unit, and full debug
-info; the dev profile uses `opt-level = 1`.
-
-**Toolchain.** [rust-toolchain.toml](../rust-toolchain.toml) pins Rust 1.95.0
-with the ARM target, and the [maskfile](../maskfile.md) holds the build, flash,
-test, and simulation commands
-([ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)). The day-to-day
-workflow is in [development](development.md).
-
-Changing a constant means rebuilding and reflashing. When a change touches the
-storage reservation, update `STORAGE_FLASH_PAGE_START`/`COUNT`, `memory_sd.x`,
-and the [memory map](hardware.md#memory-layout) together
-([ADR 0010](adr/0010-static-memory-layout.md)).
+- **Constants.** Shared timing, scan, connection, USB identity, button,
+  display, and storage constants live in [src/config.rs](../src/config.rs),
+  which only the firmware binaries compile. Limits that a pure module enforces
+  are defined in that module, so the host crate never depends on `config.rs`
+  (see [module layers](#module-layers-and-dependency-rules)). Pins are chosen
+  where each binary claims its peripherals, in `main.rs`, `selftest.rs`, and
+  `sim.rs`. The values are listed in
+  [hardware: configuration defaults](hardware.md#configuration-defaults) and
+  [hardware: constants outside config.rs](hardware.md#constants-outside-configrs).
+- **Builds.** The `embedded` feature (bridge and self-test, with the
+  SoftDevice) and the `sim` feature (Renode, without SoftDevice, USB, or flash
+  storage) are mutually exclusive: [build.rs](../build.rs) refuses to build
+  both and selects the matching memory map. The library builds with no feature.
+  Commands, features, and memory maps per configuration are in
+  [development](development.md#build-configurations); the toolchain is pinned
+  ([ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)).
+- **Storage reservation.** `STORAGE_FLASH_PAGE_START`/`COUNT`, `memory_sd.x`,
+  and the [memory map](hardware.md#memory-layout) change together
+  ([ADR 0010](adr/0010-static-memory-layout.md)).
 
 ## Architecture Constraints
 
@@ -1164,6 +1121,11 @@ Statuses:
 - **Accepted**: current direction
 - **Superseded**: kept for history and linked to its replacement
 
+Every ADR includes an "Alternatives Considered" section and a
+"Verification Status" subsection under "Implementation" that separates
+implemented, software-verified, and hardware-verified evidence, as in the
+[template](#adr-template).
+
 When an ADR or a code change alters a lifecycle traced in this guide, update
 the matching [key runtime lifecycle](#key-runtime-lifecycles) in the same
 change.
@@ -1204,7 +1166,7 @@ Write an ADR before implementing any of these [TODO.md](../TODO.md) items:
 ```markdown
 # ADR NNNN: Title
 
-- Status: Proposed | Accepted | Superseded
+- Status: Proposed | Accepted | Superseded by ADR NNNN
 - Date: YYYY-MM-DD
 
 ## Context
@@ -1215,6 +1177,10 @@ What forces, constraints, and current facts made this decision necessary?
 
 What did we decide?
 
+## Alternatives Considered
+
+Which other options were weighed, and why was each rejected?
+
 ## Rationale
 
 Why this option over the alternatives?
@@ -1222,6 +1188,21 @@ Why this option over the alternatives?
 ## Consequences
 
 What becomes easier, harder, riskier, or more constrained?
+
+## Implementation
+
+Where the decision lives in the code, configuration, and tooling.
+
+### Verification Status
+
+- **Implemented:** what is in the repository.
+- **Software-verified:** which host tests or Renode scenarios exercise it.
+- **Hardware-verified:** which recorded first-flash result covers it, or "not
+  yet".
+
+## Related
+
+Links to guides, other ADRs, and TODO.md items.
 ```
 
 ## Related Guides

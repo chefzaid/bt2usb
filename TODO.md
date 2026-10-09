@@ -26,19 +26,19 @@ probe, or USB host to close.
 | --- | ---: | ---: | ---: |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 11 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 3 | 2 | 0 |
-| [USB HID Device](#usb-hid-device) | 4 | 3 | 2 |
+| [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
 | [UI, Display And Power](#ui-display-and-power) | 8 | 3 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 6 | 6 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 4 | 6 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 6 | 8 | 3 |
-| [Developer Experience](#developer-experience) | 6 | 1 | 0 |
-| [Documentation](#documentation) | 3 | 1 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 4 | 12 | 0 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
+| [Developer Experience](#developer-experience) | 7 | 2 | 0 |
+| [Documentation](#documentation) | 4 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 7 | 0 |
-| **Total** | **61** | **57** | **22** |
+| **Total** | **64** | **66** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -132,8 +132,13 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [ ] **P0** **Authenticated pairing and enrollment policy.** *(hardware)*
   Implement the ADR above: define whether each supported device uses
   authenticated pairing, how user presence is checked, and whether weaker
-  devices are rejected; add a bounded pairing window and visible state. Accept
-  when downgrade, unsolicited pairing, timeout, and reconnect cases have
+  devices are rejected; add a bounded pairing window and visible state.
+  Require LE Secure Connections and a 16-byte minimum encryption key size.
+  Today `Bonder` in `src/ble/multi_conn.rs` does not override
+  `security_params`, so pairing uses the vendored `default_security_params`
+  (`vendor/nrf-softdevice/src/ble/gap.rs`), which sets `min_key_size = 7` and
+  leaves the LE Secure Connections flag clear. Accept when downgrade, legacy
+  pairing, short-key, unsolicited pairing, timeout, and reconnect cases have
   automated tests plus representative real-device evidence
   ([security](docs/security.md#pairing-and-authentication)).
 - [ ] **P0** **Refuse peer-initiated pairing on background reconnects.**
@@ -228,6 +233,14 @@ Context: [features](docs/features.md#usb-hid-device) and
   transitions, and reject invalid control requests consistently. Accept when
   descriptor/request tests and USB captures from a real host demonstrate the
   supported behavior ([testing](docs/testing.md#known-verification-gaps)).
+- [ ] **P1** **Confirm USB stability without an explicit HFXO request.**
+  *(hardware)* The USB peripheral needs the high-frequency crystal oscillator,
+  but nothing under `src/` calls `sd_clock_hfclk_request` or otherwise starts
+  it, so the USB clock depends on whatever the SoftDevice and `embassy-nrf`
+  start on their own. Accept when a bring-up log and a long enumeration and
+  typing run on a board show USB stays stable with the radio idle and active,
+  or the firmware requests the crystal explicitly and that change has the same
+  evidence ([hardware](docs/hardware.md#clocks-and-radio)).
 
 ## Input Aggregation And Delivery
 
@@ -312,9 +325,11 @@ Context: [data model](docs/data-model.md#pairing-store),
 - [ ] **P1** **Versioned storage migration.** Document each wire version and
   supported upgrade/downgrade paths. The legacy parser and the identity merge in
   `DeviceStore` live in `src/storage.rs`, which the host crate does not compile,
-  so they have no host tests today. Accept when fixture tests reject unknown
-  versions and cover valid legacy conversion, malformed data, and capacity
-  changes ([data model](docs/data-model.md#schema-change-rules)).
+  so they have no host tests today (see "Host tests for the device store" under
+  [Verification And Code Quality](#verification-and-code-quality)). Accept
+  when fixture tests reject unknown versions and cover valid legacy
+  conversion, malformed data, and capacity changes
+  ([data model](docs/data-model.md#schema-change-rules)).
 - [ ] **P1** **Pairing region survives application reflash.** *(hardware)*
   Normal application flashing is expected to preserve pages 240 to 243, but the
   erase behavior of `probe-rs` in `mask run --release` has not been checked.
@@ -379,13 +394,27 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   the lost-reply path and a late reply is rejected by its request ID
   ([features](docs/features.md#manage-saved-devices)).
 - [ ] **P1** **Visible storage/security errors.** Surface pairing persistence
-  failure, full-store replacement, unsupported reports, and security failures
-  with useful user actions. Today a failed save shows only the generic
-  `Storage failed` error, a link that cannot be secured shows `Connect failed`
-  (`ble_error_message` in `src/main.rs`), and full-store replacement is only a
-  `Paired device store full - evicting oldest entry` log line. Accept when UI
-  tests cover every state and a user
-  can distinguish a temporary link failure from a peer that was not saved
+  failure, bond replacement, full-store eviction, unsupported reports, and
+  security failures with useful user actions. Today a failed save shows only
+  the generic `Storage failed` error, and a link that cannot be secured shows
+  `Connect failed` (`ble_error_message` in `src/main.rs`). Three cases do not
+  reach the user at all. A newly paired device whose identity address matches
+  a stored peer replaces that peer's record and bond (`DeviceStore::add` in
+  `src/storage.rs`, `Bonder::on_bonded` in `src/ble/multi_conn.rs`), leaving
+  only the `Updated existing paired device` log line. A full store evicts its
+  oldest peer with only the
+  `Paired device store full - evicting oldest entry` log line. A background
+  reconnect whose link cannot be secured, because the peer lost its keys or
+  the store has none for it (a legacy record carries no bond), fails with
+  `ConnectFailed`, which a silent reconnect treats as "try again"
+  (`connection_slot_task` in `src/ble/multi_conn.rs`); the slot retries after
+  each `BLE_RECONNECT_BACKOFF_MS` pause, with no limit, and the UI shows
+  nothing. Accept when UI tests cover every state; the user is told, before or
+  when it happens, that a pairing replaced an existing peer's bond or evicted
+  the oldest peer; a reconnect that fails for missing keys on either side ends
+  in a visible state that tells the user to pair the device again instead of
+  retrying silently; and a user can distinguish a temporary link failure from
+  a peer that was not saved
   ([operations](docs/operations.md#recovery-and-diagnostics)).
 
 ## Platform, Memory And Recovery
@@ -475,9 +504,18 @@ Physical access, key protection, and production provisioning. Context:
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
 - [ ] **P0** **Provisioning and physical key protection.** *(hardware)* Define
   production debug access, readout protection, key lifetime, disposal, and
-  service recovery. Accept when the threat model and provisioning procedure are
-  reviewed and readout/recovery behavior is demonstrated on a
-  production-equivalent board
+  service recovery. Today `src/main.rs` and `src/selftest.rs` pass
+  `embassy_nrf::config::Config::default()` to `embassy_nrf::init`, changing
+  only interrupt priorities. In the pinned embassy-nrf 0.7.0 that default sets
+  `debug: Debug::Allowed`, and on nRF52 chips with the improved APPROTECT
+  `init` then writes `UICR.APPROTECT` to its software-disabled value and
+  disables APPROTECT at every boot. Readout protection therefore needs
+  `nrf_config.debug` set to `Debug::Disallowed` in the production build, plus a
+  documented UICR and recovery procedure: how a unit flashed with a
+  debug-allowed build is protected, and how a protected unit is reopened for
+  service, which erases the whole chip, pairing store included. Accept when the
+  threat model and provisioning procedure are reviewed and readout/recovery
+  behavior is demonstrated on a production-equivalent board
   ([security](docs/security.md#key-storage-and-deletion)).
 - [ ] **P1** **Vendored debug and trace logs.** Local builds log at `debug`
   (`.cargo/config.toml`), where the vendored `nrf-softdevice` records each peer
@@ -550,8 +588,7 @@ Host tests, simulation, and code-health work. Context:
   host library (`src/lib.rs`, `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
   `src/ble/coordinator_tests.rs`, `src/hid_descriptor_tests.rs`,
   `src/storage/codec.rs`; commit `e3bc620`). Four files are over 500 lines
-  again today (`src/ble/multi_conn.rs`, `src/ui/ui_logic.rs`,
-  `src/usb/hid_device.rs`, `src/lib_tests.rs`, counted with `wc -l`).
+  again; see "Keep source files within a size limit" below.
 - [x] SoftDevice-free Renode build and a headless GPIO/UI/coordinator scenario
   (`src/sim.rs`, `memory_sim.x`, `renode/bt2usb-sim.resc`,
   `renode/bt2usb-sim.robot`).
@@ -579,24 +616,86 @@ Host tests, simulation, and code-health work. Context:
   `src/` is compiled by `cargo test --locked --lib --tests`
   ([testing](docs/testing.md#tests-that-do-not-run)).
 - [ ] **P1** **Host tests for the I/O shells.** The connection workers, GATT
-  HID client, storage shell and codec, USB device, and display driver
-  (`src/ble/multi_conn.rs`, `src/ble/hid_client.rs`, `src/storage.rs`,
-  `src/storage/codec.rs`, `src/usb/hid_device.rs`, `src/ui/display.rs`) have no
-  host tests; only the pure modules they call do. Move remaining decisions into
-  hardware-free modules or test the shells against fakes. Accept when each has
-  host tests for its error paths, or the testing guide records why it cannot
+  HID client, USB device, and display driver (`src/ble/multi_conn.rs`,
+  `src/ble/hid_client.rs`, `src/usb/hid_device.rs`, `src/ui/display.rs`) have
+  no host tests; only the pure modules they call do. The storage shell is the
+  next item. Move remaining decisions into hardware-free modules or test the
+  shells against fakes. Accept when each has host tests for its error paths, or
+  the testing guide records why it cannot
+  ([testing](docs/testing.md#modules-without-host-tests)).
+- [ ] **P1** **Host tests for the device store.** `DeviceStore` in
+  `src/storage.rs` loads, merges by identity address, evicts the oldest record
+  when full, forgets, and factory-resets the pairing store, and it holds the
+  legacy-format parser (`deserialize_legacy`); the byte codec is in
+  `src/storage/codec.rs`. The host crate compiles only `storage/framing.rs`
+  and `storage/record.rs`, so none of this has a host test. Move the in-memory
+  logic and the codec into host-compiled modules, or test them against a fake
+  flash. Accept when host tests cover load of valid, legacy, malformed, and
+  unreadable stores, identity merge and bond replacement, eviction at
+  `MAX_PAIRED_DEVICES`, forget, factory reset, and a codec round trip
   ([testing](docs/testing.md#modules-without-host-tests)).
 - [ ] **P1** **Broaden the Renode scenarios.** The Robot test runs one scripted
-  scenario; it does not exercise the OLED task, the saved-device management
-  screens, or the link-loss slot-reservation path. Add scenarios for each.
-  Accept when `mask sim-test` and the CI simulation job assert those paths
-  through UART output ([testing](docs/testing.md#renode-scenario-map)).
+  scenario; it does not exercise the OLED task or the saved-device management
+  screens. It also does not exercise link loss: step 2 of the scenario logs
+  `scenario: slot 0 link lost` but calls `coordinator::on_slot_disconnected`,
+  which frees the slot, instead of `coordinator::on_slot_link_lost`, which keeps
+  it reserved for reconnection (`src/sim.rs` `scenario_step`). Make step 2 call
+  `on_slot_link_lost` and add scenarios for the other two paths. Accept when
+  `mask sim-test` and the CI simulation job assert the reserved slot after a
+  link loss, the OLED task, and the management screens through UART output
+  ([testing](docs/testing.md#renode-scenario-map)).
 - [ ] **P1** **Coverage and firmware documentation in CI.** CI measures no
   coverage and builds rustdoc only for the host library. Publish the
   `cargo llvm-cov` report as a CI artifact, set a threshold once a baseline is
   recorded, and build firmware rustdoc with warnings denied. Accept when a
   coverage drop below the threshold or a firmware rustdoc warning fails CI
   ([code quality](docs/code-quality.md)).
+- [ ] **P1** **Enforce SAFETY comments on unsafe blocks.** The rule that every
+  `unsafe` block carries a `// SAFETY:` comment is a review rule only; the
+  scan-closure block in `src/ble/scanner.rs` was the last of the six without
+  one. Enable Clippy's `undocumented_unsafe_blocks` lint for the firmware,
+  self-test, and simulation builds, which CI already runs with `-D warnings`.
+  Accept when an `unsafe` block without a `SAFETY` comment fails the CI Clippy
+  steps ([code quality](docs/code-quality.md#unsafe-code-policy)).
+- [ ] **P1** **Single source for the link count and UI capacities.** The
+  two-link limit is written separately as `MAX_CONNECTIONS` in
+  `src/ble/coordinator.rs`, `SOURCES` in `src/hid/aggregate.rs`,
+  `LED_CONSUMERS` in `src/usb/hid_device.rs`, and the literal `conn_count`,
+  `central_role_count`, and `central_sec_count` values of 2 in
+  `src/sd_setup.rs`. The `UiState` capacities in `src/ui/ui_logic.rs`
+  (`devices` holds 8, `paired_names` holds 4) repeat `BLE_MAX_DISCOVERED` and
+  `MAX_PAIRED_DEVICES` from `src/config.rs` as literals. Derive each from one
+  constant, or add `const _: () = assert!(…)` checks like the one on the
+  pairing record size in `src/storage.rs`. Accept when changing any one of
+  these values alone fails the build or changes the others with it
+  ([code quality](docs/code-quality.md#known-gaps)).
+- [ ] **P2** **Inventory panic sites in firmware paths.** The
+  [panic table](docs/code-quality.md#panics-allocation-and-arithmetic) lists
+  the application's `unwrap!`, `expect`, and `unreachable!` sites, but not slice
+  indexing, `RefCell` borrows, or `StaticCell` initialization, and not the
+  vendored crate. The compiled vendored modules panic on an unexpected
+  SoftDevice event (`panic!("unexpected event {}", e)`, four times in
+  `vendor/nrf-softdevice/src/ble/gatt_client.rs` and once in `central.rs`).
+  Accept when every `unwrap!`, `expect`, `unreachable!`, and `panic!` reachable
+  from the bridge, application and vendored, is listed with the reason it
+  cannot fire, or is replaced by an error path
+  ([code quality](docs/code-quality.md#panics-allocation-and-arithmetic)).
+- [ ] **P2** **Lint the release helper and shell scripts.** CI runs no Python
+  or shell linter: CI runs `scripts/release.py` and its unit tests in
+  `scripts/release_test.py` but does not lint them, and
+  `scripts/install-renode.sh`,
+  `scripts/run-tool.sh`, `.devcontainer/post-create.sh`, and the 31 Bash
+  recipes in `maskfile.md` are not checked at all. Add Ruff (or an equivalent)
+  for the Python files and ShellCheck for the scripts and the extracted
+  `maskfile.md` recipes. Accept when a lint finding in any of them fails CI
+  ([code quality](docs/code-quality.md#other-files)).
+- [ ] **P2** **Keep source files within a size limit.** Four files are over
+  500 lines again after the split in commit `e3bc620` (`wc -l` at `802bbf1`:
+  `src/ble/multi_conn.rs` 821, `src/ui/ui_logic.rs` 603,
+  `src/usb/hid_device.rs` 521, `src/lib_tests.rs` 503), and no tool limits file
+  length. Accept when each is split below the limit, or a recorded limit with
+  named exceptions is checked in CI
+  ([code quality](docs/code-quality.md#known-gaps)).
 
 ## Release, Provenance And Supply Chain
 
@@ -608,6 +707,13 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
 
 - [x] GitHub Actions build/test/simulation workflow and tag-based firmware
   artifact generation (`.github/workflows/ci.yml`).
+- [x] Migrate to current embedded crate releases (commit `dc11b4a`, "Upgrade
+  crates versions and fix latent issues"): `embassy-executor` 0.7 to 0.10
+  (feature `arch-cortex-m` renamed `platform-cortex-m`), `embassy-nrf` 0.3 to
+  0.7, `embassy-time` 0.4 to 0.5, `embassy-usb` 0.4 to 0.6, `ssd1306` 0.9 to
+  0.10, `sequential-storage` 3 to 7, and `defmt`, `defmt-rtt`, and
+  `panic-probe` to 1.x; `usbd-hid` and `cortex-m-semihosting` were removed
+  (`Cargo.toml`). *(hardware evidence pending)*
 - [x] Pin Rust/dependency resolution and BLE Git revision, align Cargo license
   metadata with the existing GPL license, and use locked build tasks
   (`rust-toolchain.toml`, `Cargo.lock`, `Cargo.toml`, `maskfile.md`;
@@ -658,6 +764,15 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   expectations. Accept when dependency/advisory review, license inventory, and
   remediation tracking are part of a documented release procedure
   ([security policy](SECURITY.md)).
+- [ ] **P2** **Create the hardware-evidence issue label and enable private
+  vulnerability reporting.** The
+  [hardware-result template](.github/ISSUE_TEMPLATE/hardware-result.md) applies
+  the `hardware-evidence` label, which does not exist in the repository, and
+  GitHub private vulnerability reporting is disabled (both checked with the
+  GitHub REST API on 2026-10-09), so [SECURITY.md](SECURITY.md) has no private
+  channel to point to. Accept when a new hardware-result issue carries the
+  label, the **Report a vulnerability** button opens a private advisory, and
+  SECURITY.md names that channel.
 - [ ] **P1** **Supply-chain and tooling maintenance.** Extend the dependency
   audit and update automation with license checks, an SBOM artifact, and
   verified digests for downloaded non-Cargo tooling/SoftDevice inputs; today
@@ -692,8 +807,11 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   requests #4 and #5 were closed unmerged) and pin or validate the runner
   image. Replace the `# v2` comments on the `Swatinem/rust-cache` and
   `taiki-e/install-action` pins with the exact release each SHA resolves to.
-  Accept when a run shows no deprecation annotations and every pin comment
-  names its exact tag
+  On 2026-10-09 `git ls-remote` showed the `install-action` SHA is tag
+  `v2.87.21`, and the `rust-cache` SHA is the annotated `v2` tag object, whose
+  commit `6323deb` is tag `v2.9.2`; pin that commit instead of the tag object.
+  Accept when a run shows no deprecation annotations and every pin is a commit
+  SHA whose comment names its exact tag
   ([testing](docs/testing.md#continuous-integration)).
 - [ ] **P1** **Reproducible firmware evidence.** Compare artifacts from two
   clean environments, document remaining nondeterminism, and enforce release
@@ -723,13 +841,25 @@ Tasks, tooling, and environments for working on the firmware. Context:
 - [x] Stop devcontainer setup when required tool installation or its host-test
   smoke check fails (`.devcontainer/post-create.sh`). Scoped probe permissions
   and optional-tool/container pinning remain open below.
+- [x] Ignore the downloaded SoftDevice HEX and zip that `mask softdevice`
+  writes to the repository root (`/s140_nrf52_7.3.0_softdevice.hex` and
+  `/softdevice.zip` in `.gitignore`; 2026-10-09).
 - [ ] **P1** **Development environment hardening.** *(hardware)* Pin optional
   tools/container inputs and replace blanket container privilege with scoped
   probe access where feasible. Today the devcontainer runs `--privileged` on the
-  `mcr.microsoft.com/devcontainers/rust:1-bookworm` tag, and `mask deps` runs
-  `cargo install` without `--locked`. Accept when fresh Linux/WSL setups pass
-  checks and a no-probe setup still works
+  `mcr.microsoft.com/devcontainers/rust:1-bookworm` tag. The `mask` install
+  recipes are the next item. Accept when fresh Linux/WSL setups pass checks and
+  a no-probe setup still works
   ([development](docs/development.md#devcontainer-and-wsl2)).
+- [ ] **P2** **Fix maskfile coverage and install recipes.** The tarpaulin
+  fallback in `mask coverage`, `coverage-html`, and `coverage-json` runs
+  `cargo tarpaulin --locked --lib` without `--tests`, so it skips the
+  integration tests that the `cargo llvm-cov` path includes with
+  `--lib --tests`. `mask coverage-install` and `mask deps` run `cargo install`
+  without `--locked` or pinned versions. Accept when both coverage paths
+  measure the same test set and every `cargo install` that a `maskfile.md`
+  recipe runs uses `--locked` with a pinned version
+  ([development](docs/development.md#environment-setup)).
 
 ## Documentation
 
@@ -748,6 +878,13 @@ Guides, ADRs, and this plan. Context:
   [code quality](docs/code-quality.md) guide and ADRs 0009 to 0014 for
   decisions already in the code, simplified the README, and rebuilt this file as
   the complete work plan with done and open work side by side (2026-10-09).
+- [x] Applied a second review pass across the guides: corrected facts against
+  the source, configuration, and git history; added a "Verification Status"
+  section to each ADR's Implementation; made the
+  [data model](docs/data-model.md#error-tags-and-ui-messages) the one home for
+  error tags and their causes, with the user-facing table in
+  [features](docs/features.md#notices-and-errors) linking to it; and recorded
+  the review's open findings in this plan (2026-10-09).
 - [ ] **P1** **Automated documentation checks.** Validate local links, command
   examples, and configuration/memory-map consistency in CI. Accept when a broken
   link or stale documented constant produces a targeted failure

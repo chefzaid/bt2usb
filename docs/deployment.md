@@ -15,10 +15,15 @@ path, so every install, update, and rollback is a probe operation (see
 does not report its version over USB or RTT; a unit is identified by the
 artifact hash recorded when it was flashed.
 
-No `v*` tag has been pushed to the repository yet, so the packaging,
-attestation, and draft-release jobs described below have not run on GitHub.
-Their configuration is checked by `actionlint` and by the release helper's
-tests; the first hosted run is an open acceptance item in
+The five check jobs (host tests on Linux and Windows, audit, embedded build,
+and Renode) have passed on GitHub: push run `36441995385` (commit `8a04b25`,
+2026-09-28), scheduled run `37338711407` (2026-10-05), and push run
+`37932436721` (commit `7fc99d6`, 2026-10-09); run `36441384244` (commit
+`2479c79`) failed. No `v*` tag or release exists yet, so the tag-only
+`release-package` and `release` jobs described below have never run. Their
+configuration is checked by `actionlint` and by the release helper's tests;
+the first hosted tag run is the open item "Hosted provenance and release
+recovery acceptance" in
 [TODO.md](../TODO.md#release-provenance-and-supply-chain).
 
 ## Delivery Flow
@@ -90,6 +95,18 @@ The check does not enforce that the tag is on `main`, that the version
 increased, that the tag is annotated or signed, or that release notes exist.
 Those are review steps.
 
+Check a proposed tag without creating or pushing it, and run the helper's
+regression tests:
+
+```sh
+python scripts/release.py validate-tag --tag v0.1.0
+python -B -m unittest discover -s scripts -p release_test.py -v
+```
+
+The helper requires Python 3.11 or newer (it uses `tomllib`) and only the
+standard library. It never creates a tag, uploads an artifact, or publishes a
+release.
+
 ### Cut A Prerelease Or Release
 
 1. Pick the version. Use a prerelease such as `0.2.0-rc.1` for a build that
@@ -127,26 +144,9 @@ again; never move a tag whose release is published.
 
 ## Version And Build Policy
 
-A release tag must equal `v` followed by the exact `package.version` in
-`Cargo.toml`; [Version Lifecycle](#version-lifecycle) gives the full rule. For
-example, version `0.2.0-rc.1` requires tag `v0.2.0-rc.1`; tagging the same
-source as `v0.2.0` fails.
-
-Check a proposed tag without creating or pushing it, and run the helper's
-regression tests:
-
-```sh
-python scripts/release.py validate-tag --tag v0.1.0
-python -B -m unittest discover -s scripts -p release_test.py -v
-```
-
-The helper requires Python 3.11 or newer (it uses `tomllib`) and only the
-standard library. It never creates a tag, uploads an artifact, or publishes a
-release. The test module has twelve tests (counted with
-`grep -c "def test_" scripts/release_test.py`).
-
-Release firmware is built with these fixed inputs, and packaging rejects a
-build that differs:
+The tag rule and the helper that checks it are under
+[Version Lifecycle](#version-lifecycle). Release firmware is built with these
+fixed inputs, and packaging rejects a build that differs:
 
 | Input | Value | Enforced by |
 | --- | --- | --- |
@@ -300,40 +300,28 @@ v7.3.0 below it. [memory_sd.x](../memory_sd.x) reserves flash
 after any full-chip erase, and never mix in a different SoftDevice version or
 variant: the bindings and memory map are written for S140 v7.3.0.
 
-The `softdevice` task in [maskfile.md](../maskfile.md) downloads Nordic's
-archive if `s140_nrf52_7.3.0_softdevice.hex` is not already in the repository
-root, extracts that file, and flashes it:
+Run `mask softdevice`. The [`softdevice` recipe](../maskfile.md#softdevice)
+downloads Nordic's `s140_nrf52_7.3.0.zip` with `curl` only when
+`s140_nrf52_7.3.0_softdevice.hex` is missing from the repository root,
+extracts that HEX, and then always flashes it with `probe-rs download`. It
+stops on a download or extraction failure, but it never checks a digest: not
+of a fresh download, and not of a HEX that is already present. The recipe in
+`maskfile.md` is the exact command list.
 
-```bash
-set -euo pipefail
-SD_URL="https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/softdevices/s140/s140_nrf52_7.3.0.zip"
-SD_HEX="s140_nrf52_7.3.0_softdevice.hex"
-
-if [ ! -f "$SD_HEX" ]; then
-    echo "Downloading SoftDevice S140 v7.3.0..."
-    curl -fL --retry 3 "$SD_URL" -o softdevice.zip
-    unzip -o softdevice.zip "$SD_HEX"
-    rm softdevice.zip
-fi
-
-echo "Flashing SoftDevice..."
-./scripts/run-tool.sh probe-rs download "$SD_HEX" --chip nRF52840_xxAA --format hex
-echo "Done! SoftDevice is ready."
-```
-
-Run it with `mask softdevice`. Without mask, place the HEX in the current
-directory and run the same probe-rs command directly:
+Without mask, place the HEX in the current directory and run the same
+probe-rs command directly:
 
 ```sh
 probe-rs download s140_nrf52_7.3.0_softdevice.hex --chip nRF52840_xxAA --format hex
 ```
 
-The recipe stops on a download or extraction failure, but it does not check a
-digest of Nordic's archive, and it reuses an existing HEX without re-checking
-it. Record the archive's source and SHA-256 with the hardware evidence;
-digest verification for non-Cargo downloads is open work in
-[TODO.md](../TODO.md#release-provenance-and-supply-chain). The extracted HEX stays in the repository root; do not
-commit it.
+Record the archive's source and SHA-256 with the hardware evidence; digest
+verification for non-Cargo downloads is part of the open item "Supply-chain
+and tooling maintenance" in
+[TODO.md](../TODO.md#release-provenance-and-supply-chain). The extracted HEX
+stays in the repository root, where `.gitignore` excludes it; never commit
+it. Its license is described under
+[Third-Party Components And Licenses](#third-party-components-and-licenses).
 
 The SoftDevice is installed correctly when the self-test prints
 `[PASS] softdevice` and the bridge logs `softdevice RAM: N bytes` followed by
@@ -480,33 +468,98 @@ recovery steps in order of impact.
 
 ## Release Gates
 
-The workflow builds on pushes/pull requests and runs scheduled dependency checks.
-Tags matching the exact Cargo package version produce a **draft** release after
-checks pass. Packaging reuses the successful embedded job's firmware rather than
-rebuilding it. The package contains application ELF/HEX, a self-test ELF,
-manifest/lockfile/toolchain inputs, `BUILD-INFO.json`, `SHA256SUMS`, and a signed
-provenance bundle. The draft keeps hardware/release review explicit; it is not
-evidence that those reviews passed.
+The workflow runs its checks on pushes to `main` or `master`, pushes of `v*`
+tags, pull requests, manual dispatch, and a weekly schedule that runs the whole
+workflow, not only the audit ([Delivery Flow](#delivery-flow)). Only a pushed
+tag that matches the exact Cargo package version produces a **draft** release,
+after every check job passes. Packaging reuses the successful embedded job's
+firmware rather than rebuilding it; the package contents are listed under
+[Artifact Flow](#artifact-flow). The draft keeps hardware and release review
+explicit; it is not evidence that those reviews passed.
 
 An automated tag build alone is not production approval. Before publishing a
-deployment release, reviewers should confirm:
+deployment release, reviewers confirm each gate below. Each one is closed by
+the [TODO.md](../TODO.md) items named with it, all of which are open today:
 
-- Reproducible source revision, pinned toolchain/dependencies, passing host,
-  embedded, and Renode checks, and recorded build/size results.
-- Hardware results for the supported peripheral/host/hub matrix, including
-  sleep/wake, USB reconnect, link loss with held inputs, and both active slots.
-- Security policy, pairing authentication/enrollment decision, key deletion and
-  physical-access policy, and resolved or explicitly accepted security findings.
-- Assigned USB identity, unit-unique identification, documented production
-  hardware, memory and power margins, and a tested recovery procedure.
+- Reproducible source revision, pinned toolchain and dependencies, passing
+  host, embedded, and Renode checks, and recorded build and size results:
+  "Reproducible firmware evidence" in
+  [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain).
+- Hardware results for the supported peripheral, host, and hub matrix,
+  including sleep and wake, USB reconnect, link loss with held inputs, and both
+  active slots: "Hardware compatibility baseline" in
+  [Board bring-up and hardware acceptance](../TODO.md#board-bring-up-and-hardware-acceptance)
+  and "Multi-device aggregation hardware acceptance" in
+  [Input aggregation and delivery](../TODO.md#input-aggregation-and-delivery).
+- Authenticated pairing and enrollment, key deletion and physical-access
+  policy, and resolved or explicitly accepted security findings: "Authenticated
+  pairing and enrollment policy" and "Refuse peer-initiated pairing on
+  background reconnects" in
+  [BLE central and pairing](../TODO.md#ble-central-and-pairing), and
+  "Provisioning and physical key protection" in
+  [Device security and provisioning](../TODO.md#device-security-and-provisioning).
+- Assigned USB identity and unit-unique identification: "USB production
+  identity" in [USB HID device](../TODO.md#usb-hid-device).
+- Documented production hardware: "Production hardware definition" in
+  [Board bring-up and hardware acceptance](../TODO.md#board-bring-up-and-hardware-acceptance).
+- Memory and power margins: "Memory and endurance budget" in
+  [Platform, memory and recovery](../TODO.md#platform-memory-and-recovery) and
+  "Power budget and USB suspend current" in
+  [UI, display and power](../TODO.md#ui-display-and-power).
 - Release notes listing supported versions, compatibility limits, migrations,
-  rollback constraints, checksums, and the exact SoftDevice prerequisite.
-- Dependency/license review, provenance/signing strategy, a security contact,
-  ownership of support, and an update/support lifetime.
+  rollback constraints, checksums, and the exact SoftDevice prerequisite:
+  "Release notes for deployment releases" in
+  [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain).
+- A security contact, supported-version policy, ownership of support, and a
+  dependency and license review
+  ([Third-Party Components And Licenses](#third-party-components-and-licenses)):
+  "Security maintenance ownership" and "Supply-chain and tooling maintenance"
+  in [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain).
+- Hosted provenance verified from a clean machine and a tested recovery
+  procedure: "Hosted provenance and release recovery acceptance" in
+  [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain).
 
-Open implementation and validation tasks live in [TODO.md](../TODO.md). Move an
-item to completed only when its acceptance criteria are met; attach hardware or
-release evidence rather than inferring it from compilation.
+Check an item off in [TODO.md](../TODO.md) only when its "Accept when"
+criterion is met, as its
+[updating rules](../TODO.md#updating-this-checklist) describe; attach hardware
+or release evidence rather than inferring it from compilation.
+
+## Third-Party Components And Licenses
+
+bt2usb itself is licensed `GPL-3.0-only` (the `license` field in
+[Cargo.toml](../Cargo.toml)); [LICENSE](../LICENSE) holds the GNU General
+Public License version 3 text. The firmware also contains, or depends on,
+components under other licenses:
+
+| Component | How it reaches the device | License as declared | In the release package |
+| --- | --- | --- | --- |
+| bt2usb application | Source in this repository | `GPL-3.0-only`; text in `LICENSE` | Compiled into the ELF and HEX |
+| `nrf-softdevice` (vendored) | Copied from upstream commit `47d6121` into `vendor/nrf-softdevice` with a local patch ([vendor notes](../vendor/nrf-softdevice/README.bt2usb.md)) | `MIT OR Apache-2.0` in its `Cargo.toml`; [LICENSE-MIT](../vendor/nrf-softdevice/LICENSE-MIT) and [LICENSE-APACHE](../vendor/nrf-softdevice/LICENSE-APACHE) are kept beside it | Compiled into the ELF and HEX |
+| `nrf-softdevice-s140` | Git dependency at the same revision; Rust bindings to the S140 API | Its manifest at that revision declares `license-file = "LICENSE-NORDIC"` instead of an SPDX expression; that file is not copied into this repository | Compiled into the ELF and HEX |
+| Nordic SoftDevice S140 v7.3.0 | Binary HEX that `mask softdevice` downloads from Nordic and flashes separately | Nordic's own license, which ships with Nordic's archive; it is not in this repository | Not included |
+| crates.io dependencies | Resolved by [Cargo.lock](../Cargo.lock) | See below | Compiled into the ELF and HEX |
+
+The direct firmware dependencies from crates.io (`embassy-executor`,
+`embassy-nrf`, `embassy-time`, `embassy-usb`, `embassy-sync`,
+`embassy-futures`, `ssd1306`, `embedded-graphics`, `cortex-m`, `cortex-m-rt`,
+`embedded-hal`, `embedded-hal-async`, `sequential-storage`,
+`embedded-storage-async`, `defmt`, `defmt-rtt`, `panic-probe`, `static_cell`,
+and `heapless`) are each published as `MIT OR Apache-2.0` for every version of
+them that `Cargo.lock` selects, as listed by the crates.io API on 2026-10-09.
+The remaining transitive packages in `Cargo.lock` have not been inventoried.
+
+The SoftDevice is a separate component obtained from Nordic: neither the
+repository nor a release package contains it ([SoftDevice
+Installation](#softdevice-installation)). A release package contains the
+firmware, its build inputs, and the provenance files, but not `LICENSE` or any
+third-party license text.
+
+No tool checks licenses today, and this guide does not assess whether these
+licenses permit distributing the firmware under `GPL-3.0-only`. That review is
+part of the dependency and license gate above; a license inventory and an
+automated license check are the open items "Security maintenance ownership" and
+"Supply-chain and tooling maintenance" in
+[TODO.md](../TODO.md#release-provenance-and-supply-chain).
 
 ## Validation Limits
 

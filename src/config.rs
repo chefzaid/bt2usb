@@ -54,15 +54,18 @@ pub const USB_HID_POLL_MS: u8 = 1;
 
 // GPIO pin assignments (nRF52840-DK defaults)
 //
-// These are logical names; actual `embassy_nrf::peripherals::*` types are
-// selected in `main.rs` via type aliases.  Adjust for your custom PCB.
+// These are documentation only: `main.rs` passes the pins directly
+// (`p.P0_11`, `p.P0_26`, ...) when it spawns the button tasks and builds the
+// I²C bus.  Adjust them there for your custom PCB.
 //
 //   Button UP      → P0.11
 //   Button DOWN    → P0.12
 //   Button SELECT  → P0.24
 //   I²C SDA        → P0.26
 //   I²C SCL        → P0.27
-//   Status LED     → P0.06
+//
+// P0.06 is not used by the bridge firmware.  The Renode simulation build
+// (`sim.rs`) uses it as the UARTE0 TX pin, as on the DK's VCOM UART.
 
 /// Button debounce time (ms).
 pub const BUTTON_DEBOUNCE_MS: u64 = 50;

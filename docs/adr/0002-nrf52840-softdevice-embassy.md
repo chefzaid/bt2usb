@@ -217,6 +217,21 @@ start-up lines. If the reservation in `memory_sd.x` is too small,
 `too little RAM for softdevice. Change your app's RAM start address to ...`;
 [first flash](../first-flash.md#2-self-test-image) explains the fix.
 
+### Verification Status
+
+- **Implemented:** everything in the table above.
+- **Software-verified:** the CI "Embedded build & clippy" job lints the
+  `embedded` feature with warnings denied and builds the release bridge and
+  self-test for `thumbv7em-none-eabihf` against `memory_sd.x`. It passed on
+  GitHub-hosted runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and
+  37932436721 (`7fc99d6`, 2026-10-09) and scheduled run 37338711407
+  (2026-10-05). Builds do not run the SoftDevice: CI has no board, and the
+  Renode simulation is SoftDevice-free
+  ([ADR 0014](0014-renode-gpio-models.md)).
+- **Hardware-verified:** not yet. The repository holds no board record of the
+  boot log, the `softdevice RAM: N bytes` value, USB power events, or the
+  interrupt-priority setup; [first flash](../first-flash.md) asks for them.
+
 ## Related
 
 - [Architecture: system at a glance](../architecture.md#system-at-a-glance)

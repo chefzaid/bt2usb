@@ -80,26 +80,13 @@ When `probe-rs run` is attached, the session ends with the panic message.
 
 ### Log Levels
 
-`DEFMT_LOG` filters log statements at compile time. Changing it needs a rebuild
-and a reflash.
-
-| Build | `DEFMT_LOG` | Source |
-| --- | --- | --- |
-| Local builds (`mask run`, `cargo run`) | `debug` | `[env]` in [.cargo/config.toml](../.cargo/config.toml) |
-| CI and release artifacts | `info` | Workflow environment in [ci.yml](../.github/workflows/ci.yml); packaging rejects any other level |
-
-Cargo's `[env]` does not override a variable that is already set, so
-`DEFMT_LOG=info mask run --release` reproduces the release level locally, and
-`DEFMT_LOG=trace` adds more detail, including pairing identifiers and the raw
-bytes of every HID notification, which are keystrokes; use it only with test
-peripherals and never share such a log
-([reporting a defect](#reporting-a-defect)). `defmt`
-also accepts per-module filters such as `DEFMT_LOG=info,bt2usb=debug`. Lower
-levels include dependency output too: at `debug`, the vendored SoftDevice
-wrapper adds lines such as `connect started`, `Scan started`, and
-`connected role={:?} peer_addr={:?}`, which prints the peer's BLE address.
-This firmware's own `debug` lines are `DeviceStore: no changes to save` and
-`HID descriptor: no recognized usages found`.
+`DEFMT_LOG` filters log statements at compile time, so changing it needs a
+rebuild and a reflash. Local builds log at `debug` and CI and release
+artifacts at `info`; [development](development.md#log-levels) owns how the
+level is set and overridden. What each level reveals, including the peer
+addresses and raw keystroke bytes that the vendored SoftDevice wrapper logs at
+`debug` and `trace`, is in [security](security.md#logging-and-privacy). Note
+the level with any log you share ([reporting a defect](#reporting-a-defect)).
 
 ### Renode UART
 
@@ -155,6 +142,12 @@ UI and isolated OLED tasks started
   replaced by `failed to enable USB power events; assuming VBUS present`. If
   only the regulator status read fails, the line is simply missing; in both
   cases [sd_setup.rs](../src/sd_setup.rs) assumes VBUS is present.
+- On the first boot after UICR was erased, `bt2usb firmware starting` can
+  appear twice: `embassy_nrf::init` writes the reset-pin setting (and, on
+  chips with build code `F` or later, the debug-port setting) to UICR and
+  resets the chip once before the rest of the sequence. Later boots log it once. This is source-derived, not
+  observed on a board; see
+  [security](security.md#physical-access-and-debug-port).
 
 The [boot lifecycle](architecture.md#boot-and-initialization) explains what
 each step does.
@@ -255,7 +248,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 
 | Level | Message | Meaning | Action |
 | --- | --- | --- | --- |
-| info | `bt2usb firmware starting` | `main` started | None |
+| info | `bt2usb firmware starting` | `main` started | None; twice in a row on the first boot after a UICR erase is expected ([boot sequence](#boot-sequence)) |
 | info | `softdevice RAM: {:?} bytes` (vendor) | RAM the SoftDevice configuration needs | Record it; must be at most 24576 |
 | warn | `You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to {:x}` (vendor) | The 24 KiB reservation exceeds the requirement | None required; see [memory checks](#stack-and-memory-checks) |
 | panic | `too little RAM for softdevice. Change your app's RAM start address to {:x}` (vendor) | The reservation in `memory_sd.x` is too small | [RAM panic incident](#boot-panics-while-enabling-the-softdevice) |
@@ -348,23 +341,23 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 
 ### OLED Messages
 
-| Screen text | Cause in source | Next step |
-| --- | --- | --- |
-| `Scan failed` | SoftDevice scan error | Retry the scan |
-| `Connect failed` | Connection attempt timed out or could not be secured, the selection was invalid, or no slot was free | Wake the peripheral, put it in pairing mode, retry |
-| `No HID service` | GATT HID discovery failed | [HID error incident](#connect-fails-with-an-hid-error) |
-| `Notify failed` | No report characteristic accepted notifications | Same |
-| `HID map read failed`, `HID map too large`, `Unsupported HID map` | Report Map unreadable, over 512 bytes, or rejected by the parser (malformed items, unbalanced collections, alternative usage sets, or no keyboard, mouse, or consumer input) | Same |
-| `Storage failed` | Store unreadable at boot, or a save, Forget, or reset write failed | [Storage](#storage-unreadable-and-writes-disabled) and [flash](#flash-writes-report-busy-or-fail) incidents |
-| `Action failed; retry` | The selected saved device was no longer in the store | Reopen the saved-device list and retry |
-| `Busy; try again` | The UI-to-BLE command queue (4 entries) was full | Wait a few seconds and retry |
-| `Device changed; retry` | The saved-device list changed under the selection | Reopen the list |
-| `No devices found` | A scan listed no HID advertisers | [Scan incident](#scan-finds-no-devices) |
-| `Complete` / `Device forgotten` or `Pairings reset` | Management change persisted | SELECT to dismiss |
-| `Please wait...` | A management request is pending | [Pending incident](#a-management-action-stays-pending) |
+What raises each error text is defined once in the
+[data model](data-model.md#error-tags-and-ui-messages). The next step for each
+message:
 
-The mapping from error tags to these texts is defined in the
-[data model](data-model.md#error-tags-and-ui-messages).
+| Screen text | Next step |
+| --- | --- |
+| `Scan failed` | Retry the scan; see [scan incident](#scan-finds-no-devices) |
+| `Connect failed` | Wake the peripheral, put it in pairing mode, retry |
+| `No HID service`, `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
+| `HID map read failed`, `HID map too large`, `Unsupported HID map` | [HID error incident](#connect-fails-with-an-hid-error) |
+| `Storage failed` | [Storage](#storage-unreadable-and-writes-disabled) and [flash](#flash-writes-report-busy-or-fail) incidents |
+| `Action failed; retry` | Reopen the saved-device list and retry |
+| `Busy; try again` | Wait a few seconds and retry |
+| `Device changed; retry` | Reopen the saved-device list |
+| `No devices found` | [Scan incident](#scan-finds-no-devices) |
+| `Complete` / `Device forgotten` or `Pairings reset` | A management change was stored; SELECT to dismiss |
+| `Please wait...` | A management request is pending; see [pending incident](#a-management-action-stays-pending) |
 
 ## Common Incidents
 
@@ -464,10 +457,14 @@ Watchdog recovery is open work in
 
 - The cable is on the debugger port instead of the nRF52840's native USB port,
   or it is a charge-only cable.
-- The native port was unpowered at boot (`USB power: vbus=false ready=false`)
-  and the SoftDevice USB power events were not enabled
-  (`failed to enable USB power events; assuming VBUS present`), so a later
-  plug-in is not noticed.
+- The native port was unpowered at boot (`USB power: vbus=false ready=false`).
+  That line means the SoftDevice USB power events were enabled, so plugging in
+  the native cable later should be reported and start enumeration; if it does
+  not, the plug-in was not noticed.
+- The SoftDevice USB power events could not be enabled
+  (`failed to enable USB power events; assuming VBUS present`, logged instead
+  of the `USB power` line). The firmware then treats VBUS as present from boot
+  and never notices an unplug or a replug.
 - The firmware panicked before USB started (no `USB HID device started`).
 - The host or a hub blocks new USB devices, or the monitor's hub has no
   upstream cable to the PC.
@@ -644,10 +641,10 @@ radio idle point to a flash problem; run the self-test's `flash` stage.
 - Normal power policy: the display turns off after 120 seconds without
   activity and while the host has USB suspended. The first button press only
   wakes it.
-- No display response: wiring (SDA P0.26, SCL P0.27, 3.3 V, common ground) or
-  a module strapped to I2C address `0x3D`. The firmware uses the `ssd1306`
-  crate's default interface at `0x3C`, the address the self-test probes; a
-  `0x3D` module needs a code change.
+- No display response: wiring (SDA P0.26, SCL P0.27, VDD (not 5 V), common
+  ground) or a module strapped to I2C address `0x3D`. The firmware uses the
+  `ssd1306` crate's default interface at `0x3C`, the address the self-test
+  probes; a `0x3D` module needs a code change.
 - A stuck bus: SDA or SCL held low. The display task logs that it requested
   STOP and then waits for the hardware; it can stay degraded while the rest of
   the bridge runs ([ADR 0009](adr/0009-isolated-display-task.md)).
@@ -793,16 +790,16 @@ Interoperability work is tracked in [TODO.md](../TODO.md#ble-central-and-pairing
 
 ## Recovery And Diagnostics
 
-| Symptom | First checks |
-| --- | --- |
-| Probe missing | Data cable, power, probe permissions; WSL attachment; `mask probe-list` |
-| No firmware boot | Matching ELF, SoftDevice installed, RAM boundary log, correct native board target |
-| No USB device | Native USB port, data cable, direct host connection, `USB configured by host` log |
-| No OLED | Common ground, 3.3 V, pin mapping, module address, I2C error/retry logs; input bridge tasks remain independent |
-| No scan result | BLE HID/HOGP peripheral in pairing mode, nearby radio, scan completion |
-| Reconnect fails | Peripheral awake, bond state on both sides, sanitized security/disconnect log |
-| Newly paired peer is not remembered | Visible storage failure and flash logs; an invalid/unsupported store is preserved until an explicit Factory reset |
-| Host will not wake | Hub remains powered, host wake permission, suspend/wakeup logs |
+| Symptom | First checks | Incident |
+| --- | --- | --- |
+| Probe missing | Data cable, power, probe permissions; WSL attachment; `mask probe-list` | [Probe not found](#probe-not-found-or-flashing-fails) |
+| No firmware boot | Matching ELF, SoftDevice installed, RAM boundary log, correct native board target | [No log output](#no-log-output-after-flashing), [boot panic](#boot-panics-while-enabling-the-softdevice) |
+| No USB device | Native USB port, data cable, direct host connection, `USB configured by host` log | [USB does not enumerate](#usb-device-does-not-enumerate) |
+| No OLED | Common ground, VDD (not 5 V), pin mapping, module address, I2C error/retry logs; input bridge tasks remain independent | [OLED is dark](#oled-is-dark-or-the-i2c-bus-is-stuck) |
+| No scan result | BLE HID/HOGP peripheral in pairing mode, nearby radio, scan completion | [Scan finds no devices](#scan-finds-no-devices) |
+| Reconnect fails | Peripheral awake, bond state on both sides, sanitized security/disconnect log | [Saved peripheral does not reconnect](#saved-peripheral-does-not-reconnect), [private address not found](#bonded-peer-with-a-private-address-is-not-found) |
+| Newly paired peer is not remembered | Visible storage failure and flash logs; an invalid/unsupported store is preserved until an explicit Factory reset | [Storage unreadable](#storage-unreadable-and-writes-disabled), [flash writes fail](#flash-writes-report-busy-or-fail) |
+| Host will not wake | Hub remains powered, host wake permission, suspend/wakeup logs | [Host does not wake](#host-does-not-wake-from-sleep) |
 
 Use the least disruptive step that fixes the problem. Each later step loses
 more state:
@@ -814,9 +811,16 @@ more state:
 3. Reset or power-cycle the board. Links restart; pairings are kept.
 4. Reflash a known-working application with a probe
    ([flashing methods](deployment.md#flashing-methods)). Pairings are kept.
+   If that build is older than the one running, follow
+   [rollback](deployment.md#rollback) and check
+   [storage compatibility](deployment.md#storage-compatibility) first: some
+   older builds may overwrite a store they cannot read.
 5. Factory reset from the saved-device menu. All pairings are deleted.
 6. Full-chip erase, reinstall the SoftDevice, and flash the application. The
-   SoftDevice and all pairings are deleted.
+   SoftDevice and all pairings are deleted. When the application is an older
+   build, use the [rollback](deployment.md#rollback) steps to pick and verify
+   it; the first boot afterwards may log `bt2usb firmware starting` twice
+   ([boot sequence](#boot-sequence)).
 
 Keep an independent keyboard available during debugging. If firmware hangs,
 reset or power-cycle the board, then reflash a known-working application using a

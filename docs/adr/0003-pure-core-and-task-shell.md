@@ -151,9 +151,10 @@ Follow-up obligations:
   [TODO.md](../../TODO.md): move or delete the ten uncompiled tests so every
   `#[test]` in `src/` runs under `cargo test --locked --lib --tests`.
 - "Host tests for the I/O shells" in [TODO.md](../../TODO.md): move the
-  remaining decisions in the shells, including the `DeviceStore` load, merge,
-  and eviction rules, into hardware-free modules, or test the shells against
-  fakes.
+  remaining decisions in the shells into hardware-free modules, or test the
+  shells against fakes. The `DeviceStore` load, merge, and eviction rules have
+  their own item,
+  ["Host tests for the device store"](../../TODO.md#verification-and-code-quality).
 - "Async task fault tests" in [TODO.md](../../TODO.md) covers the shell-level
   behavior (cancellation, full channels, contention) that reducer tests cannot.
 - Passing host tests never closes a hardware gate; that needs the later layers
@@ -175,15 +176,28 @@ Follow-up obligations:
   for example `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
   in-module tests such as those in `aggregate.rs` and `management.rs`, and
   [tests/integration.rs](../../tests/integration.rs).
-- Counting with `grep -rh '#\[test\]' src tests | wc -l` finds 232 test
-  attributes. Ten of them are in `src/ble/scanner.rs`, which the host library
-  does not compile; the other 222 match the 219 unit and 3 integration tests in
-  the 2026-09-28 validation record in [testing](../testing.md).
 - CI runs `cargo test --locked --lib --tests`, `cargo clippy --locked --lib
   --tests -- -D warnings`, and `cargo doc --locked --no-deps --lib` with
   warnings denied on `ubuntu-latest` and `windows-latest`
   ([ci.yml](../../.github/workflows/ci.yml)). `mask coverage` measures the same
   library with `cargo-llvm-cov`, or `cargo-tarpaulin` as a fallback.
+
+### Verification Status
+
+- **Implemented:** the split in the table above, for every subsystem listed.
+- **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
+  finds 232 test attributes. Ten of them are in `src/ble/scanner.rs`, which
+  the host library does not compile; the other 222 match the 219 unit and 3
+  integration tests that passed in the
+  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28).
+  The CI host-test jobs on Linux and Windows passed on GitHub-hosted runners
+  in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
+  (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The
+  shells listed under Consequences have no host tests.
+- **Hardware-verified:** not applicable to the split itself. The shells it
+  leaves untested are covered only by the board layers in
+  [ADR 0004](0004-layered-verification.md), for which the repository holds no
+  board record.
 
 ## Related
 

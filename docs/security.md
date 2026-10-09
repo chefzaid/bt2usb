@@ -21,7 +21,8 @@ Implemented controls:
 - the firmware itself requests new pairing only for an explicit user
   connection, never for a background reconnect (a peer-sent Security Request
   is a separate, untested path; see
-  [Pairing And Authentication](#pairing-and-authentication))
+  [Pairing And Authentication](#pairing-and-authentication) and TODO:
+  [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing))
 - no fallback to fresh pairing when encryption with stored keys fails
 - bond lookup and replacement scoped to the peer's identity, not only the
   encryption master ID
@@ -49,7 +50,9 @@ Known limitations:
 - no enrollment allowlist or bounded pairing window
 - a newly paired device can claim the identity of an existing bond
 - bond keys stored unencrypted in internal flash
-- no readout protection or production debug policy
+- no readout protection or production debug policy: every boot keeps the
+  SWD debug port open (see
+  [Physical Access And Debug Port](#physical-access-and-debug-port))
 - no signed update verification, secure boot, anti-rollback, or DFU
 - logical deletion is not physical key erasure
 - a trace-level build of the vendored BLE crate logs raw notification bytes
@@ -127,16 +130,16 @@ Security assumptions:
 ## Threat Model
 
 Each gap names the [TODO.md](../TODO.md) item that would close it and links to
-its section; "Not tracked" marks a gap without a backlog item yet. Mitigations
-are implemented in the source cited; none is hardware-verified.
+its section; a gap inherent to the design says so instead. Mitigations are
+implemented in the source cited; none is hardware-verified.
 
 | Actor | Threat | Current mitigation | Gap |
 | --- | --- | --- | --- |
 | Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [multi_conn.rs](../src/ble/multi_conn.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Advertise a look-alike HID device so the user selects and pairs it, then inject input | Pairing only after an explicit Connect from the device list (`allow_pairing`, [multi_conn.rs](../src/ble/multi_conn.rs)); only advertisements carrying the HID UUID are listed ([coordinator.rs](../src/ble/coordinator.rs)) | Names are attacker-chosen and the list shows names only; no confirmation code, allowlist, or pairing window. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Act as a man in the middle during pairing | None: `IoCapabilities::None` offers no user-confirmed authentication | TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing); [ADR 0011](adr/0011-interim-just-works-pairing.md) records the interim decision |
-| Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. A stored peer without a bond is retried at its stored address, and a Security Request from that peer makes the vendored crate request pairing; untested. Not tracked |
-| Nearby attacker | Fill the scan list with fake HID advertisers, or jam the radio | Scan list bounded to `BLE_MAX_DISCOVERED` (8); scan window 8 s plus a 2 s backstop; connect attempts bounded to 6 s ([config.rs](../src/config.rs), [scanner.rs](../src/ble/scanner.rs)) | The first eight HID advertisers win, so a crowded list can hide the intended device; jamming cannot be prevented. Not tracked |
+| Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. A stored peer without a bond is retried at its stored address, and a Security Request from that peer makes the vendored crate request pairing; untested. TODO: [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing) |
+| Nearby attacker | Fill the scan list with fake HID advertisers, or jam the radio | Scan list bounded to `BLE_MAX_DISCOVERED` (8); scan window 8 s plus a 2 s backstop; connect attempts bounded to 6 s ([config.rs](../src/config.rs), [scanner.rs](../src/ble/scanner.rs)) | The first eight HID advertisers win, so a crowded list can hide the intended device; jamming cannot be prevented. TODO: [Scan list under crowding](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Crash or hang the bridge with malformed advertisements | Bounded AD-structure walk and UTF-8 name handling ([adv_parser.rs](../src/ble/adv_parser.rs)) | No fuzzing. TODO: [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) |
 | Paired peripheral (malicious or compromised) | Type or click anything, including consumer usages and host wake | By design it is trusted as local input; consumer usages capped at `0x0FFF`; wake only on a newly pressed input ([wake.rs](../src/hid/wake.rs)) | No per-device capability limits: a peer whose Report Map declares a keyboard can type. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Paired peripheral | Crash, hang, or misroute input with malformed GATT data, Report Maps, report references, or notifications | Bounded vendored discovery, 512-byte Report Map limit, bounded descriptor parser, exact-length report decoders (see [Input Validation Boundaries](#input-validation-boundaries)) | Vendored discovery has no automated tests; no real-peripheral evidence or fuzzing. TODO: [Report Map interoperability and legacy policy](../TODO.md#ble-central-and-pairing), TODO: [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) |
@@ -147,7 +150,7 @@ are implemented in the source cited; none is hardware-verified.
 | Malicious USB host | Send malformed control requests | `set_report` accepts only a one-byte keyboard output report and masks it to defined LED bits; protocol changes only switch report layout ([hid_device.rs](../src/usb/hid_device.rs)) | `GET_REPORT`/`SET_IDLE` behavior comes from `embassy-usb` defaults and is unreviewed. TODO: [HID/USB conformance](../TODO.md#usb-hid-device) |
 | Malicious USB host | Read bonds, change pairings, or reflash over USB | Only keyboard, mouse, and consumer HID interfaces exist; no vendor, CDC, mass-storage, or DFU interface (`hid_device::init`) | A future DFU or companion protocol would change this. TODO: [Signed USB/BLE DFU](../TODO.md#product-extensions), TODO: [Windows/macOS companion app](../TODO.md#product-extensions) |
 | Malicious USB host | Fingerprint or track the unit | None | Development VID/PID `0x1209`/`0x0001` and a stable FICR-derived serial. TODO: [USB production identity](../TODO.md#usb-hid-device) |
-| Physical attacker with SWD | Read LTK/IRK from flash, impersonate peers, or decrypt recorded traffic | None | No readout protection; keys unencrypted. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning) |
+| Physical attacker with SWD | Read LTK/IRK from flash, impersonate peers, or decrypt recorded traffic | None | No readout protection: every boot leaves the debug port open ([Physical Access And Debug Port](#physical-access-and-debug-port)); keys unencrypted. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning) |
 | Physical attacker with SWD | Replace firmware with a keylogger | None on the device; release provenance helps only people who verify before flashing | No secure boot or signed updates. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning), TODO: [Signed USB/BLE DFU](../TODO.md#product-extensions) |
 | Physical attacker with buttons | Pair their own keyboard, or Forget/reset the user's devices | Default-Cancel confirmations for destructive actions ([ui_logic.rs](../src/ui/ui_logic.rs)) | No lock or PIN on the local UI. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Supply-chain attacker | Ship a malicious crate or toolchain update | `Cargo.lock` with `--locked`, pinned Rust 1.95.0, fixed `nrf-softdevice` revision with a reviewed vendored patch, `cargo audit` on every run and weekly | No license check or SBOM; two unmaintained transitive crates. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain), TODO: [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) |
@@ -206,7 +209,8 @@ when it has none, by calling `request_pairing()`
 (`vendor/nrf-softdevice/src/ble/gap.rs`). A background reconnect to a stored
 peer without a bond still closes the link when the firmware's own `encrypt()`
 finds no keys, but whether a peer-requested pairing can complete first has not
-been tested.
+been tested. Closing this path is the P0 TODO
+[Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing).
 
 ## USB Host Interface
 
@@ -263,7 +267,8 @@ supported report layouts.
 Long-term encryption and identity keys are stored in the nRF52840's internal
 flash as part of the paired-device record; see the
 [data model](data-model.md#pairing-store). This application does not encrypt
-those records at rest or provision a production debug/readout-protection policy.
+those records at rest or provision a production debug/readout-protection policy
+(see [Physical Access And Debug Port](#physical-access-and-debug-port)).
 Physical debug access and firmware artifacts that contain memory dumps must be
 treated as sensitive. The UI's disconnect action does not erase stored bonds.
 
@@ -290,6 +295,65 @@ flash write. A failed save shows `Storage failed` while the link keeps working;
 the record survives a reboot only if a later save succeeds. A full-chip erase
 with the debug probe removes the pairing region together with SoftDevice; see
 [operations](operations.md#saved-devices-and-storage).
+
+## Physical Access And Debug Port
+
+This section is source-derived: it follows the code path in the pinned
+`embassy-nrf` 0.7.0 (`Cargo.lock`) and has not been observed on hardware.
+
+The bridge ([main.rs](../src/main.rs)) and the self-test
+([selftest.rs](../src/selftest.rs)) both call `embassy_nrf::init` with
+`embassy_nrf::config::Config::default()`, changing only the GPIOTE and time
+driver interrupt priorities. The default `debug` setting is
+`Debug::Allowed`. [Cargo.toml](../Cargo.toml) enables `embassy-nrf` with the
+features `defmt`, `nrf52840`, `time-driver-rtc1`, `gpiote`, and `unstable-pac`;
+it does not enable `reset-pin-as-gpio` or `nfc-pins-as-gpio`, and no other crate
+in `Cargo.lock` depends on `embassy-nrf`. On every boot `init` therefore checks
+these UICR words, before the SoftDevice is enabled:
+
+| UICR word | Value written when it differs | Effect |
+| --- | --- | --- |
+| `APPROTECT` | `0x5A`, the library's "disabled" value, only on chips whose FICR build code is `F` or later (`APPROTECT_MIN_BUILD_CODE` in `chips/nrf52840.rs`); `init` also writes `0x5A` to the `APPROTECT.DISABLE` register on those chips. Older build codes are left alone | Keeps the SWD debug port open on every boot |
+| `PSELRESET[0]`, `PSELRESET[1]` | `18` (`RESET_PIN`) | P0.18 becomes the pin reset |
+| `NFCPINS` bit 0 | `1` | P0.09 and P0.10 stay in NFC antenna mode; an erased UICR already holds this value |
+
+The library writes a word only when its value differs, and only when the write
+clears bits; a word that would need bits set back to 1 is left unchanged, and
+for `PSELRESET` and `NFCPINS` a warning says to erase UICR. If any word was
+written, `init` resets the chip (`SCB::sys_reset`) before returning. The first
+boot after UICR is erased therefore writes `PSELRESET` (and `APPROTECT` on
+build-code `F` or later chips) and resets once, so the boot log shows
+`bt2usb firmware starting` (or `==== bt2usb self-test ====`) twice; later boots
+find the values in place and do not reset. Which build code the development
+boards carry has not been recorded.
+
+Consequences: no current build enables readout protection. Anyone with SWD
+access can read flash, including the bond records in pages 240–243, read RAM,
+and write new firmware. P0.18 resets the chip when driven low, and P0.09/P0.10
+are not free GPIOs ([hardware](hardware.md#pin-and-peripheral-usage)).
+
+Enabling readout protection would require:
+
+1. Setting `nrf_config.debug = embassy_nrf::config::Debug::Disallowed` before
+   `embassy_nrf::init` in both [main.rs](../src/main.rs) and
+   [selftest.rs](../src/selftest.rs), so neither image reopens the port. With
+   `Disallowed`, `init` writes `0x00` to UICR `APPROTECT` and resets once. That
+   write only clears bits, so it needs no erase, even over the `0x5A` that
+   earlier builds wrote.
+2. Accepting that the probe can then no longer flash, attach, or read RTT logs.
+   The only way back is the debug port's erase-all through the CTRL-AP, which
+   erases flash, RAM, and UICR: the SoftDevice, the application, and every
+   bond. Then reinstall the SoftDevice, flash, and pair every peripheral again,
+   as after any [full-chip erase](deployment.md#softdevice-reinstall-after-a-full-erase).
+   The exact probe-rs command for this recovery has not been tried here.
+3. Recognizing what it does not do: the erase-all still lets someone with the
+   board install other firmware, and the bonds stay unencrypted in flash.
+
+None of this is implemented or tested. The policy decision and the hardware
+demonstration are the P0 TODO items
+[ADR: provisioning, debug access, and readout protection](../TODO.md#device-security-and-provisioning)
+and
+[Provisioning and physical key protection](../TODO.md#device-security-and-provisioning).
 
 ## Logging And Privacy
 
@@ -343,8 +407,11 @@ update verifier, anti-rollback mechanism, secure boot chain, or OTA/USB DFU flow
 The configured release workflow signs GitHub artifact provenance for the checked
 build and its checksum manifest. Verify the expected source and workflow identity
 using the [deployment guide](deployment.md#verify-before-flashing); an
-unauthenticated checksum alone does not establish origin. Hosted signing and
-verification still need a successful tag-run acceptance record. Artifact
+unauthenticated checksum alone does not establish origin. Hosted CI check jobs
+pass (for example push run 37932436721 on commit `7fc99d6`), but the tag-only
+`release-package` and `release` jobs have never run and no `v*` tag exists, so
+hosted signing and verification still need a successful tag-run acceptance
+record. Artifact
 attestations do not make the device enforce signed firmware. Production USB
 identity, protected provisioning, and recovery are open tasks.
 
@@ -400,15 +467,17 @@ pinning is recorded in
 
 ## Unsafe Code
 
-Application `unsafe` is limited to a few audited sites: building the
+Application `unsafe` is limited to six blocks, each reviewed in
+[code quality](code-quality.md#unsafe-code-policy): building the
 advertisement slice from SoftDevice-provided pointer and length
 ([scanner.rs](../src/ble/scanner.rs), [selftest.rs](../src/selftest.rs)),
 dereferencing the `StaticCell`-backed `Bonder` pointer
 ([multi_conn.rs](../src/ble/multi_conn.rs)), SoftDevice power SVCs
 ([sd_setup.rs](../src/sd_setup.rs)), and the volatile stack-paint read
 ([stack.rs](../src/stack.rs)). The vendored SoftDevice crate wraps the
-SoftDevice C API with `unsafe` FFI. Rules for adding or reviewing `unsafe`
-are in [code quality](code-quality.md#unsafe-code-policy).
+SoftDevice C API with `unsafe` FFI. No separate audit record exists; rules for
+adding or reviewing `unsafe` are in the same
+[code quality](code-quality.md#unsafe-code-policy) section.
 
 ## Security Testing
 

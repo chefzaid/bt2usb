@@ -230,8 +230,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - **Software-verified:** the
   [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
   reports the headless Robot scenario passing locally with Renode 1.16.1
-  through WSL. No successful hosted run of the CI `simulation` job is recorded
-  in the repository.
+  through WSL. The CI "Renode simulation test" job, which installs Renode
+  1.16.1 by default and runs the same Robot file, passed on GitHub-hosted
+  runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
+  (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05).
 - **Hardware-verified:** not applicable to the models themselves. The button
   path they emulate is checked on a board by the self-test's button stage,
   for which the repository holds no board record.

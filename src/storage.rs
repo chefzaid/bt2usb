@@ -5,9 +5,12 @@
 //! for previously paired devices so they can be auto-reconnected on power-up.
 //!
 //! Storage layout:
-//!   - Each record is a serialized `PairedDevice` with optional `BondInfo`.
-//!   - Records are appended sequentially; the flash pages are managed
-//!     by `sequential-storage` which handles wear levelling and GC.
+//!   - The whole store is one `sequential-storage` map item under
+//!     `KEY_PAIRED_DEVICES`, rewritten in full on each save.
+//!   - That item is a versioned frame (see `framing`) holding one
+//!     length-prefixed record per paired device: a serialized `PairedDevice`
+//!     with optional `BondInfo`.
+//!   - `sequential-storage` manages the flash pages (wear levelling and GC).
 
 mod codec;
 mod framing;
@@ -67,7 +70,8 @@ pub struct PairedDevice {
     pub address: Address,
     /// Device name (for UI display, truncated to 32 bytes).
     pub name: heapless::String<32>,
-    /// Last RSSI seen (for sorting by signal strength).
+    /// RSSI the device had when it was last stored (a change to it alone does
+    /// not cause a flash write). Nothing sorts or displays by it yet.
     pub last_rssi: i8,
     /// BLE bonding keys for reconnecting without pairing again.
     pub bond: Option<BondInfo>,

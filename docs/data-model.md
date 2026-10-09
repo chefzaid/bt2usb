@@ -567,25 +567,31 @@ debounced press. Electrical details are in
 
 ### Error Tags And UI Messages
 
-`BleErrorTag` is the coordinator's `ErrorTag`
-([ble/coordinator.rs](../src/ble/coordinator.rs)); the UI text comes from
-`ble_error_message` in [main.rs](../src/main.rs).
+This table is the contract for user-visible errors. `BleErrorTag` is the
+coordinator's `ErrorTag` ([ble/coordinator.rs](../src/ble/coordinator.rs)),
+re-exported in [ble/mod.rs](../src/ble/mod.rs); the OLED text comes from
+`ble_error_message` in [main.rs](../src/main.rs). How errors propagate is in
+[architecture](architecture.md#how-errors-surface); what a user should do is in
+[features](features.md#notices-and-errors).
 
 | Tag | Raised by | OLED message |
 | --- | --- | --- |
-| `ScanFailed` | SoftDevice refused or ended a scan with an error | `Scan failed` |
-| `ConnectFailed` | Connection setup failed or timed out, the link could not be encrypted, bad scan index, or no free slot | `Connect failed` |
-| `HidNotFound` | GATT discovery of the HID service failed | `No HID service` |
+| `ScanFailed` | The SoftDevice refused a user or boot scan or ended it with an error (`scanner::scan`) | `Scan failed` |
+| `ConnectFailed` | `Connect` with an index outside the coordinator's last scan result (for example after Factory reset cleared it) or with no free slot (`plan_connect`); the whitelist connect timed out after 6 seconds or failed, including the MTU exchange; the link was not encrypted within 25 polls 200 ms apart, the pairing request failed, or the link dropped while securing; no keys during a background reconnect, which may not start pairing. A silent attempt that fails this way is retried, not shown | `Connect failed` |
+| `HidNotFound` | GATT discovery of the HID service failed or found no Report characteristic (`discover_and_subscribe`) | `No HID service` |
 | `NotifyFailed` | No input report characteristic could be subscribed | `Notify failed` |
-| `StorageFailed` | Store unreadable at boot, a save failed, or a management write failed | `Storage failed` |
-| `ManagementFailed` | Forget named an identity not in the store | `Action failed; retry` |
-| `ReportMapReadFailed` | The Report Map could not be read | `HID map read failed` |
-| `ReportMapTooLarge` | The Report Map exceeds 512 bytes | `HID map too large` |
-| `ReportMapInvalid` | The Report Map does not parse | `Unsupported HID map` |
+| `StorageFailed` | The store was unreadable or invalid at boot; saving a device after a connection failed, including every save while the store is read-only; a Forget or Factory reset could not be persisted. Every `StoreError` maps here | `Storage failed` |
+| `ManagementFailed` | Forget named an identity that `DeviceStore::find` no longer matches | `Action failed; retry` |
+| `ReportMapReadFailed` | The Report Map read returned an error, the ATT MTU is outside the 23–517 bytes the long-read assembler accepts, or a fragment or the end of the value was malformed | `HID map read failed` |
+| `ReportMapTooLarge` | The Report Map is longer than 512 bytes | `HID map too large` |
+| `ReportMapInvalid` | The Report Map is malformed, exceeds the parser's nesting bounds, or declares no supported keyboard, mouse, or consumer input | `Unsupported HID map` |
 
-The UI also produces `Busy; try again` (command channel full),
-`Device changed; retry` (Forget index no longer in the saved-device snapshot)
-and `No devices found` (scan ended empty).
+The UI raises three error messages without a tag: `Busy; try again` when
+`try_send` finds `BLE_CMD_CHANNEL` full and `Device changed; retry` when the
+chosen saved device is no longer in the UI's snapshot (both in
+[main.rs](../src/main.rs)), and `No devices found` when a scan ends with an
+empty list ([ui/ui_logic.rs](../src/ui/ui_logic.rs)). The completion notices
+`Device forgotten` and `Pairings reset` also come from `ui_logic.rs`.
 
 ### Management Request Lifecycle
 
@@ -643,22 +649,15 @@ The loop also keeps the `DiscoveredDevice` list from the last `PairedDevices`
 reply to turn a Forget index into an address, a `ManagementRequests` tracker,
 and a `PowerManager`. RSSI and addresses are never rendered.
 
-| Screen | OLED text ([ui/display.rs](../src/ui/display.rs)) | UP | DOWN | SELECT |
-| --- | --- | --- | --- | --- |
-| `Home` | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` | List saved devices | — | Scan |
-| `Scanning` | `Scanning` and 0–3 dots | — | — | — |
-| `DeviceList` | `Select device` and a 4-row window | Cursor up | Cursor down | Connect to the highlighted device |
-| `Connecting` | `Connecting...` | — | — | — |
-| `Connected` | `Connected`, summary, `SEL:add DOWN:disc`, `UP:saved devices` | List saved devices | Disconnect all | Scan for another device |
-| `Error` | `ERROR`, message, `SEL:retry DOWN:back`, `UP:saved devices` | List saved devices | Dismiss | Scan |
-| `SavedDevices` | `Saved devices`, names, final `Factory reset` row, `UP at first: back` | Cursor up; on the first row, dismiss | Cursor down | Open `ConfirmForget(i)` or `ConfirmReset` with Cancel selected |
-| `ConfirmForget(i)` | `Forget device?`, name, Cancel / Forget | Select Cancel | Select Forget | Cancel returns to the list; Forget sends the request |
-| `ConfirmReset` | `Reset all pairings?`, `Disconnect all`, Cancel / Reset | Select Cancel | Select Reset | Cancel returns to the list; Reset sends the request |
-| `Managing` | `Please wait...` | Ignored | Ignored | Ignored |
-| `Notice` | `Complete`, message, `SELECT: back` | List saved devices | — | Dismiss |
+`Screen` has the variants `Home`, `Scanning`, `DeviceList`, `Connecting`,
+`Connected`, `Error`, `SavedDevices`, `ConfirmForget(usize)`, `ConfirmReset`,
+`Managing`, and `Notice`. The text each one shows and what UP, DOWN, and
+SELECT do on it are listed once, in
+[features: screens and buttons](features.md#screens-and-buttons).
 
-Dismiss returns to `Connected` when a link summary exists, otherwise `Home`,
-and clears the message. Events change screens as follows:
+Dismissing an error, a notice, or the saved-device list returns to
+`Connected` when a link summary exists, otherwise `Home`, and clears the
+message. Events change screens as follows:
 
 | Event | Effect |
 | --- | --- |
@@ -716,20 +715,24 @@ Versioned migration beyond the legacy format is open work in
 ## Privacy And Retention
 
 Bond keys are stored unencrypted in internal flash. Device names are kept for
-display; RSSI is stored but not used. The application's own log statements
-print device names, counts, slot numbers and host LED state, but not
-addresses, keys, or keystroke content; keep it that way. The vendored
-`nrf-softdevice` is not as strict: at debug level it logs the peer address of
-every new connection (`"connected role={:?} peer_addr={:?}"` in
-[central.rs](../vendor/nrf-softdevice/src/ble/central.rs)).
-[.cargo/config.toml](../.cargo/config.toml) sets `DEFMT_LOG = "debug"` for
-any build whose environment does not already set it, so local RTT logs include
-peer addresses; the CI workflow sets `DEFMT_LOG: info` for its artifacts, which
-leaves that line out. Mask
-addresses before sharing a debug log
-([security](security.md#logging-and-privacy)). Logical deletion does not guarantee physical erasure; see
-[security](security.md#key-storage-and-deletion). Factory reset of a readable
-store appends an empty item rather than erasing pages.
+display; RSSI is stored but not used. Logical deletion does not guarantee
+physical erasure; see [security](security.md#key-storage-and-deletion).
+Factory reset of a readable store appends an empty item rather than erasing
+pages.
+
+Which logs may contain this data, and at which level, is defined in
+[security: logging and privacy](security.md#logging-and-privacy). In short, the
+application's own log statements print no addresses, keys, or keystrokes, but
+the vendored `nrf-softdevice` does: at debug, the default for local builds, it
+logs every peer address, and at trace it logs raw notification bytes
+(`GATT_HVX write handle={:?} type={:?} data={:?}` in
+[gatt_client.rs](../vendor/nrf-softdevice/src/ble/gatt_client.rs)), which are
+keystrokes, and any displayed passkey (`on_passkey_display passkey={}` in
+[gap.rs](../vendor/nrf-softdevice/src/ble/gap.rs)). The Just Works pairing used
+today displays no passkey, and the trace line that prints a peer's master ID
+(`ble evt sec info request`) is compiled only with the crate's
+`ble-peripheral` feature, which bt2usb does not enable. No vendored log line
+prints an LTK or IRK.
 
 ## Related Guides
 

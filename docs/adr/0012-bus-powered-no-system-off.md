@@ -181,7 +181,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   [lib_logic_tests.rs](../../src/lib_logic_tests.rs), three tests in
   `wake.rs`, and aggregator tests that assert releases, disconnects, and
   invalid sources do not wake (for example
-  `invalid_sources_cannot_modify_state_or_wake`). The suspend handling in
+  `invalid_sources_cannot_modify_state_or_wake`). CI runs them on Linux and
+  Windows, and they passed on GitHub-hosted runners in push runs 36441995385
+  (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and
+  scheduled run 37338711407 (2026-10-05). The suspend handling in
   `hid_device.rs` and the `PowerManager` glue are not host-tested.
 - **Hardware-verified:** not yet. The repository holds no board record of PC
   sleep and wake, wake filtering, or power draw.

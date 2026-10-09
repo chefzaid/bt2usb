@@ -211,9 +211,12 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   reports the host, embedded, and simulation checks passing locally with Rust
   1.95.0, 31 mask recipes validated, and the WSL-to-Windows Cargo fallback
   smoke check passing. That record does not include a hosted GitHub Actions
-  run. The `8a04b25` commit message records one hosted Linux host job that
-  failed at the earlier actionlint installation step, which that commit
-  replaced; no successful hosted run is recorded in the repository.
+  run. The push run for `2479c79` (36441384244) failed at the earlier
+  actionlint installation step, which `8a04b25` replaced. With the pinned
+  toolchain, push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
+  (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05) passed
+  all five check jobs on GitHub-hosted runners. The tag-only release jobs
+  have never run.
 - **Hardware-verified:** not applicable, except that `mask run`,
   `mask selftest`, and `mask softdevice` need a board and probe; the
   repository holds no board record of them.

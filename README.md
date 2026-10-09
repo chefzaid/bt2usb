@@ -38,7 +38,9 @@ works today is in [Features](docs/features.md); every task, done and open, is in
 
 [TODO.md](TODO.md) is the complete work plan: finished work is checked off with
 its source references, and open work carries a priority and an acceptance
-criterion. Hardware gates stay open until board evidence exists.
+criterion. The [status at a glance](TODO.md#status-at-a-glance) table shows what
+is done and what is left in each area. Hardware gates stay open until board
+evidence exists.
 
 ## Quick Start
 
@@ -54,10 +56,12 @@ mask build --release     # bridge and self-test firmware
 
 On a new board, follow [first flash](docs/first-flash.md) to install SoftDevice
 S140, run the self-test, and validate the bridge; then `mask run --release`.
-The [development guide](docs/development.md) covers every task, Windows/WSL, and
-the devcontainer.
+[Getting started](docs/development.md#getting-started) walks through the
+no-hardware, simulation, and board paths, including Windows/WSL and the
+devcontainer.
 
 ## License
 
-GNU GPL v3; see [LICENSE](LICENSE). Nordic SoftDevice is a separate component
-obtained from Nordic.
+GNU GPL v3; see [LICENSE](LICENSE). Nordic SoftDevice S140 is obtained
+separately from Nordic; see
+[third-party components](docs/deployment.md#third-party-components-and-licenses).

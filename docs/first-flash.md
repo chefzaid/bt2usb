@@ -29,7 +29,11 @@ Every image in this checklist logs over RTT through the debug probe.
 `mask selftest` and `mask run --release` flash the image and stay attached to
 show the log; `mask rtt` attaches to an already running release build. The `defmt`
 logger adds a level and an uptime timestamp in front of each message, so look
-for the message text quoted here, which is copied from the source. The
+for the message text quoted here, which is copied from the source. Capital
+letters such as N, X, Y, P, F, and S, and placeholders such as NAME, stand for
+the values the source formats with `{}`; for example the source's
+`==== self-test done: {} passed, {} failed, {} skipped ====` is quoted as
+`==== self-test done: P passed, F failed, S skipped ====`. The
 [log message reference](operations.md#log-message-reference) explains each
 message the bridge can print.
 
@@ -56,11 +60,16 @@ both. Self-test `[PASS]` lines are `info`; `[FAIL]` and `[SKIP]` lines are
   | ------------- | ------ | ---------- |
   | OLED SDA      | P0.26  |            |
   | OLED SCL      | P0.27  |            |
-  | OLED VCC      | VDD    | 3.3 V only |
+  | OLED VCC      | VDD    | The board's I/O rail; never 5 V |
   | OLED GND      | GND    | Common ground with the board |
   | Button UP     | P0.11  | GND        |
   | Button DOWN   | P0.12  | GND        |
   | Button SELECT | P0.24  | GND        |
+
+  Connect OLED VCC to VDD (the board's I/O rail; never 5 V), so any pull-ups
+  on the module pull SDA and SCL to the nRF52840's I/O voltage; its GPIOs are
+  not 5 V tolerant. See [Wiring](hardware.md#wiring) and
+  [OLED Display](hardware.md#oled-display) in the hardware reference.
 
   On the DK, P0.11/P0.12/P0.24 are also wired to the on-board buttons 1, 2
   and 3, so those work as UP/DOWN/SELECT without extra switches. The firmware
@@ -110,7 +119,7 @@ USB enumeration (up to 10 s), each button prompt (up to 20 s), and the BLE scan
 | ----- | --------------------- | ---- | ----------- |
 | Start | `==== bt2usb self-test ====` | Printed first | No output at all: check the probe connection and that step 1 completed |
 | SoftDevice | `softdevice RAM: N bytes`, then `[PASS] softdevice: enabled (…)` | N is at most 24576 (0x6000) | A panic saying `too little RAM for softdevice. Change your app's RAM start address to X`: set `RAM : ORIGIN` in `memory_sd.x` to `0x` followed by X (printed in hex without a prefix) and shrink `LENGTH` by the same amount. Other panics in `Softdevice::enable`, such as `sd_ble_enable err …` or `selected configuration has too high RAM requirements.`, also stop here. No `[PASS] softdevice` line at all usually means the SoftDevice isn't flashed (step 1) or is the wrong version |
-| Flash | `flash: no saved pairings yet` or `flash: saved pairing record present (N bytes)`, then `[PASS] flash: write, read-back and remove OK` | Write, read-back and remove all OK; saved pairings are only read | `[FAIL] flash:` with `reading the pairing region failed`, `write failed`, `read-back didn't match what was written`, or `remove failed`. The pairing region (pages 240–243, 0xF0000–0xF3FFF) can't be used; check nothing else uses it on this board |
+| Flash | `flash: no saved pairings yet` or `flash: saved pairing record present (N bytes)`, then `[PASS] flash: write, read-back and remove OK` | Write, read-back and remove all OK; saved pairings are only read | `[FAIL] flash:` with `reading the pairing region failed`, `write failed`, `read-back didn't match what was written`, or `remove failed`. The pairing region (pages 240–243, `0x000F0000–0x000F4000`, end exclusive) can't be used; check nothing else uses it on this board |
 | USB enumeration | `[PASS] usb enumeration: configured by the PC` | The PC lists "BT-to-USB HID Bridge" from "bt2usb" | `USB: no VBUS yet; plug the nRF USB port (not the debugger port) into the PC`, then `[FAIL] usb enumeration: not configured within 10 s: …` and `[SKIP] usb hid report: needs enumeration`. Wrong port, a charge-only cable, or a PC that blocks new USB devices |
 | USB report | `[PASS] usb hid report: idle mouse report accepted` | Idle mouse report accepted | `[FAIL] usb hid report: host never polled the endpoint (1 s)`: enumerated, but the host did not poll the mouse interface within 1 s. `[FAIL] usb hid report: endpoint write failed`: the endpoint returned an error. For either, check the PC's device manager for a driver error |
 | OLED ACK | `[PASS] oled i2c: SSD1306 acknowledged at 0x3C` | The display acknowledges its address | `[FAIL] oled i2c: no ACK at 0x3C: check SDA=P0.26, SCL=P0.27, VCC, GND (or a 0x3D module)`. A preceding `OLED I2C stalled; requesting STOP, display task degraded until DMA completes` means a transfer did not finish within 500 ms; SDA or SCL may be shorted or held low |
@@ -277,7 +286,12 @@ list ends with a "Factory reset" entry, and UP on the first entry goes back.
       afterwards.
 - [ ] **Failure reporting:** inject a flash write failure in a controlled test.
       The UI retains a storage error and does not report deletion/enrollment
-      success. Record cached/persistent state and behavior after reboot.
+      success. Record cached/persistent state and behavior after reboot. No
+      hook exists yet to make a flash write fail on a board (the host tests in
+      `ble/management.rs` inject failures only into the pure `commit`
+      function), so record this check as `skip: no fixture` until one exists;
+      [Power-loss-safe persistence](../TODO.md#pairing-storage) tracks the
+      flash fault-injection work.
 - [ ] **Two sources sharing an endpoint:** if available, hold overlapping keys
       or mouse buttons on two devices. Releasing/disconnecting one preserves the
       other's held state. More than six unique keyboard keys produces rollover;
@@ -305,6 +319,41 @@ list ends with a "Factory reset" entry, and UP on the first entry goes back.
       unchecked for the next board or release. Review remaining
       [release gates](deployment.md#release-gates).
 
+## 8. Extended Acceptance (Optional)
+
+These checks go beyond bring-up: each one supplies evidence for an open
+hardware item in [TODO.md](../TODO.md). Run them when the equipment is at
+hand, and mark any you do not run as `skip: <reason>`.
+
+- [ ] **Pairing region survives reflash:** with at least one peer saved and
+      reconnecting, flash the bridge again with `mask run --release`. The
+      Cargo runner is `probe-rs run --chip nRF52840_xxAA` with no erase option
+      ([.cargo/config.toml](../.cargo/config.toml)). Record `probe-rs --version`
+      and the erase mode used, then confirm the saved peers reconnect without
+      pairing again (`Loaded N devices from flash`, then a
+      `slot N connecting to NAME` line per peer). The expected erase behavior is
+      in [deployment](deployment.md#erase-behavior);
+      [Pairing region survives application reflash](../TODO.md#pairing-storage)
+      closes with this result.
+- [ ] **Supply current:** measure the current the board draws from the nRF
+      USB supply while idle, while scanning, with two links active, with the
+      OLED on and off, and while the host has suspended USB (the bridge keeps
+      its BLE links and radio active then). Record the meter, and whether the
+      debugger cable was connected, since the DK can draw from either USB
+      connector. Compare the figures with the 100 mA the configuration
+      descriptor declares (`max_power` in `src/usb/hid_device.rs`) and with the
+      USB suspend-current limit. See [Power](hardware.md#power);
+      [Power budget and USB suspend current](../TODO.md#ui-display-and-power)
+      closes with this result.
+- [ ] **USB stability without an HFXO request:** the application never
+      requests the high-frequency crystal oscillator (there is no
+      `sd_clock_hfclk_request` call), and how the USB peripheral's clock need is
+      met under the SoftDevice has not been checked on hardware
+      ([Clocks And Radio](hardware.md#clocks-and-radio)). Across the
+      sections above, confirm the device never drops off the bus or
+      re-enumerates unexpectedly, including during scans and with two links
+      active, and record any USB errors the host logs.
+
 ## Recording The Result
 
 Open a GitHub issue from the **Hardware acceptance result** template
@@ -319,16 +368,18 @@ labels the issue `hardware-evidence`, and has these parts:
   make, model, and firmware; host OS and version, BIOS/UEFI, monitor and hub.
 - **Measurements:** the `softdevice RAM` value, the stack high-water after
   section 4, and reconnect and release timings from sections 4 and 5.
-- **One table per section 0–7** of this checklist. Write `pass`, `fail`, or
-  `skip: <reason>` in every Result cell, and quote the supporting log line or
-  measurement in Notes.
+- **One table per section 0–8** of this checklist. Fill in the tables: write
+  `pass`, `fail`, or `skip: <reason>` in every Result cell, and quote the
+  supporting log line or measurement in Notes. The section 8 table also has
+  cells for the probe-rs version and erase mode and for each current reading.
 - **Sanitizing:** confirm that no bond keys (LTK/IRK), raw flash dumps, or
   private keystrokes are attached, that device names, BLE addresses, and the
   USB serial are masked where they identify a person, and that no log from a
   `trace`-level build is attached.
 
-An empty or skipped cell is unverified, not a pass. File each deviation as its
-own issue and link it from section 7.
+An empty or skipped cell is unverified, not a pass; section 8 is optional, so
+mark the checks you did not run as `skip: <reason>` rather than leaving them
+empty. File each deviation as its own issue and link it from section 7.
 [Hardware acceptance evidence](testing.md#hardware-acceptance-evidence) in the
 testing guide explains how these records feed release review and the hardware
 gates in [TODO.md](../TODO.md). Report a suspected vulnerability privately

@@ -69,6 +69,8 @@ extension or USB-C/USB-A adapter may make the controls easier to reach.
 | P0.11, P0.12, P0.24 | Buttons, GPIO input with pull-up | Same, with an idle-level check | Same, driven by Renode |
 | P0.26, P0.27 | TWIM0 SDA, SCL | Same | Not used |
 | P0.06, P0.08 | Not used | Not used | UARTE0 TX and RX for the log |
+| P0.18 | Pin reset, set in UICR by `embassy_nrf::init` | Same | Same `init` code; Renode's UICR handling not checked |
+| P0.09, P0.10 | NFC antenna pins; UICR `NFCPINS` left in NFC mode | Same | Same `init` code; not used |
 | USBD | Composite HID device | Same device, one idle mouse report | Not used |
 | TWISPI0 (TWIM0) | OLED | OLED probe and Home screen | Not used |
 | GPIOTE | Async button edges | Async button waits | Async button edges |
@@ -81,6 +83,18 @@ owns POWER, the application learns about USB power through SoftDevice events
 [usb/hid_device.rs](../src/usb/hid_device.rs)).
 Flash writes go through the SoftDevice flash API. Check Nordic's S140
 specification before claiming any further peripheral, timer or PPI resource.
+
+P0.18, P0.09 and P0.10 are not free GPIOs. The bridge and the self-test pass
+`embassy_nrf::init` its default configuration with only the interrupt
+priorities changed, and [Cargo.toml](../Cargo.toml) enables neither the
+`reset-pin-as-gpio` nor the `nfc-pins-as-gpio` feature of `embassy-nrf`. On
+every boot `init` therefore makes sure UICR `PSELRESET` selects P0.18 as the
+pin reset and `NFCPINS` keeps P0.09 and P0.10 in NFC mode. On chips with build
+code `F` or later it also writes the UICR value that keeps the SWD port open.
+Whenever it had to write UICR, it resets the chip once. The simulation build
+uses the same default configuration. This is source-derived from `embassy-nrf`
+0.7.0, not observed on a board; the UICR behavior and its security effect are
+in [security](security.md#physical-access-and-debug-port).
 
 `config.rs` names P0.06 as a status LED, but no firmware code drives it. On the
 nRF52840-DK the user LEDs are on P0.13–P0.16 and P0.06 is the UART TX line to
@@ -383,12 +397,16 @@ another board yet.
       only through VBUS events.
 - [ ] **Pins.** Choose GPIOs for the three buttons and the I2C bus that the
       board does not dedicate to something else, for example the 32.768 kHz
-      crystal pins (P0.00, P0.01), the NFC antenna pins (P0.09, P0.10, which need
-      a UICR change before GPIO use), a pin configured as reset, on-board flash
-      or LEDs. Change them in `main.rs` and `selftest.rs` (including the pin
-      names in the self-test messages), update the comments in `config.rs`, and
-      update `sim.rs`, the Renode scripts and this guide if the simulation
-      should follow.
+      crystal pins (P0.00, P0.01), the NFC antenna pins (P0.09, P0.10), the pin
+      reset (P0.18), on-board flash or LEDs. P0.09/P0.10 and P0.18 stay
+      reserved unless `embassy-nrf`'s `nfc-pins-as-gpio` or `reset-pin-as-gpio`
+      feature is enabled; freeing P0.18 on a chip whose UICR already selects it
+      as reset also needs a UICR erase
+      ([UICR behavior](security.md#physical-access-and-debug-port)). Change
+      them in `main.rs` and `selftest.rs` (including the pin names in the
+      self-test messages), update the comments in `config.rs`, and update
+      `sim.rs`, the Renode scripts and this guide if the simulation should
+      follow.
 - [ ] **Buttons.** Keep them active-low with the internal pull-up, or change
       `ui/buttons.rs` and the self-test's idle check together.
 - [ ] **Display.** Confirm the module's I2C address and supply voltage; see

@@ -2,8 +2,9 @@
 //!
 //! This board is **bus-powered** through the monitor's USB hub, not battery
 //! powered, so the aggressive low-power modes are intentionally *not* used:
-//! - We keep the fast 7.5 ms BLE connection interval for low HID latency rather
-//!   than relaxing it to save a few mA that wall power makes irrelevant.
+//! - We keep requesting a short BLE connection interval (7.5–15 ms, see
+//!   `config::BLE_CONN_INTERVAL_MIN`/`MAX`) for low HID latency rather than
+//!   relaxing it to save a few mA that wall power makes irrelevant.
 //! - We never enter System-OFF: it would drop USB enumeration and the BLE links,
 //!   which must stay up for the monitor hub. The Embassy executor already idles
 //!   the CPU (WFE / System-ON-Idle) automatically between events.
@@ -21,7 +22,9 @@ use embassy_time::Instant;
 
 pub use crate::power_logic::PowerState;
 
-/// Inactivity timeout before entering low-power mode.
+/// Inactivity timeout before the power state drops to `Idle`. `LowPower`
+/// follows after more than twice this with no BLE link, or at once when the USB
+/// bus is suspended (see [`crate::power_logic::next_power_state`]).
 const IDLE_TIMEOUT_SECS: u64 = 60;
 
 /// Set whenever a HID report flows from a BLE device to the USB host, so the

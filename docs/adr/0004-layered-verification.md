@@ -31,12 +31,10 @@ over three months:
 The 2026-09-28 validation record in [testing](../testing.md) shows the result:
 every software layer passed locally, the hosted workflow was "Not yet verified
 by a workflow run", and board, radio, and USB acceptance was "Not performed".
-Hosted runs of the hardened workflow came later. The push run for `2479c79`
-failed at the actionlint installation step, which `8a04b25` replaced. GitHub
-Actions lists the push runs for `8a04b25` (2026-09-28) and `7fc99d6`
-(2026-10-09) and the scheduled run of 2026-10-05 as successful, with all five
-check jobs passing. The tag-only release jobs have never run, because no tag
-exists. Board acceptance has still not been performed. The documentation needs a rule for stating exactly that.
+Hosted runs of the hardened workflow came later, and the tag-only release
+jobs and board acceptance have still not run (see
+[Verification Status](#verification-status)). The documentation needs a rule
+for stating exactly that.
 
 ## Decision
 
@@ -178,6 +176,23 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   `.github/ISSUE_TEMPLATE/hardware-result.md` template.
 - Records: dated validation records and known gaps in
   [testing](../testing.md#known-verification-gaps).
+
+### Verification Status
+
+- **Implemented:** all five layers. Layers 1 to 3 run in CI; layers 4 and 5
+  exist as the self-test image, the first-flash checklist, and the
+  hardware-result issue template.
+- **Software-verified:** the
+  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  reports every software layer passing locally. On GitHub-hosted runners, the
+  push run for `2479c79` (36441384244) failed at the actionlint installation
+  step, which `8a04b25` replaced. Push runs 36441995385 (`8a04b25`,
+  2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and scheduled run
+  37338711407 (2026-10-05) passed all five check jobs. The tag-only
+  `release-package` and `release` jobs have never run, because no `v*` tag
+  exists.
+- **Hardware-verified:** not yet. No layer 4 or layer 5 result is recorded in
+  the repository.
 
 ## Related
 

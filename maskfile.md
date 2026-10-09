@@ -2,7 +2,7 @@
 
 Common development tasks for the bt2usb Bluetooth-to-USB HID bridge.
 
-> Requires [mask](https://github.com/jacobdeichert/mask) (`cargo install mask`)
+> Requires [mask](https://github.com/jacobdeichert/mask) (`cargo install --locked mask`)
 
 ## build
 
@@ -56,7 +56,7 @@ fi
 
 ## flash-debug
 
-> Flash debug build with RTT logging enabled
+> Build and flash the dev-profile (debug) firmware; logs stream over RTT as in every profile
 
 ```bash
 ./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --bin bt2usb
@@ -80,10 +80,12 @@ Needs the SoftDevice flashed once. Flash the real firmware afterwards with
 > Run unit + integration tests on host (Windows/Linux/macOS)
 
 Runs the library unit tests AND the `tests/` integration tests, building for the
-native host. The embedded binary target is skipped automatically (it is gated
-behind `required-features = ["embedded"]`). This works on Windows, Linux, macOS,
-and inside the WSL2 devcontainer because `.cargo/config.toml` no longer pins a
-global `build.target` (embedded tasks pass `--target` explicitly instead).
+native host. The firmware binaries are skipped automatically: `bt2usb` and
+`bt2usb-selftest` require the `embedded` feature and `bt2usb-sim` requires the
+`sim` feature (`required-features` in `Cargo.toml`). This works on Windows,
+Linux, macOS, and inside the WSL2 devcontainer because `.cargo/config.toml`
+sets no global `build.target` (embedded tasks pass `--target` explicitly
+instead).
 
 ```bash
 ./scripts/run-tool.sh cargo test --locked --lib --tests
@@ -110,7 +112,7 @@ global `build.target` (embedded tasks pass `--target` explicitly instead).
     * desc: Generate JSON report
 
 **Options:**
-- `--html` - Generate HTML report and open in browser
+- `--html` - Generate an HTML report and print its path (no browser is opened)
 - `--json` - Output JSON format for CI integration
 
 ```bash
@@ -210,7 +212,7 @@ echo "Done! Run 'mask coverage' to generate reports."
 
 ## fmt
 
-> Format all Rust code
+> Format the bt2usb package (vendored code is not touched)
 
 ```bash
 ./scripts/run-tool.sh cargo fmt
@@ -262,7 +264,8 @@ echo "Done! Run 'mask coverage' to generate reports."
 
 Downloads portable Renode and the Python deps for `renode-test` into your home
 (`~/.local`). Idempotent. Run this once inside WSL/Linux, then use `mask sim` /
-`mask sim-test`. (On Windows, run it from inside WSL — see README.)
+`mask sim-test`. (On Windows, run it from inside WSL; see
+docs/development.md#devcontainer-and-wsl2.)
 
 ```bash
 bash scripts/install-renode.sh
@@ -319,8 +322,11 @@ fi
 
 > Flash the Nordic SoftDevice S140 (required once per board)
 
-Downloads and flashes the SoftDevice if not present. Verify the vendor image
-and production provenance requirements in docs/deployment.md before release use.
+Downloads Nordic's S140 archive only when `s140_nrf52_7.3.0_softdevice.hex` is
+missing from the repository root, extracts the HEX, and always flashes it. No
+digest is checked, of a fresh download or of an existing HEX; record the
+archive's SHA-256 yourself. See docs/deployment.md#softdevice-installation
+before release use.
 
 ```bash
 set -euo pipefail
@@ -365,7 +371,11 @@ devcontainer build --workspace-folder .
 
 ## doc
 
-> Generate and open documentation
+> Generate and open the firmware API documentation
+
+Builds rustdoc for the `embedded` configuration, dependencies included, without
+denying warnings. CI instead builds only the host library's documentation, with
+`cargo doc --locked --no-deps --lib` and `RUSTDOCFLAGS=-D warnings`.
 
 ```bash
 ./scripts/run-tool.sh cargo doc --locked --features embedded --target thumbv7em-none-eabihf --open

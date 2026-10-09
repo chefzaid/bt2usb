@@ -90,22 +90,24 @@ Three rules apply before any screen sees a press:
 
 The screen text below is quoted from
 [`ui/display.rs`](../src/ui/display.rs); transitions come from the reducer in
-[`ui/ui_logic.rs`](../src/ui/ui_logic.rs). A dash means the button does
-nothing on that screen.
+[`ui/ui_logic.rs`](../src/ui/ui_logic.rs), whose `Screen` variant is named in
+the second column. A dash means the button does nothing on that screen. The
+state behind these screens is in the
+[data model](data-model.md#ui-state-model).
 
-| Screen | What it shows | UP | DOWN | SELECT |
-| --- | --- | --- | --- | --- |
-| Home | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` | Open saved devices | — | Start an 8-second scan |
-| Scanning | `Scanning` and a dot animation that advances once per second | — | — | — |
-| Select device | `Select device`, up to four device names, `>` on the highlighted row | Move up, stopping at the first | Move down, stopping at the last | Connect to the highlighted device |
-| Connecting | `Connecting...` | — | — | — |
-| Connected | `Connected`, the device name or `2 devices`, `SEL:add DOWN:disc`, `UP:saved devices` | Open saved devices | Disconnect every link and return to Home | Scan to add another device |
-| ERROR | `ERROR`, the message, `SEL:retry DOWN:back`, `UP:saved devices` | Open saved devices | Acknowledge: return to Connected if a link is up, otherwise Home | Start a new scan |
-| Please wait... | `Please wait...` while a management request runs | — | — | — |
-| Saved devices | `Saved devices`, saved names newest first, a final `Factory reset` entry, `UP at first: back` | Move up; on the first entry, go back to Home or Connected | Move down, stopping at `Factory reset` | Open the confirmation for the highlighted entry |
-| Forget device? | The device name, `> Cancel`, `  Forget` | Highlight Cancel | Highlight Forget | Run the highlighted choice |
-| Reset all pairings? | `Disconnect all`, `> Cancel`, `  Reset` | Highlight Cancel | Highlight Reset | Run the highlighted choice |
-| Complete | `Complete`, `Device forgotten` or `Pairings reset`, `SELECT: back` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
+| Screen | `Screen` variant | What it shows | UP | DOWN | SELECT |
+| --- | --- | --- | --- | --- | --- |
+| Home | `Home` | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` | Open saved devices | — | Start an 8-second scan |
+| Scanning | `Scanning` | `Scanning` and a dot animation that advances once per second | — | — | — |
+| Select device | `DeviceList` | `Select device`, up to four device names, `>` on the highlighted row | Move up, stopping at the first | Move down, stopping at the last | Connect to the highlighted device |
+| Connecting | `Connecting` | `Connecting...` | — | — | — |
+| Connected | `Connected` | `Connected`, the device name or `2 devices`, `SEL:add DOWN:disc`, `UP:saved devices` | Open saved devices | Disconnect every link and return to Home | Scan to add another device |
+| ERROR | `Error` | `ERROR`, the message, `SEL:retry DOWN:back`, `UP:saved devices` | Open saved devices | Acknowledge: return to Connected if a link is up, otherwise Home | Start a new scan |
+| Please wait... | `Managing` | `Please wait...` while a management request runs | — | — | — |
+| Saved devices | `SavedDevices` | `Saved devices`, saved names newest first, a final `Factory reset` entry, `UP at first: back` | Move up; on the first entry, go back to Home or Connected | Move down, stopping at `Factory reset` | Open the confirmation for the highlighted entry |
+| Forget device? | `ConfirmForget(i)` | The device name, `> Cancel`, `  Forget` | Highlight Cancel | Highlight Forget | Run the highlighted choice |
+| Reset all pairings? | `ConfirmReset` | `Disconnect all`, `> Cancel`, `  Reset` | Highlight Cancel | Highlight Reset | Run the highlighted choice |
+| Complete | `Notice` | `Complete`, `Device forgotten` or `Pairings reset`, `SELECT: back` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
 
 Lists show four rows at a time and scroll to keep the highlighted row visible.
 A highlighted row that a newer list no longer contains is clamped to the last
@@ -207,9 +209,12 @@ Some details matter in daily use:
 
 At power-up the OLED shows Home. If devices are saved, the bridge runs one
 8-second scan (the screen shows Scanning), then assigns the two most recently
-added saved devices to connection slots 0 and 1. A device seen in that scan is
-matched by its identity key, so a rotating private address still matches, or by
-its stored address; one that was not seen is tried at its stored address.
+added saved devices to connection slots 0 and 1. "Most recently added" means
+the order in which devices were first saved: reconnecting or renaming a saved
+device does not move it ([data model](data-model.md#in-memory-cache)). A
+device seen in that scan is matched by its identity key, so a rotating private
+address still matches, or by its stored address; one that was not seen is
+tried at its stored address.
 
 Each slot then keeps reconnecting in the background until it succeeds or the
 user gives it another command. For a bonded device, every attempt first scans
@@ -221,6 +226,20 @@ for a background attempt (a peer's own Security Request is the exception; see
 connect, or secure the device is retried silently. Other failures, such as a
 peer without a usable HID service or an unreadable Report Map, are shown as
 errors and stop that slot's retries.
+
+Background retries also stop when:
+
+- you press DOWN on Connected, which disconnects every slot, including one
+  that is still retrying;
+- you start a scan while both slots are in use, connected or retrying, which
+  disconnects both first;
+- the device connects and is secured but its HID discovery then fails, as
+  above.
+
+In these cases the record stays saved, and the device comes back when you
+connect it again from a scan, or after a restart if it is one of the two most
+recently added. Forget and Factory reset also stop the retries of the slots
+they target, and remove the record.
 
 When the boot scan finishes, the screen shows the scan's device list, or the
 `No devices found` error if no device advertised the HID service. When a saved
@@ -274,26 +293,24 @@ never replaces an error. DOWN acknowledges an error,
 SELECT acknowledges a notice; both then return to Connected if a link is up,
 otherwise Home. SELECT on an error starts a new scan instead.
 
-| Message | Cause | What to do |
-| --- | --- | --- |
-| `No devices found` | A scan heard no device advertising the HID service | Put the device in pairing mode, move it closer, scan again |
-| `Scan failed` | The SoftDevice reported a scan error | Scan again; check the log |
-| `Connect failed` | Connection timed out, the link could not be encrypted, the list entry is gone, or both slots are busy | Wake the device, scan again; for a re-paired peripheral, forget it first |
-| `No HID service` | GATT discovery did not find a usable HID service | Check the device is a BLE HID keyboard or mouse |
-| `Notify failed` | No HID input report could be subscribed | Check the device is supported; see the log |
-| `HID map read failed` | The Report Map could not be read completely | Retry; record the log for [Report Map interoperability](../TODO.md) |
-| `HID map too large` | The Report Map is longer than 512 bytes | The device is not supported |
-| `Unsupported HID map` | The Report Map could not be parsed | The device's report layout is not supported |
-| `Storage failed` | A flash write failed, or the store is unreadable (also shown at boot) | See [Pairing Storage](#pairing-storage); Factory reset recovers an unreadable store |
-| `Action failed; retry` | The device to forget is no longer in the store | Reopen saved devices |
-| `Busy; try again` | The UI could not queue a command for the BLE task | Wait a moment and retry |
-| `Device changed; retry` | The selected saved device is no longer in the UI's list snapshot | Reopen saved devices |
-| `Device forgotten`, `Pairings reset` | A management change was committed to flash | Press SELECT |
+| Message | What to do |
+| --- | --- |
+| `No devices found` | Put the device in pairing mode, move it closer, and scan again |
+| `Scan failed` | Scan again; if it repeats, check the log |
+| `Connect failed` | Wake the device and scan again; for a peripheral that was paired again elsewhere, forget it on the bridge first |
+| `No HID service` | Check that the device is a BLE HID keyboard or mouse |
+| `Notify failed` | Check that the device is supported; see the log |
+| `HID map read failed` | Retry; record the log for [Report Map interoperability](../TODO.md#ble-central-and-pairing) |
+| `HID map too large` | The device is not supported |
+| `Unsupported HID map` | The device's report layout is not supported |
+| `Storage failed` | See [Pairing Storage](#pairing-storage); Factory reset recovers an unreadable store |
+| `Action failed; retry` | Reopen saved devices; the device was already removed |
+| `Busy; try again` | Wait a moment and retry |
+| `Device changed; retry` | Reopen saved devices |
+| `Device forgotten`, `Pairings reset` | Press SELECT |
 
-`Scan failed` through `Action failed; retry` map one-to-one from the nine BLE
-error tags in [`main.rs`](../src/main.rs) `ble_error_message`. `No devices found`,
-`Busy; try again`, `Device changed; retry`, and the two completion notices come
-from the UI loop and reducer.
+Every cause that raises each message, and the error tag behind it, is listed
+in the [data model](data-model.md#error-tags-and-ui-messages).
 
 ### Wake and display
 
@@ -425,8 +442,9 @@ covered by host tests; the tasks that perform them are in
 ### Reconnect And Link Loss
 
 - The boot plan in [`ble/reconnect.rs`](../src/ble/reconnect.rs) takes the
-  saved devices newest first, matches each to at most one scan result, never
-  gives one scan result to two devices, and caps the plan at two slots.
+  saved devices most recently added first, matches each to at most one scan
+  result, never gives one scan result to two devices, and caps the plan at two
+  slots.
 - A slot that loses an established link reports it, keeps the slot reserved
   for that device, releases the link's held input, and retries every 500 ms
   after each attempt. A user command replaces the retry at any time.
@@ -619,9 +637,10 @@ keeps application code out of those pages
   Writes are tried three times, 20 ms apart, because flash operations compete
   with the radio; log lines include `Saved {} devices to flash` and
   `Flash write failed after {} attempts: {:?}`.
-- **Order and capacity.** Records are kept in the order they were first added.
-  Boot reconnect and the saved-device list use newest first; a fifth device
-  evicts the oldest.
+- **Order and capacity.** Records are kept in the order they were first added,
+  and an update does not move a record. Boot reconnect and the saved-device
+  list use the most recently added first; a fifth device evicts the oldest
+  ([data model](data-model.md#in-memory-cache)).
 
 Host tests cover the framing and record validation
 ([`storage/framing.rs`](../src/storage/framing.rs),
@@ -730,19 +749,16 @@ SoftDevice configuration, USB device, and pins as the bridge and prints one
 `[PASS]`, `[FAIL]`, or `[SKIP]` line per stage over RTT. Run it with
 `mask selftest` before the first real flash; it never types anything on the PC.
 
-| Stage | Pass condition |
-| --- | --- |
-| `softdevice` | The SoftDevice enables; the `softdevice RAM: N bytes` line above it is what `memory_sd.x` must reserve |
-| `flash` | A scratch record under key `0xFE` is written, read back, and removed in the pairing region; saved pairings are only read |
-| `usb enumeration`, `usb hid report` | The PC configures the device within 10 seconds, then accepts one all-zero mouse report within 1 second |
-| `oled i2c`, `oled render` | An SSD1306 acknowledges at `0x3C`, initializes, and accepts the Home screen |
-| `button UP (P0.11)`, `button DOWN (P0.12)`, `button SELECT (P0.24)` | Each reads released at rest and is pressed within 20 seconds; no press is a skip |
-| `ble scan` | The radio hears any advertisement during an 8-second scan; HID devices heard are listed |
-| `stack` | Less than half of the stack region has been used |
-
-The self-test owns its flash driver and uses a 1024-byte buffer so it can read
-an existing pairing record. It ends with
-`==== self-test done: {} passed, {} failed, {} skipped ====`.
+It checks, in order, that the SoftDevice enables (and how much RAM it needs),
+that a scratch record can be written, read back, and removed in the pairing
+region without touching saved pairings, that the PC enumerates the device and
+accepts an idle mouse report, that the OLED acknowledges and draws the Home
+screen, that each button is released at rest and pressed when prompted, that
+the radio hears advertisements, and that less than half of the stack has been
+used. It ends with
+`==== self-test done: {} passed, {} failed, {} skipped ====`. Each stage's log
+lines, pass condition, and fix are in
+[first flash: self-test image](first-flash.md#2-self-test-image).
 
 The bridge logs over `defmt` RTT. Development builds use the `debug` level from
 [`.cargo/config.toml`](../.cargo/config.toml); every CI build, including the
@@ -882,50 +898,87 @@ results, and route suspected vulnerabilities to the security policy.
 
 ## Current Technical Boundaries
 
-Do not describe these as implemented. Each is tracked with an acceptance
-criterion in [TODO.md](../TODO.md).
+These are the limits a user of the bridge will notice today. None of them is
+implemented, so do not describe them as features.
 
-- authenticated pairing (passkey or numeric comparison), an enrollment policy,
-  or a bounded pairing window
-- a production USB VID/PID and unit-identity policy
-- defined `GET_REPORT`/`SET_IDLE` behavior and USB conformance captures
-- descriptor-driven translation for NKRO, packed buttons, 16-bit motion, or
-  vendor layouts; a decision on keeping the absent-Report-Map fallback
-- a documented, measured loss policy for input under sustained USB stalls
-- power-loss-safe persistence beyond fail-closed loading, and documented
-  storage migration and downgrade paths
-- watchdog recovery, recorded reset causes, build identification, and
-  diagnostic counters
-- measured SoftDevice RAM, stack, flash, and endurance budgets
-- a deadline for management requests in the UI
-- on-screen reporting of full-store eviction, unsupported reports, and security
-  failures
-- fuzzing, property tests, async fault tests, soak tests, and latency
-  measurements
-- license checks, an SBOM, verified digests for downloaded non-Cargo tools and
-  the SoftDevice, and replacements for the unmaintained `bare-metal` and
-  `proc-macro-error` dependencies
-- reproducible-build comparison and size budgets
-- pinned optional tools and container inputs, and scoped probe access instead
-  of a privileged devcontainer
-- automated documentation link and constant checks
-- readout protection, a provisioning procedure, and a security-maintenance
-  process with a private contact and supported versions
-- signed firmware, secure boot, rollback protection, or USB/BLE DFU
-- multiple BLE profile sets, monitor-input-aware switching, or a companion app
-- other MCUs or boards
+- **Pairing is not authenticated.** Pairing uses Just Works with no passkey,
+  confirmation, or pairing window, so a device in radio range while you pair
+  can intercept or impersonate the one you chose
+  ([authenticated pairing](../TODO.md#ble-central-and-pairing)).
+- **A background reconnect can still pair.** The bridge never starts pairing
+  for a background reconnect, but if the device at the other end asks to pair
+  and the bridge holds no keys for it, the pairing goes ahead without you
+  choosing anything. This applies to a saved device stored without keys, for
+  example one saved by firmware older than the bonding store, and to any
+  device that copies its address
+  ([Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing)).
+- **The scan list holds the first eight devices heard.** In a crowded room, or
+  with deliberate fake advertisers nearby, the device you want may be missing
+  from the list; move it closer and scan again
+  ([Scan list under crowding](../TODO.md#ble-central-and-pairing)).
+- **Only fixed report layouts work.** NKRO keyboards, mice with 16-bit motion
+  or packed buttons, and vendor-specific layouts are rejected or not
+  translated
+  ([report translation](../TODO.md#hid-report-parsing-and-translation)).
+- **The USB identity is a development one.** The bridge enumerates with the
+  test VID/PID `0x1209`/`0x0001`, and `GET_REPORT` and `SET_IDLE` are left to
+  library defaults, so behavior with strict hosts and BIOS/UEFI setups is
+  unproven ([USB identity and conformance](../TODO.md#usb-hid-device)).
+- **Fast input can be lost while USB stalls.** Under sustained USB stalls an
+  intermediate tap or some mouse travel can be lost; final releases are kept,
+  but the loss policy is not measured
+  ([backpressure](../TODO.md#input-aggregation-and-delivery)).
+- **Losing power while saving is untested.** What a power cut during a flash
+  write leaves behind is not known, and there is no documented migration or
+  downgrade path between storage versions
+  ([power-loss-safe persistence](../TODO.md#pairing-storage)).
+- **Errors are coarse and some events are silent.** A link that cannot be
+  secured shows only `Connect failed`, a failed save only `Storage failed`, a
+  fifth saved device replaces the oldest without a prompt, and an unsupported
+  report is dropped without a message. *Please wait...* has no deadline, so a
+  coordinator that never answers needs a power cycle
+  ([visible errors and the management wait](../TODO.md#ui-display-and-power)).
+- **Power use is not measured.** The bridge keeps its radio and links active
+  while the PC sleeps; whether a given hub accepts that current is untested
+  ([power budget](../TODO.md#ui-display-and-power)).
+- **A hang needs a power cycle.** There is no watchdog, no recorded reset
+  cause, and no way to read the firmware version from the device
+  ([watchdog and diagnostics](../TODO.md#platform-memory-and-recovery)).
+- **Keys are readable with physical access.** Bond keys are stored
+  unencrypted and readout protection is not enabled, so anyone with the board
+  and a debug probe can read them
+  ([provisioning and key protection](../TODO.md#device-security-and-provisioning)).
+- **Updates need a debug probe.** There is no USB or BLE firmware update, no
+  signed firmware, and no secure boot or rollback protection; there are also
+  no profile sets, monitor-input-aware switching, companion app, or other
+  supported boards ([product extensions](../TODO.md#product-extensions)).
 
-These are implemented but still need hardware or hosted evidence before a
-release can rely on them:
+No behavior in this guide is hardware-verified yet: pairing, reconnect,
+enumeration through hubs, sleep and wake, two-device input on a real host,
+Report Map long reads, and Forget across a reboot all wait for a recorded
+[first-flash](first-flash.md) run
+([hardware acceptance](../TODO.md#board-bring-up-and-hardware-acceptance)).
+The check jobs pass on GitHub Actions, but no `v*` tag exists, so the tag-only
+release jobs and their provenance attestation have never run
+([release](../TODO.md#release-provenance-and-supply-chain)).
 
-- every BLE, USB, storage, and display behavior in this guide on a recorded
-  first-flash run, including a compatibility matrix of peripherals, hosts,
-  hubs, and BIOS/UEFI or KVM targets
-- Forget and Factory reset across reboot and interrupted writes
-- two-source aggregation on a real USB host
-- Report Map long reads with real peripherals and different MTUs
-- the tag-only release jobs, provenance attestation, and verification of a
-  downloaded release (the check jobs already pass on GitHub Actions)
+Every open engineering task, including the tests, measurements, tooling, and
+supply-chain work that a user does not see, is in [TODO.md](../TODO.md) with
+its priority and acceptance criterion, grouped by section:
+[BLE central and pairing](../TODO.md#ble-central-and-pairing),
+[HID report parsing](../TODO.md#hid-report-parsing-and-translation),
+[USB HID device](../TODO.md#usb-hid-device),
+[input delivery](../TODO.md#input-aggregation-and-delivery),
+[pairing storage](../TODO.md#pairing-storage),
+[UI, display and power](../TODO.md#ui-display-and-power),
+[platform and recovery](../TODO.md#platform-memory-and-recovery),
+[device security](../TODO.md#device-security-and-provisioning),
+[hardware acceptance](../TODO.md#board-bring-up-and-hardware-acceptance),
+[verification and code quality](../TODO.md#verification-and-code-quality),
+[release and supply chain](../TODO.md#release-provenance-and-supply-chain),
+[developer experience](../TODO.md#developer-experience),
+[documentation](../TODO.md#documentation), and
+[product extensions](../TODO.md#product-extensions).
 
 ## Related Guides
 

@@ -2,7 +2,8 @@
 // nRF52840 GPIO + GPIOTE models with pin SENSE / LATCH / DETECT support.
 //
 // Loaded at runtime by Renode (`include @renode/nrf52840_sense_gpio.cs`) and
-// used by renode/bt2usb-nrf52840.repl in place of the stock `NRF52840_GPIO` /
+// used by the renode/nrf52840-sense-gpio.repl overlay (loaded from
+// renode/bt2usb-sim.resc) in place of the stock `NRF52840_GPIO` /
 // `NRF52840_GPIOTasksEvents` models.
 //
 // Why: embassy-nrf waits for input edges (`Input::wait_for_low/high/*_edge`)

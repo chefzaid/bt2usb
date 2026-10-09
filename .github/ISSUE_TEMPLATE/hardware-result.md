@@ -7,10 +7,10 @@ assignees: ""
 ---
 
 Work through [docs/first-flash.md](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md)
-and record each check below. The sections match its steps 0–7. Write `pass`,
-`fail`, or `skip: <reason>` in every Result cell; an empty or skipped cell is
-unverified, not a pass. Quote the log line or measurement that supports each
-result in Notes.
+and record each check below. The sections match its steps 0–8; section 8 is
+optional. Write `pass`, `fail`, or `skip: <reason>` in every Result cell; an
+empty or skipped cell is unverified, not a pass. Quote the log line or
+measurement that supports each result in Notes.
 
 ## Build
 
@@ -111,7 +111,7 @@ result in Notes.
 | Cancel by default | | |
 | Forget one peer; it does not reconnect after reset | | |
 | Factory reset; no prior peer auto-reconnects | | |
-| Failure reporting (record cached/persistent state after reboot) | | |
+| Failure reporting (record cached/persistent state after reboot; `skip: no fixture` until a fault-injection hook exists) | | |
 | Two sources sharing an endpoint (record supported pairs) | | |
 | OLED failure isolation | | |
 
@@ -122,6 +122,19 @@ result in Notes.
 | `memory_sd.x` change committed with margin evidence, or none needed | | |
 | Deviations filed as separate issues (link them) | | |
 | Result archived; [release gates](https://github.com/chefzaid/bt2usb/blob/main/docs/deployment.md#release-gates) reviewed | | |
+
+## [8. Extended Acceptance (Optional)](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md#8-extended-acceptance-optional)
+
+| Check | Result | Notes |
+| --- | --- | --- |
+| Reflash with `mask run --release` while peers are saved; peers reconnect without pairing again | | probe-rs version: , erase mode: |
+| Supply current, idle | | mA: |
+| Supply current, scanning | | mA: |
+| Supply current, two links active | | mA: |
+| Supply current, OLED on / OLED off | | mA on: , mA off: |
+| Supply current during USB suspend | | mA: |
+| Measured currents compared with the declared 100 mA and the USB suspend-current limit | | Meter, debugger cable connected or not: |
+| USB stays stable without an HFXO request (no unexpected drop-off or re-enumeration) | | Host USB errors, if any: |
 
 ## Sanitizing
 

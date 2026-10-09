@@ -174,7 +174,8 @@ Negative:
   `BLE_CONNECT_TIMEOUT_SECS`.
 - Adding a third slot or a new endpoint means revisiting channel capacities,
   GAP contention, SoftDevice RAM, and this policy.
-- All of this is software-verified only. No layer 5 result covers it yet.
+- None of this is verified on hardware yet (see
+  [Verification Status](#verification-status)).
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
@@ -205,17 +206,28 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Wake policy | `new_press` in [wake.rs](../../src/hid/wake.rs); `REMOTE_WAKE` and `run_usb_device` in `hid_device.rs` |
 | Keyboard LEDs | A `Watch` with `LED_CONSUMERS = 2` receivers in `hid_device.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state |
 
-Host tests cover the policy with the production code:
-`same_key_held_by_two_sources_survives_release_and_disconnect`,
-`keyboard_rollover_recovers_when_one_source_disconnects`,
-`mouse_unions_buttons_without_replaying_other_sources_motion`, and
-`consumer_priority_falls_back_and_shared_usage_survives_disconnect` in
-`aggregate.rs`; `queue_overflow_preserves_final_release` and
-`stale_completion_cannot_erase_post_reset_input` in `delivery.rs`; and the
-actual worker against fake endpoints in
-[delivery_tests.rs](../../src/hid/delivery_tests.rs), for example
-`unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write` and
-`repeated_usb_errors_use_capped_backoff_and_eventually_recover`.
+### Verification Status
+
+- **Implemented:** everything in the table above.
+- **Software-verified:** host tests cover the policy with the production code:
+  `same_key_held_by_two_sources_survives_release_and_disconnect`,
+  `keyboard_rollover_recovers_when_one_source_disconnects`,
+  `mouse_unions_buttons_without_replaying_other_sources_motion`, and
+  `consumer_priority_falls_back_and_shared_usage_survives_disconnect` in
+  `aggregate.rs`; `queue_overflow_preserves_final_release` and
+  `stale_completion_cannot_erase_post_reset_input` in `delivery.rs`; and the
+  actual worker against fake endpoints in
+  [delivery_tests.rs](../../src/hid/delivery_tests.rs), for example
+  `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write` and
+  `repeated_usb_errors_use_capped_backoff_and_eventually_recover`. The
+  coordinator and reconnect planner have host tests too, and the Renode
+  scenario drives the coordinator reducers on the ARM target. These passed on
+  GitHub-hosted runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and
+  37932436721 (`7fc99d6`, 2026-10-09) and scheduled run 37338711407
+  (2026-10-05). The slot workers, GAP serialization, and the USB side in
+  `hid_device.rs` are not host-tested.
+- **Hardware-verified:** not yet. No layer 5 result covers two peripherals on
+  one host, endpoint stalls, or suspend and resume.
 
 ## Related
 

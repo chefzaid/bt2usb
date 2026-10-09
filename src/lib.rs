@@ -5,9 +5,12 @@
 //! reimplementation. This crate root simply exposes the hardware-free modules so
 //! they can be unit-tested on the host with `cargo test` / `mask test`.
 //!
-//! The SoftDevice-coupled BLE modules (`multi_conn`, `hid_client`, `scanner`) and
-//! `storage`/`usb` are *not* included here; only their pure cores are
-//! (`ble::adv_parser`, `ble::coordinator`).
+//! The library compiles `hid`, `ble::{adv_parser, coordinator, reconnect,
+//! long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
+//! `power_logic`, plus `storage::{framing, record}` under `cfg(test)` only.
+//! The SoftDevice-coupled modules (`ble::{multi_conn, hid_client, scanner}`,
+//! `storage` and `storage::codec`, `usb`, `power`, `sd_setup`, `stack`,
+//! `ui::{display, buttons}`) and `config` are *not* included here.
 
 #![cfg_attr(not(test), no_std)]
 

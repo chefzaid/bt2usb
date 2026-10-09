@@ -6,8 +6,13 @@
 //!    HID-over-GATT Profile (HOGP).
 //! 2. **HID Client** - performs GATT service/characteristic discovery
 //!    on a connected peripheral and subscribes to HID Report notifications.
-//! 3. **Connection Manager** - maintains the active connection, handles
-//!    connect/disconnect flow, and reports status changes to the UI task.
+//! 3. **Connection coordinator** - [`multi_conn::ble_task`] owns the
+//!    connection-slot state machine ([`coordinator`]), loads the paired-device
+//!    store, runs scans and boot-time reconnects, and reports status changes
+//!    to the UI task.
+//! 4. **Connection workers** - two [`multi_conn::connection_slot_task`]s, one
+//!    per link (typically a keyboard and a mouse), each connecting, pairing or
+//!    encrypting, running the HID client, and reconnecting after a drop.
 //!
 //! Communication with other tasks is done via Embassy channels defined
 //! in the crate root.

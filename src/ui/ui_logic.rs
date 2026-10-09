@@ -4,8 +4,9 @@
 //! given the current screen and a button press, it returns the next screen plus
 //! the side effects to perform (which BLE command to send, what to redraw) as
 //! data. The `main.rs` loop is the imperative shell that applies the outcome
-//! (channel send + OLED draw). Being I/O-free, this is host-unit-tested
-//! (the orchestration layer of the docs/testing.md).
+//! (channel send + OLED draw). Being I/O-free, this is host-unit-tested (it is
+//! in the pure-core layer, see
+//! docs/architecture.md#module-layers-and-dependency-rules).
 
 /// Screens (views) the UI can be in.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]

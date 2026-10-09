@@ -31,9 +31,10 @@ pub struct ReconnectTarget {
 /// Decide which stored peers to auto-reconnect after boot, and at which address.
 ///
 /// `peer_count` stored devices are considered in the caller's order (most
-/// recently used first). `matches(peer, scanned)` reports whether scan result
-/// `scanned` is `peer` — by resolving a rotating RPA against the peer's IRK, or
-/// by a plain address match for a stable address.
+/// recently added first, as `DeviceStore::iter_recent` yields them).
+/// `matches(peer, scanned)` reports whether scan result `scanned` is `peer` —
+/// by resolving a rotating RPA against the peer's IRK, or by a plain address
+/// match for a stable address.
 ///
 /// Returns up to [`MAX_CONNECTIONS`] targets (one per connection slot), never
 /// assigning the same scan result to two different peers.

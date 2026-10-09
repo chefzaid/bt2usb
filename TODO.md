@@ -24,8 +24,8 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [BLE Central And Pairing](#ble-central-and-pairing) | 11 | 5 | 3 |
-| [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 3 | 2 | 0 |
+| [BLE Central And Pairing](#ble-central-and-pairing) | 11 | 8 | 3 |
+| [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 3 | 3 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
@@ -36,9 +36,9 @@ probe, or USB host to close.
 | [Verification And Code Quality](#verification-and-code-quality) | 4 | 12 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 7 | 2 | 0 |
-| [Documentation](#documentation) | 4 | 1 | 0 |
-| [Product Extensions](#product-extensions) | 0 | 7 | 0 |
-| **Total** | **64** | **66** | **22** |
+| [Documentation](#documentation) | 5 | 1 | 0 |
+| [Product Extensions](#product-extensions) | 0 | 28 | 0 |
+| **Total** | **65** | **91** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -165,6 +165,70 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   the user rescan with a name filter). Accept when host tests show the intended
   device is listed with more than eight HID advertisers present
   ([security](docs/security.md#threat-model)).
+- [ ] **P1** **Keyboard ready in time for firmware setup keys.** *(hardware)*
+  A monitor that powers its hub together with the PC boots the bridge at the
+  same moment as the PC, and the keyboard must work before the PC's firmware
+  stops waiting for a setup key such as F2 or Del. Today the bridge first runs
+  the full 8-second boot scan (`BLE_SCAN_DURATION_SECS`) before it assigns any
+  saved device to a slot (`ble_task` in `src/ble/multi_conn.rs`). Each
+  background attempt then scans up to 6 seconds (`BLE_CONNECT_TIMEOUT_SECS`) to
+  resolve a bonded device's current address, even when the boot scan has just
+  found it, and up to 6 more to connect. The shared `GAP_PROCEDURE` lock lets
+  only one slot's scan or connect run at a time, and those scans use the
+  vendored default of a 312.5 ms window every 1.7 s (`ScanConfig::default()`
+  in `vendor/nrf-softdevice/src/ble/central.rs`). A keyboard therefore cannot
+  type for at least 8 seconds after power-up, and a sleeping mouse can hold the
+  radio while the keyboard waits. Start reconnecting without waiting for a full
+  scan, and look for every bonded peer in one scan, for example with the
+  SoftDevice whitelist and device identity list (`set_whitelist` and
+  `set_device_identities_list` in `vendor/nrf-softdevice/src/ble/gap.rs`),
+  which resolve private addresses in the SoftDevice. Raise the scan duty cycle
+  while a reconnect is pending only for a bounded time that the
+  [power budget](#ui-display-and-power) measurement covers, USB suspend
+  included. The same changes shorten the reconnect after a peripheral sleeps,
+  and "Soak and latency measurements" reuses both timings. Accept when
+  [first flash](docs/first-flash.md#5-in-the-monitor) has a cold-start check in
+  which the monitor and the PC power on together and a setup key pressed
+  repeatedly from power-on opens firmware setup; that check passes for the
+  named keyboards, monitors, and PCs of the hardware compatibility baseline;
+  the times from VBUS to the first delivered keystroke and from a key press on
+  a sleeping keyboard to its first delivered keystroke are published in
+  [features](docs/features.md#boot-and-reconnect); and a saved device that is
+  asleep no longer delays the other slot's reconnect by a full attempt
+  ([architecture](docs/architecture.md#background-reconnect)).
+- [ ] **P1** **Send the host's lock-key state to every keyboard that
+  connects.** *(hardware)* Each slot keeps one LED receiver across reconnects
+  (`connection_slot_task` in `src/ble/multi_conn.rs`) and writes to the
+  keyboard only when `changed()` returns (`run_notification_loop` in
+  `src/ble/hid_client.rs`). The receiver also consumes changes while the slot
+  holds a mouse, for which `write_leds` does nothing. A keyboard that connects
+  after the host's last LED change, including one that wakes from sleep on the
+  same slot, therefore shows the wrong Caps Lock and Num Lock state until the
+  host changes it, whereas a wired keyboard receives the state when it is
+  plugged in. Write the current state, when the host has sent one, as soon as
+  a keyboard's LED output report is discovered, then follow changes as today.
+  Accept when a host test of that decision shows that a keyboard connecting
+  after the last LED change receives the current state once, and on a board a
+  keyboard that sleeps and reconnects shows the host's Caps Lock state
+  ([features](docs/features.md#keyboard-leds)).
+- [ ] **P1** **Bound the connection parameters a peripheral may request.**
+  *(hardware)* The bridge connects with a 7.5 to 15 ms interval, no
+  peripheral latency, and a 4-second supervision timeout
+  (`BLE_CONN_INTERVAL_MIN`, `BLE_CONN_INTERVAL_MAX`, `BLE_SLAVE_LATENCY`, and
+  `BLE_SUP_TIMEOUT` in `src/config.rs`), but the vendored crate grants every
+  later request from the peripheral unchanged
+  (`BLE_GAP_EVTS_BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST` in
+  `vendor/nrf-softdevice/src/ble/gap.rs`). A peripheral can therefore move to a
+  long interval, which delays every report, or to a supervision timeout of up
+  to 32 seconds, during which a key held when the link silently fails stays
+  held on the host. Decide the accepted ranges, answer a request outside them
+  with the nearest accepted values, and either record the change in the
+  vendored patch notes ([ADR 0007](docs/adr/0007-vendored-softdevice-patch.md))
+  or handle the event in the application. Accept when a test shows an
+  out-of-range request is clamped,
+  [features](docs/features.md#connection-and-security) states the bound that
+  holds, and the negotiated parameters of the named peripherals in the hardware
+  compatibility baseline are recorded.
 
 ## HID Report Parsing And Translation
 
@@ -195,6 +259,20 @@ types. Context: [architecture](docs/architecture.md#hid-path-and-limits) and
   and 16-bit movement. Accept when a fixture corpus covers supported layouts and
   unsupported layouts fail explicitly without misclassifying input
   ([architecture](docs/architecture.md#hid-path-and-limits)).
+- [ ] **P1** **Accept keyboards that use the reserved byte.**
+  `KeyboardReport::from_ble_bytes` in `src/hid/keyboard.rs` drops every
+  keyboard report whose second byte is not zero, on every path in
+  `src/hid/mod.rs`. A keyboard that sends data in that byte, which HID 1.11
+  reserves for OEM use and tells a BIOS to ignore, therefore types nothing
+  through the bridge, although the aggregator already clears the byte before
+  USB ([security](docs/security.md#input-validation-boundaries)). Ignore its
+  value when a keyboard Report Reference or the Report Map identifies the
+  report, and keep the check only on the legacy length-only path, where it
+  guards classification. Accept when classification tests cover a non-zero
+  reserved byte with a keyboard Report Reference, with a numbered Report Map,
+  and on the legacy path, and the input-validation table in
+  [security](docs/security.md#input-validation-boundaries) states the new rule
+  ([features](docs/features.md#translation)).
 
 ## USB HID Device
 
@@ -480,8 +558,11 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   the build or a CI check ([hardware](docs/hardware.md#memory-layout)).
 - [ ] **P1** **Diagnostics without sensitive input.** Add firmware/build
   identification, reset reasons, bounded counters for reconnect/queue/write
-  failures, and a documented collection method. Accept when reports support
-  reproduction without logging key material or keystroke content
+  failures, and a documented collection method. Log each peripheral's Device
+  Information Service PnP ID (characteristic `0x2A50`) after HID input is
+  flowing, and have the hardware-result template ask for it. Accept when
+  reports support reproduction without logging key material or keystroke
+  content
   ([operations](docs/operations.md#reporting-a-defect)).
 
 ## Device Security And Provisioning
@@ -885,6 +966,16 @@ Guides, ADRs, and this plan. Context:
   error tags and their causes, with the user-facing table in
   [features](docs/features.md#notices-and-errors) linking to it; and recorded
   the review's open findings in this plan (2026-10-09).
+- [x] Stated the product's purpose and the rules every extension follows at the
+  head of [Product Extensions](#product-extensions), grouped its open items by
+  what they serve, added the open feature and decision items that follow from
+  that purpose, and added the bridge behaviors that fall short of it (setup-key
+  readiness, lock-key state on reconnect, peripheral-requested connection
+  parameters, the reserved keyboard byte) to their sections; the user-visible
+  limits they address are listed in
+  [features](docs/features.md#current-technical-boundaries) (`TODO.md`,
+  `docs/features.md`, `docs/architecture.md`, `docs/hardware.md`,
+  `docs/security.md`; 2026-10-09).
 - [ ] **P1** **Automated documentation checks.** Validate local links, command
   examples, and configuration/memory-map consistency in CI. Accept when a broken
   link or stale documented constant produces a targeted failure
@@ -892,19 +983,72 @@ Guides, ADRs, and this plan. Context:
 
 ## Product Extensions
 
-Future features. None is started; each needs its decision first where one is
-listed. Context: [features](docs/features.md#current-technical-boundaries).
+bt2usb exists so that a Bluetooth LE keyboard and mouse behave like wired USB
+ones. Plugged into a monitor's USB hub, the bridge is meant to move with the
+monitor's built-in KVM from one computer to the next, work in BIOS/UEFI setup
+screens and boot menus, and need no Bluetooth radio, driver, pairing, or
+software on any host, which also suits work machines where Bluetooth is
+disabled. None of this is hardware-verified yet. Every extension below serves
+that purpose and follows these rules:
 
-- [ ] **P2** **ADR: bootloader, flash partitioning, and signed DFU.** Choose a
-  bootloader, the flash partition layout (no bootloader or DFU region is
-  allocated today), image signing, secure boot, and anti-rollback. Accept when
-  the ADR is Accepted and listed in the
+1. **The host sees standard USB HID.** Normal use needs no driver, app, or
+   setting on any host, and a boot-protocol keyboard and mouse stay available
+   for firmware setup screens and KVMs whatever else is added.
+2. **The bridge holds the configuration.** Pairings, settings, and remaps are
+   stored in the bridge, not on a host, so they follow the bridge from one host
+   to the next behind the hub. The bridge's own controls can change every one
+   of them. The keyboard may run bridge actions, but deleting data and
+   approving a pairing stay on the bridge's own controls.
+3. **No host changes the bridge unseen.** Several computers share the bridge
+   through a KVM, so every change made from a host needs confirmation on the
+   bridge itself. No host can read bond keys, peer addresses, or keystrokes,
+   and no extension weakens the pairing, key-protection, or release gates
+   above.
+4. **Out of scope:** Bluetooth Classic peripherals (the nRF52840 radio is LE
+   only), audio, and acting as a Bluetooth keyboard or mouse toward a host. Any
+   role in which the bridge itself advertises or accepts connections, such as
+   a firmware update over BLE, needs its own decision, because it adds attack
+   surface the bridge does not have today.
+
+None of these items is started. Each needs its decision first where an "ADR:"
+item is listed. Context:
+[features](docs/features.md#current-technical-boundaries).
+
+### Shared Decisions
+
+These decisions come first because several items below depend on them.
+
+- [ ] **P2** **ADR: persistent device settings.** Decide where settings live:
+  a second `sequential-storage` item beside `KEY_PAIRED_DEVICES` in the pairing
+  pages, or separate flash pages, which changes the
+  [memory layout](docs/hardware.md#memory-layout). A new record type inside
+  the paired-device frame is not an option:
+  [ADR 0006](docs/adr/0006-fail-closed-pairing-store.md) validates that whole
+  frame and makes an unreadable pairing store refuse writes, so a corrupt
+  setting would lock the pairing store. Cover versioning, defaults, and how a
+  corrupt or unknown settings item falls back to defaults without touching bond
+  records. The compatibility mode, settings menu, keyboard shortcuts, and key
+  remapping items depend on this decision. Accept when the ADR is Accepted and
+  listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
-- [ ] **P2** **Signed USB/BLE DFU.** *(hardware)* Choose a bootloader and flash
-  partition layout; implement signed image validation, rollback policy,
-  interrupted-update recovery, and physical recovery. Accept only after
-  power-cut and invalid-image tests
-  ([security](docs/security.md#firmware-integrity-and-updates)).
+- [ ] **P2** **ADR: USB interface and report extensions.** Decide how System
+  Control, an NKRO keyboard report, 16-bit mouse motion with a Resolution
+  Multiplier, Battery Strength, the host management interface, and the
+  compatibility configuration fit the composite device. Cover which interface
+  carries each report and whether that adds report IDs to an interface that
+  has none today; the endpoint packet sizes (each interrupt endpoint uses an
+  8-byte maximum packet in `src/usb/hid_device.rs`, which a bitmap keyboard
+  report or a 16-bit mouse report does not fit); the Feature `GET_REPORT` and
+  `SET_REPORT` requests a Resolution Multiplier needs on the mouse interface,
+  which rejects `SET_REPORT` today; whether a changed interface set needs its
+  own product ID or device release number; and how the boot keyboard and
+  mouse, whose report-protocol layouts start with the boot layout for hosts
+  that skip `SET_PROTOCOL`, stay unchanged. Accept when the ADR is Accepted and
+  listed in the
+  [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+
+### Hand-Off Between Hosts And KVMs
+
 - [ ] **P2** **ADR: multiple BLE profile sets.** Decide profile selection,
   storage layout and migration, and which slots a profile owns. Accept when the
   ADR is Accepted and listed in the
@@ -917,16 +1061,274 @@ listed. Context: [features](docs/features.md#current-technical-boundaries).
   explicit supported signal from the monitor/host, define fallback behavior, and
   prototype against named hardware. Accept when input reaches the intended PC
   without leaking held keys during a switch.
-- [ ] **P2** **Windows/macOS companion app.** *(hardware)* Define a versioned,
-  authenticated management protocol and installation/update policy before
-  implementing the tray UI. Accept when settings, diagnostics, access control,
-  and firmware compatibility are tested end to end.
+- [ ] **P2** **Connect any saved device that is present.** Only the two most
+  recently added saved devices reconnect at boot
+  (`store.iter_recent().take(MAX_CONNECTIONS)` in `ble_task`,
+  `src/ble/multi_conn.rs`), and a slot whose link drops stays reserved for
+  that device (`on_slot_link_lost` in `src/ble/coordinator.rs`). A third or
+  fourth saved device, such as a second keyboard kept at another desk,
+  therefore connects only through a scan and a selection on the bridge, and
+  that scan first disconnects both slots when both are in use
+  (`plan_start_scan`). Let a saved device that advertises take a free slot, or
+  a slot whose device is still retrying, and decide when a retrying device
+  gives up its slot. Accept when reconnect-planner and coordinator tests cover
+  four saved devices with any two present, a saved device that wakes while its
+  slot is held by a retrying one, and an unchanged result when only the two
+  most recent are present ([features](docs/features.md#boot-and-reconnect)).
+- [ ] **P2** **KVM and firmware-setup compatibility mode.** *(hardware)* Some
+  KVM switches emulate the keyboard and mouse instead of passing USB through,
+  and some firmware setup screens may handle only simple boot devices; either
+  can mishandle a composite device with a consumer-control interface. Add a
+  stored setting (see "ADR: persistent device settings" above) that enumerates
+  with only the boot keyboard and boot mouse interfaces, or with the boot
+  keyboard alone, and restarts the bridge so it re-enumerates when the setting
+  changes; `hid_device::init` builds the descriptors once at start-up. Start
+  only when the
+  [hardware compatibility baseline](#board-bring-up-and-hardware-acceptance)
+  records a KVM or firmware setup screen that fails with the default
+  configuration, and promote this item to P1 then. Accept when that target
+  works with the compatibility configuration, both configurations are recorded
+  on the baseline's KVMs and firmware setup screens, and a change of
+  configuration releases every held input
+  ([features](docs/features.md#usb-hid-device)).
+
+### Control From The Bridge
+
+The bridge usually sits behind a monitor, so every setting must be reachable
+from its own controls, and frequent actions also from the keyboard.
+
+- [ ] **P2** **Settings menu on the bridge.** *(hardware)* Add a Settings
+  screen with the display timeout (today the build-time
+  `SCREEN_AUTO_OFF_TIMEOUT_SECS`, 120 s), display rotation for a bridge
+  mounted upside down (`src/ui/display.rs` fixes `DisplayRotation::Rotate0`),
+  contrast, and the switches other items add, such as the compatibility mode
+  and keyboard shortcuts. Which saved devices reconnect belongs to "Multiple
+  BLE profile sets" and "Connect any saved device that is present". Accept when
+  reducer tests cover each setting, a corrupt settings item restores defaults
+  while saved devices still reconnect, and settings survive a reboot on a board
+  ([features](docs/features.md#screens-and-buttons)).
+- [ ] **P2** **Link status screen.** *(hardware)* The Connected screen shows one
+  device name or `2 devices`. Add a status view that lists each slot's device,
+  whether it delivers keyboard, mouse, or consumer input, and its live signal
+  strength, so the bridge can be placed where a monitor stand does not block
+  the radio; the stored `last_rssi` is a scan-time hint only. The view also
+  shows the firmware version from "Diagnostics without sensitive input" and the
+  state that "Visible storage/security errors" defines for a slot that keeps
+  retrying. Accept when reducer tests cover connected, retrying, and empty
+  slots and a board shows the signal strength change as a peripheral moves
+  ([features](docs/features.md#screens-and-buttons)).
+- [ ] **P2** **Peripheral battery level.** *(hardware)* Discover the Battery
+  Service (`0x180F`) and subscribe to Battery Level (`0x2A19`) when a
+  peripheral offers it, after HID input is flowing so the first keystroke is
+  never delayed. Show each device's level in the link status view, with one
+  low-battery notice that does not interrupt input. Today HID discovery ignores
+  the Battery Service; its UUID appears in `src/` only in advertisement-parser
+  test data. Accept when host tests cover level parsing and the low-battery
+  threshold, a peripheral without the service connects as before, and a real
+  keyboard's level is shown and updates
+  ([features](docs/features.md#hid-discovery-and-report-maps)).
+- [ ] **P2** **Keyboard shortcuts for bridge actions.** Reserve a configurable
+  key chord, recognized per source before aggregation, that runs bridge
+  actions from the keyboard: open the status view, switch profile set, and
+  wake the display. The key that completes the chord never reaches the host,
+  chord keys already sent are released before the action runs, and the same
+  keys typed without the chord are unaffected. A shortcut never starts a scan
+  that would disconnect the keyboard that typed it (`plan_start_scan` in
+  `src/ble/coordinator.rs` disconnects both slots when both are in use), and
+  never confirms a Forget, a reset, or a pairing, which stay on the bridge's
+  own controls. Shortcuts stay off until enabled on the bridge, so no key
+  combination is taken from the host unasked. Accept when host tests prove
+  those properties for both slots
+  ([features](docs/features.md#two-source-aggregation)).
+- [ ] **P2** **Key remapping and input adjustments.** *(hardware)* Remap keys
+  per saved device (for example Caps Lock to Control), invert scrolling, and
+  scale pointer speed inside the bridge, so the change follows the bridge to
+  every host behind the hub and into firmware setup screens with no host
+  software. Apply remapping per source before aggregation, so six-key rollover,
+  new-press-only wake, and release on disconnect see the remapped keys. A remap
+  meant for one host only, such as Command and Option swapped for a PC but not
+  for a Mac on the same KVM, needs the active host from "Monitor-input-aware
+  switching" and is not part of this item. Accept when host tests cover
+  remapped press and release pairs on both slots, modifiers, and a remap whose
+  target key the other slot already holds, and a remap survives a reboot on a
+  board ([features](docs/features.md#two-source-aggregation)).
+
+### Input Fidelity
+
+The host should get everything a keyboard or mouse would give it when plugged
+in by cable or paired directly.
+
+- [ ] **P2** **Power, sleep, and wake keys.** *(hardware)* Keyboards with power
+  or sleep keys often report them in a Generic Desktop System Control
+  collection (usage `0x80`: System Power Down `0x81`, System Sleep `0x82`,
+  System Wake Up `0x83`). `src/hid/report_protocol.rs` classifies only
+  keyboard, mouse, and consumer reports and the USB device has no System
+  Control report, so these keys are dropped. Power and sleep keys that a
+  keyboard sends on the Consumer page already reach the host through the
+  consumer-control interface. Add the report kind, a bounded translation, and a
+  USB System Control report on the interface that "ADR: USB interface and
+  report extensions" chooses, with the same release-on-disconnect and
+  new-press-only wake rules as the other endpoints. Accept when descriptor
+  fixtures and aggregation tests cover press and release, and a real keyboard's
+  sleep key suspends a named host through the bridge
+  ([features](docs/features.md#translation)).
+- [ ] **P2** **More than six keys on the USB keyboard.** *(hardware)* The USB
+  keyboard report carries six key codes, so more than six distinct keys held
+  across both keyboards become the rollover report of six `0x01` codes. Add a
+  bitmap (NKRO) keyboard report for report protocol while keeping the six-key
+  boot report. The USB extensions ADR decides between a separate NKRO
+  interface and the boot keyboard's own report protocol, with the firmware
+  setup screens and KVMs that skip `SET_PROTOCOL` in mind, and the larger
+  endpoint packet a bitmap report needs. NKRO input from BLE keyboards comes
+  from descriptor-driven translation
+  ([HID Report Parsing And Translation](#hid-report-parsing-and-translation)).
+  Accept when aggregation tests cover more than six held keys in report
+  protocol and the rollover report in boot protocol, and a named host registers
+  more than six simultaneous keys through the bridge
+  ([data model](docs/data-model.md#usb-hid-report-contracts)).
+- [ ] **P2** **High-resolution mouse movement and scrolling.** *(hardware)* USB
+  mouse X, Y, wheel, and pan are signed 8-bit values and the descriptor has no
+  Resolution Multiplier, so the host gets only standard wheel steps and
+  coalesced motion saturates at the signed 8-bit range (-128 to 127) per
+  report. Add 16-bit movement and high-resolution wheel and pan (a Resolution
+  Multiplier feature report) for report protocol, leaving the three-byte boot
+  report unchanged, on the interface and packet size the USB extensions ADR
+  chooses. The Resolution Multiplier needs Feature `GET_REPORT` and
+  `SET_REPORT` on the mouse interface, which rejects `SET_REPORT` today
+  (`set_report` in `src/usb/hid_device.rs`), so this item follows "HID/USB
+  conformance" and updates the
+  [USB host interface](docs/security.md#usb-host-interface) table. This also
+  carries the 12- and 16-bit motion that descriptor-driven translation will
+  decode from BLE mice. Accept when host tests show motion beyond the signed
+  8-bit range per report delivered without saturation, and a named host scrolls
+  in high-resolution steps through the bridge
+  ([data model](docs/data-model.md#usb-hid-report-contracts)).
+- [ ] **P2** **Peripheral battery level reported to the host.** *(hardware)* A
+  host paired over Bluetooth shows each keyboard's and mouse's battery level;
+  through the bridge it sees none. Report the level from "Peripheral battery
+  level" above as a HID Battery Strength usage (Generic Device Controls page
+  `0x06`, usage `0x20`) on an interface that the USB extensions ADR chooses,
+  never on the boot keyboard or mouse interface. Hosts that read HID battery
+  reports, such as Linux, show it; others may not. Accept when descriptor tests
+  cover the report and a Linux host shows a real peripheral's level
+  ([features](docs/features.md#usb-hid-device)).
+- [ ] **P2** **Per-peripheral quirks.** Key a bounded, data-driven quirk table
+  on the Device Information Service PnP ID (characteristic `0x2A50`: vendor ID
+  source, vendor ID, product ID, and version) for peripherals whose Report Map
+  misdescribes their reports, so that descriptor-driven translation alone
+  cannot handle them. Read the PnP ID after HID input is flowing, so the first
+  keystroke is never delayed. Accept when host tests cover quirk lookup and
+  default behavior for an unknown peripheral, and each quirk names the
+  hardware-result issue that justifies it
+  ([features](docs/features.md#translation)).
+- [ ] **P2** **ADR: HID passthrough for other device classes.** Decide whether
+  a BLE HID peripheral whose reports the fixed keyboard, mouse, and consumer
+  translation cannot represent (for example a touchpad or a vendor-defined
+  control) gets its own USB interface that mirrors its Report Map. A mirrored
+  map hands a peer-chosen descriptor and peer-chosen reports to the host, so
+  decide which usages a mirrored interface may carry (no keyboard, keypad,
+  mouse, or system-control usages, which keep going through the bounded
+  translation and release rules), and add the case to the
+  [threat model](docs/security.md#threat-model). Cover how many such
+  interfaces exist, how their descriptors stay fixed at enumeration while
+  peripherals come and go, where Report Maps of up to 512 bytes are stored, how
+  they are validated, and how the boot keyboard and mouse stay unaffected.
+  Accept when the ADR is Accepted and listed in the
+  [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+- [ ] **P2** **HID passthrough for other device classes.** *(hardware)*
+  Implement the ADR above. Accept when a mirrored peripheral works on a named
+  host, a malformed or oversized Report Map is rejected before enumeration, and
+  the boot keyboard and mouse still pass the
+  [first-flash](docs/first-flash.md#5-in-the-monitor) monitor and firmware setup
+  checks.
+
+### More Peripherals And Form Factors
+
+- [ ] **P2** **ADR: more than two simultaneous peripherals.** Decide the link
+  count and what it costs in SoftDevice RAM (`conn_count` and
+  `central_role_count` are 2 in `src/sd_setup.rs`), aggregation sources and
+  consumer priority, endpoint fairness, the saved-device capacity
+  (`MAX_PAIRED_DEVICES` is 4, and all records share one item of at most 512
+  bytes, `MAX_RECORD_SIZE`, which fits at most five full records), and the UI.
+  The decision would supersede
+  [ADR 0005](docs/adr/0005-two-slots-and-independent-endpoints.md) in part and
+  follows "Single source for the link count and UI capacities" under
+  [Verification And Code Quality](#verification-and-code-quality). Accept when
+  the ADR is Accepted and listed in the
+  [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+- [ ] **P2** **More simultaneous peripherals and saved devices.** *(hardware)*
+  Support a third device at once, such as a numeric keypad or presenter remote
+  beside the keyboard and mouse, and more saved devices. Accept when three
+  links deliver input at once on a board with recorded SoftDevice RAM and stack
+  margins, the [memory and endurance budget](#platform-memory-and-recovery)
+  covers the new link count, and existing pairing stores migrate to the new
+  capacity ([data model](docs/data-model.md#schema-change-rules)).
+- [ ] **P2** **Display-less plug-in dongle.** *(hardware)* A bridge that plugs
+  straight into the monitor's USB port needs no cable or case. Build a variant
+  for a plug-in nRF52840 USB dongle, such as Nordic's nRF52840 Dongle, with an
+  LED for status, one button for the actions that stay on the bridge's own
+  controls, and keyboard shortcuts that a long press of that button enables.
+  Nordic's dongle ships with a USB bootloader that starts at `0xE0000`, inside
+  today's application range and below the pairing pages (`0xF0000` to
+  `0xF3FFF`), so the variant needs its own flash map and a decision whether
+  firmware is flashed through that bootloader or the board is erased over SWD,
+  under "ADR: bootloader, flash partitioning, and signed DFU" below. If
+  "Production hardware definition" chooses this variant, that item's
+  acceptance applies to it. Accept when the authenticated pairing ADR covers a
+  display-less pairing flow, the variant has its own build, pin map, and linker
+  script with the same assertions as `memory_sd.x`, and it has a passing
+  first-flash record adapted to it
+  ([hardware](docs/hardware.md#porting-to-another-nrf52840-board)).
 - [ ] **P2** **Additional MCU/board targets.** *(hardware)* Select a concrete
   target, isolate board configuration, and implement its radio/USB/storage
   integration. Accept when it has a maintained build and hardware acceptance
   record; alternatives listed in
   [hardware](docs/hardware.md#possible-future-ports) are not supported ports
   today.
+
+### Updates And Host Tools
+
+- [ ] **P2** **ADR: bootloader, flash partitioning, and signed DFU.** Choose a
+  bootloader, the flash partition layout (no bootloader or DFU region is
+  allocated today), image signing, secure boot, and anti-rollback. Accept when
+  the ADR is Accepted and listed in the
+  [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+- [ ] **P2** **Signed USB/BLE DFU.** *(hardware)* Choose a bootloader and flash
+  partition layout; implement signed image validation, rollback policy,
+  interrupted-update recovery, and physical recovery. Entering update mode
+  needs a press on the bridge's own button, so no host behind a KVM can start
+  an update unseen. An update over BLE would give the bridge an advertising,
+  connectable role that it does not have today
+  ([security](docs/security.md#security-posture-summary)), so the ADR above
+  decides it separately. Accept only after power-cut and invalid-image tests
+  ([security](docs/security.md#firmware-integrity-and-updates)).
+- [ ] **P2** **ADR: host management interface.** Decide whether the bridge
+  offers a management channel to the host, such as a vendor-defined HID
+  interface, its versioned protocol, what it may read (status, diagnostics,
+  settings) and change, and how each change is confirmed on the bridge itself.
+  Every host behind a KVM shares the bridge, so no host may change pairings or
+  settings unseen, and the protocol never exposes bond keys, peer addresses,
+  or keystrokes. The interface is left out of the compatibility
+  configuration, so a KVM or firmware setup screen sees only the boot keyboard
+  and mouse. Today the bridge has no such interface, which the
+  [threat model](docs/security.md#threat-model) relies on. Accept when the ADR
+  is Accepted and listed in the
+  [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+- [ ] **P2** **Browser configuration page.** *(hardware)* Publish, with each
+  release, a static web page that reads status and diagnostics and changes
+  settings through WebHID, so nothing is installed on the host. WebHID blocks
+  reports in keyboard and mouse top-level collections and is available only in
+  Chromium-based browsers, so the page talks to the vendor-defined interface
+  from the host management ADR. Accept when the page works in a named
+  Chromium-based browser, every change waits for confirmation on the bridge,
+  and each page release states the firmware versions it supports.
+- [ ] **P2** **Windows/macOS companion app.** *(hardware)* The app is an
+  optional client for hosts without a WebHID browser, and normal use never
+  needs it. Build it on the host management interface above, after the browser
+  configuration page, and define its installation and update policy before
+  implementing the tray UI. Accept when it performs every operation the
+  browser configuration page does against the same firmware versions, and
+  every change waits for confirmation on the bridge.
 
 ## Updating This Checklist
 

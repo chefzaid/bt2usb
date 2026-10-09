@@ -1160,6 +1160,15 @@ Write an ADR before implementing any of these [TODO.md](../TODO.md) items:
 - bootloader, flash partitioning, and signed USB/BLE DFU
 - provisioning, debug access, and readout protection
 - multiple BLE profile sets
+- persistent device settings (storage location, versioning, and defaults,
+  without letting a settings record lock the pairing store)
+- more than two simultaneous peripherals (would supersede
+  [ADR 0005](adr/0005-two-slots-and-independent-endpoints.md) in part)
+- USB interface and report extensions (System Control, NKRO, high-resolution
+  mouse, battery strength, and the compatibility configuration)
+- HID passthrough interfaces for device classes the fixed translation cannot
+  represent
+- a host management interface and how its changes are confirmed on the bridge
 
 ## ADR Template
 

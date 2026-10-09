@@ -252,7 +252,9 @@ sleep, anything that link was holding down on the PC is released at once, the
 slot stays reserved for the same device, and it reconnects silently once the
 device advertises again. The screen shows only the links that are actually up.
 The log shows `slot N link lost; reconnecting`, with the slot number. A link
-that drops without a disconnect is detected by the 4-second supervision timeout.
+that drops without a disconnect is detected by the supervision timeout, 4
+seconds unless the peripheral has requested a longer one
+([Connection And Security](#connection-and-security)).
 
 ### Manage saved devices
 
@@ -371,6 +373,10 @@ covered by host tests; the tasks that perform them are in
   timeout, a 7.5 ms connection event length, and a 64-byte ATT MTU. The
   SoftDevice is configured for two central links and no advertising or
   peripheral role ([`sd_setup.rs`](../src/sd_setup.rs)).
+- A peripheral can later request other connection parameters, and the
+  vendored crate grants the request unchanged, including a longer interval or
+  a supervision timeout of up to 32 seconds
+  ([TODO.md](../TODO.md#ble-central-and-pairing)).
 - Pairing is Just Works with bonding: the security handler declares no input
   or output capability ([ADR 0011](adr/0011-interim-just-works-pairing.md)).
   This gives encryption but no protection against an active attacker in radio
@@ -461,7 +467,11 @@ logs `Host LEDs: num={} caps={} scroll={}`, and writes the byte to the BLE
 keyboard's own output report: the first Output report that shares the keyboard
 input's report ID in the Report Map, or, for a keyboard-only map without report
 IDs, the first Output report. Both slots watch the latest
-LED state, so it reaches the keyboard whichever slot holds it. A USB reset sends
+LED state, so it reaches the keyboard whichever slot holds it. Each slot passes
+on a change only once, and consumes it even while it holds a mouse, so a
+keyboard that reconnects after sleeping, or connects to a slot that already saw
+the latest change, shows a stale state until the host's state changes again
+([TODO.md](../TODO.md#ble-central-and-pairing)). A USB reset sends
 all LEDs off. A failed write logs `Failed to write LED state to BLE keyboard`.
 
 Hardware evidence still needed for the BLE central: pairing, reconnect, LED, and
@@ -916,10 +926,34 @@ implemented, so do not describe them as features.
   with deliberate fake advertisers nearby, the device you want may be missing
   from the list; move it closer and scan again
   ([Scan list under crowding](../TODO.md#ble-central-and-pairing)).
+- **A keyboard is not ready right after power-up.** The bridge scans for 8
+  seconds before it starts reconnecting saved devices, then searches for them
+  one at a time, so a keyboard cannot type until at least 8 seconds after the
+  monitor powers the bridge. When the PC powers on at the same moment, that
+  can be too late for a firmware setup key such as F2 or Del
+  ([Keyboard ready in time for firmware setup keys](../TODO.md#ble-central-and-pairing)).
 - **Only fixed report layouts work.** NKRO keyboards, mice with 16-bit motion
   or packed buttons, and vendor-specific layouts are rejected or not
-  translated
+  translated, and a keyboard that sends data in its report's reserved byte
+  types nothing
   ([report translation](../TODO.md#hid-report-parsing-and-translation)).
+- **Some keys and details do not reach the PC.** Power, sleep, and wake keys
+  that a keyboard reports as System Control are dropped, more than six keys
+  held at once produce a rollover report, scrolling comes in standard wheel
+  steps without high-resolution scrolling, and neither the PC nor the bridge
+  shows the battery level of a keyboard or mouse
+  ([input fidelity](../TODO.md#input-fidelity)).
+- **Lock-key lights can be wrong after a reconnect.** A keyboard that
+  reconnects, for example after sleeping, can show the wrong Caps Lock and Num
+  Lock state until the lock state next changes on the PC
+  ([Send the host's lock-key state to every keyboard that connects](../TODO.md#ble-central-and-pairing)).
+- **Bridge settings are fixed in the firmware.** The display timeout and
+  orientation cannot be changed on the device, there are no keyboard
+  shortcuts for bridge actions, and keys cannot be remapped
+  ([control from the bridge](../TODO.md#control-from-the-bridge)). At
+  power-up the bridge always reconnects the two most recently added saved
+  devices, and another saved device connects only through a scan
+  ([hand-off between hosts](../TODO.md#hand-off-between-hosts-and-kvms)).
 - **The USB identity is a development one.** The bridge enumerates with the
   test VID/PID `0x1209`/`0x0001`, and `GET_REPORT` and `SET_IDLE` are left to
   library defaults, so behavior with strict hosts and BIOS/UEFI setups is
@@ -949,9 +983,13 @@ implemented, so do not describe them as features.
   and a debug probe can read them
   ([provisioning and key protection](../TODO.md#device-security-and-provisioning)).
 - **Updates need a debug probe.** There is no USB or BLE firmware update, no
-  signed firmware, and no secure boot or rollback protection; there are also
-  no profile sets, monitor-input-aware switching, companion app, or other
-  supported boards ([product extensions](../TODO.md#product-extensions)).
+  signed firmware, and no secure boot or rollback protection
+  ([updates and host tools](../TODO.md#updates-and-host-tools)).
+- **No profiles, host tools, or other boards.** There are no profile sets,
+  monitor-input-aware switching, KVM compatibility mode, companion app or
+  browser configuration page, plug-in dongle variant, or other supported
+  boards, and no more than two peripherals connect at once
+  ([product extensions](../TODO.md#product-extensions)).
 
 No behavior in this guide is hardware-verified yet: pairing, reconnect,
 enumeration through hubs, sleep and wake, two-device input on a real host,

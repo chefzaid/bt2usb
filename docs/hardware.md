@@ -434,6 +434,13 @@ another board yet.
       the stack high-water, run `mask size`, and complete the first-flash
       checklist with the board revision recorded.
 
+A plug-in nRF52840 USB dongle keeps the same MCU and SoftDevice but has no
+OLED, fewer buttons, and a preinstalled USB bootloader. On Nordic's nRF52840
+Dongle that bootloader starts at `0xE0000`, inside today's application range
+and below the pairing pages, so such a board needs its own pin map, a
+display-less UI, and a different flash layout. It is tracked as the
+[display-less dongle item](../TODO.md#more-peripherals-and-form-factors).
+
 ## Possible Future Ports
 
 ESP32-S3, RP2040 with an external BLE module, and STM32 with an external BLE module

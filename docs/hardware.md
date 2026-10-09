@@ -269,15 +269,15 @@ Radio parameters that are not in `config.rs` come from the vendored
 
 | Parameter | Value |
 | --- | --- |
-| Scan type | Active for user scans; the vendored default is also active |
+| Scan type | Active for user scans, so scan responses supply names; passive for reconnect scans, which need only the advertiser's address |
 | Extended scanning | Enabled (vendored default) |
 | PHY | 1M |
-| Scan interval / window | 2732 / 500 in 0.625 ms units: about 1.7 s / 312.5 ms |
+| Scan interval / window | User scans and slow reconnect scans: the vendored default of 2732 / 500 in 0.625 ms units, about 1.7 s / 312.5 ms. Reconnect scans for 30 s after power-up or a lost link, and every connection attempt: 160 / 80, a 50 ms window every 100 ms |
 | Scan and initiator TX power | 0 dBm (`TxPower::ZerodBm`); connections inherit it |
-| User and boot scan duration | Stops at the first advertisement after 8 s (`BLE_SCAN_DURATION_SECS`), or at a 10 s backstop |
-| Connection attempt | Whitelist scan for the target, timeout 6 s (`BLE_CONNECT_TIMEOUT_SECS`) |
-| Bonded-peer address resolution | Scan up to 6 s for an address the stored IRK resolves |
-| Connection parameters | 7.5–15 ms interval, slave latency 0, 4 s supervision timeout |
+| User scan duration | Stops at the first advertisement after 8 s (`BLE_SCAN_DURATION_SECS`), or at a 10 s backstop; there is no boot scan |
+| Connection attempt | Whitelist scan for the target at 160 / 80, timeout 6 s (`BLE_CONNECT_TIMEOUT_SECS`) |
+| Reconnect scan | Up to 6 s for an address that either slot's stored IRK resolves or that equals its stored address; a device heard for the other slot is handed over |
+| Connection parameters | 7.5–15 ms interval, slave latency 0, 4 s supervision timeout; a peripheral's later request is answered within 7.5–15 ms (up to 30 ms for one that asks only for slower intervals), latency at most 20, and a 1–4 s supervision timeout |
 | Security | `IoCapabilities::None` (Just Works), bonding allowed; before HID discovery the worker polls up to 25 times, 200 ms apart (about 5 s), for an encrypted security mode (`wait_for_secure_link` in [multi_conn.rs](../src/ble/multi_conn.rs)) |
 
 One GAP scan or connection setup runs at a time (`GAP_PROCEDURE` in
@@ -299,8 +299,14 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `BLE_SLAVE_LATENCY` | 0 | Connection events a peripheral may skip |
 | `BLE_CONN_EVENT_LENGTH` | 6 | 7.5 ms SoftDevice event length, in 1.25 ms units |
 | `BLE_SUP_TIMEOUT` | 400 | 4-second supervision timeout, in 10 ms units |
-| `BLE_CONNECT_TIMEOUT_SECS` | 6 | Connection-attempt / bonded-peer resolution scan timeout |
+| `BLE_CONNECT_TIMEOUT_SECS` | 6 | Connection-attempt and reconnect scan timeout |
 | `BLE_RECONNECT_BACKOFF_MS` | 500 | Pause between reconnect attempts |
+| `BLE_FAST_SCAN_INTERVAL` / `WINDOW` | 160 / 80 | A 50 ms window every 100 ms, in 0.625 ms units, for connection attempts and fast reconnect scans |
+| `BLE_FAST_RECONNECT_SECS` | 30 | How long reconnect scans stay fast after power-up or a lost link |
+| `BLE_FAILED_RECONNECT_HOLDOFF_MS` | 6500 | How long the other slot's reconnect scans ignore a device after a failed attempt; derived from `BLE_CONNECT_TIMEOUT_SECS` and `BLE_RECONNECT_BACKOFF_MS` |
+| `BLE_PEER_MAX_CONN_INTERVAL` | 24 | Longest interval (30 ms) granted to a peripheral that asks only for intervals slower than 15 ms |
+| `BLE_MAX_PERIPHERAL_LATENCY` | 20 | Largest peripheral latency granted to a peripheral's request |
+| `BLE_MIN_SUP_TIMEOUT` | 100 | Shortest supervision timeout granted to a peripheral's request (1 s); the longest is `BLE_SUP_TIMEOUT` |
 | `MAX_PAIRED_DEVICES` | 4 | Stored peers; active slots are separately limited to two |
 | `STORAGE_FLASH_PAGE_START` / `COUNT` | 240 / 4 | Pairing storage reservation |
 | `USB_VID` / `USB_PID` | `0x1209` / `0x0001` | Development IDs; obtain an assigned production identity |

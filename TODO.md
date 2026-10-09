@@ -24,8 +24,8 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [BLE Central And Pairing](#ble-central-and-pairing) | 11 | 8 | 3 |
-| [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 3 | 3 | 0 |
+| [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
+| [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
@@ -36,9 +36,9 @@ probe, or USB host to close.
 | [Verification And Code Quality](#verification-and-code-quality) | 4 | 12 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 7 | 2 | 0 |
-| [Documentation](#documentation) | 5 | 1 | 0 |
+| [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **65** | **91** | **22** |
+| **Total** | **70** | **88** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -83,10 +83,10 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   `BLE_CONNECT_TIMEOUT_SECS` (6 s) so a user scan does not wait indefinitely
   behind a reconnect (`src/ble/mod.rs` `GAP_PROCEDURE`, `src/ble/multi_conn.rs`,
   `src/config.rs`). *(hardware evidence pending)*
-- [x] Stored pairing/bond records, boot reconnect planning, identity-key
-  matching, and retries after link loss; a lost or not-yet-seen paired device is
-  retried, with a `BLE_RECONNECT_BACKOFF_MS` pause between attempts, while its
-  slot stays reserved (`src/storage.rs`, `src/ble/reconnect.rs`,
+- [x] Stored pairing/bond records, boot reconnect, identity-key matching, and
+  retries after link loss; a lost or not-yet-seen paired device is retried,
+  with a `BLE_RECONNECT_BACKOFF_MS` pause between attempts, while its slot
+  stays reserved (`src/storage.rs`, `src/ble/reconnect.rs`,
   `src/ble/multi_conn.rs`).
   *(hardware evidence pending)*
 - [x] Peer-identity-scoped bond replacement and key lookup, stable identity
@@ -122,6 +122,44 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   and discovery and MTU-exchange timeouts return errors instead of panicking
   (`vendor/nrf-softdevice/`, `Cargo.toml`,
   `vendor/nrf-softdevice/README.bt2usb.md`).
+- [x] Start reconnecting saved devices at power-up without the 8-second boot
+  scan, and let one passive reconnect scan look for both slots' saved devices.
+  A device heard for the other slot is handed to it with its live address,
+  usable once and for 2 seconds, and wakes it, so a sleeping device no longer
+  holds the radio while the other slot's device advertises. A device whose
+  attempt failed is left out of the other slot's scans for 6.5 seconds, so one
+  that advertises but will not connect cannot keep cutting them short.
+  Reconnect scans listen 50 ms of every 100 ms for 30 seconds after power-up
+  or a lost link, then fall back to the default duty cycle; connection
+  attempts always use the fast one. Boot no longer shows Scanning or a "No devices found" error
+  (`ReconnectTable` in `src/ble/reconnect.rs`, `find_saved_peer` in
+  `src/ble/scanner.rs`, `src/ble/multi_conn.rs`, `src/config.rs`,
+  `src/ui/ui_logic.rs`; [ADR 0015](docs/adr/0015-shared-reconnect-scan.md)).
+  Host tests cover the table: handover, single use, expiry, clearing, the
+  fast window across retries, the tie-break, and the holdoff after a failed
+  attempt. *(hardware evidence pending)*
+- [x] Write the host's current lock-key state to a keyboard as soon as its link
+  starts, then every change. A keyboard that wakes and reconnects, or connects
+  to a slot that already passed the last change to an earlier link, now shows
+  the host's Caps Lock and Num Lock state at once, as a wired keyboard does
+  when plugged in (`forward_host_leds` in `src/hid/host_leds.rs`, the
+  `HostLeds` implementation for `LedReceiver` in `src/usb/hid_device.rs`,
+  `run_notification_loop` in `src/ble/hid_client.rs`). Host tests poll the real
+  forwarding loop, including a reconnect after the state was already
+  forwarded, which fails against the old changes-only loop.
+  *(hardware evidence pending)*
+- [x] Bound the connection parameters a peripheral may request: the interval
+  stays within 7.5–15 ms (a peripheral that asks only for slower intervals
+  gets its fastest, up to 30 ms, so it does not disconnect), latency at most
+  20, and the supervision timeout within 1–4 s and always above
+  `(1 + latency) × interval × 2`; a request outside the bounds gets the
+  nearest values and is logged with both
+  (`bound_request` in `src/ble/conn_params.rs`,
+  `Bonder::conn_param_update_request` in `src/ble/multi_conn.rs`, and the
+  vendored `SecurityHandler::conn_param_update_request` hook in
+  `vendor/nrf-softdevice/src/ble/security.rs` and `gap.rs`;
+  [ADR 0016](docs/adr/0016-bounded-peer-connection-parameters.md)). Host tests
+  sweep every policy boundary and out-of-range values. *(hardware evidence pending)*
 - [ ] **P0** **ADR: authenticated pairing and enrollment.** Decide, per
   supported device class, between passkey entry and numeric comparison, how user
   presence is confirmed with the OLED and three buttons, the pairing-window
@@ -168,67 +206,23 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [ ] **P1** **Keyboard ready in time for firmware setup keys.** *(hardware)*
   A monitor that powers its hub together with the PC boots the bridge at the
   same moment as the PC, and the keyboard must work before the PC's firmware
-  stops waiting for a setup key such as F2 or Del. Today the bridge first runs
-  the full 8-second boot scan (`BLE_SCAN_DURATION_SECS`) before it assigns any
-  saved device to a slot (`ble_task` in `src/ble/multi_conn.rs`). Each
-  background attempt then scans up to 6 seconds (`BLE_CONNECT_TIMEOUT_SECS`) to
-  resolve a bonded device's current address, even when the boot scan has just
-  found it, and up to 6 more to connect. The shared `GAP_PROCEDURE` lock lets
-  only one slot's scan or connect run at a time, and those scans use the
-  vendored default of a 312.5 ms window every 1.7 s (`ScanConfig::default()`
-  in `vendor/nrf-softdevice/src/ble/central.rs`). A keyboard therefore cannot
-  type for at least 8 seconds after power-up, and a sleeping mouse can hold the
-  radio while the keyboard waits. Start reconnecting without waiting for a full
-  scan, and look for every bonded peer in one scan, for example with the
-  SoftDevice whitelist and device identity list (`set_whitelist` and
-  `set_device_identities_list` in `vendor/nrf-softdevice/src/ble/gap.rs`),
-  which resolve private addresses in the SoftDevice. Raise the scan duty cycle
-  while a reconnect is pending only for a bounded time that the
-  [power budget](#ui-display-and-power) measurement covers, USB suspend
-  included. The same changes shorten the reconnect after a peripheral sleeps,
-  and "Soak and latency measurements" reuses both timings. Accept when
-  [first flash](docs/first-flash.md#5-in-the-monitor) has a cold-start check in
+  stops waiting for a setup key such as F2 or Del. The bridge now starts
+  reconnecting at power-up with a fast, shared reconnect scan (done above;
+  [ADR 0015](docs/adr/0015-shared-reconnect-scan.md)), but no board has shown
+  that it is fast enough, and the fast duty cycle's current is unmeasured.
+  Accept when the
+  [first-flash cold-start check](docs/first-flash.md#5-in-the-monitor), in
   which the monitor and the PC power on together and a setup key pressed
-  repeatedly from power-on opens firmware setup; that check passes for the
-  named keyboards, monitors, and PCs of the hardware compatibility baseline;
-  the times from VBUS to the first delivered keystroke and from a key press on
-  a sleeping keyboard to its first delivered keystroke are published in
-  [features](docs/features.md#boot-and-reconnect); and a saved device that is
-  asleep no longer delays the other slot's reconnect by a full attempt
-  ([architecture](docs/architecture.md#background-reconnect)).
-- [ ] **P1** **Send the host's lock-key state to every keyboard that
-  connects.** *(hardware)* Each slot keeps one LED receiver across reconnects
-  (`connection_slot_task` in `src/ble/multi_conn.rs`) and writes to the
-  keyboard only when `changed()` returns (`run_notification_loop` in
-  `src/ble/hid_client.rs`). The receiver also consumes changes while the slot
-  holds a mouse, for which `write_leds` does nothing. A keyboard that connects
-  after the host's last LED change, including one that wakes from sleep on the
-  same slot, therefore shows the wrong Caps Lock and Num Lock state until the
-  host changes it, whereas a wired keyboard receives the state when it is
-  plugged in. Write the current state, when the host has sent one, as soon as
-  a keyboard's LED output report is discovered, then follow changes as today.
-  Accept when a host test of that decision shows that a keyboard connecting
-  after the last LED change receives the current state once, and on a board a
-  keyboard that sleeps and reconnects shows the host's Caps Lock state
-  ([features](docs/features.md#keyboard-leds)).
-- [ ] **P1** **Bound the connection parameters a peripheral may request.**
-  *(hardware)* The bridge connects with a 7.5 to 15 ms interval, no
-  peripheral latency, and a 4-second supervision timeout
-  (`BLE_CONN_INTERVAL_MIN`, `BLE_CONN_INTERVAL_MAX`, `BLE_SLAVE_LATENCY`, and
-  `BLE_SUP_TIMEOUT` in `src/config.rs`), but the vendored crate grants every
-  later request from the peripheral unchanged
-  (`BLE_GAP_EVTS_BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST` in
-  `vendor/nrf-softdevice/src/ble/gap.rs`). A peripheral can therefore move to a
-  long interval, which delays every report, or to a supervision timeout of up
-  to 32 seconds, during which a key held when the link silently fails stays
-  held on the host. Decide the accepted ranges, answer a request outside them
-  with the nearest accepted values, and either record the change in the
-  vendored patch notes ([ADR 0007](docs/adr/0007-vendored-softdevice-patch.md))
-  or handle the event in the application. Accept when a test shows an
-  out-of-range request is clamped,
-  [features](docs/features.md#connection-and-security) states the bound that
-  holds, and the negotiated parameters of the named peripherals in the hardware
-  compatibility baseline are recorded.
+  repeatedly from power-on opens firmware setup, passes for the named
+  keyboards, monitors, and PCs of the hardware compatibility baseline, also
+  with the mouse switched off; the times from VBUS to the first delivered
+  keystroke and from a key press on a sleeping keyboard to its first delivered
+  keystroke are published in
+  [features](docs/features.md#boot-and-reconnect); and the
+  [power budget](#ui-display-and-power) measurement covers the fast reconnect
+  duty cycle, USB suspend included. If the times fall short, the SoftDevice
+  device identity list and whitelist are the next option
+  ([ADR 0015](docs/adr/0015-shared-reconnect-scan.md#alternatives-considered)).
 
 ## HID Report Parsing And Translation
 
@@ -249,6 +243,16 @@ types. Context: [architecture](docs/architecture.md#hid-path-and-limits) and
   buttons, X/Y, wheel, and horizontal scroll (AC Pan), and consumer usages are
   limited to `MAX_CONSUMER_USAGE` (`0x0FFF`) (`src/hid/`).
   *(hardware evidence pending)*
+- [x] Accept keyboards that use the reserved byte: when the characteristic's
+  Report Reference resolves to the keyboard report of a Report Map with report
+  IDs, or a Report Map without report IDs describes only a keyboard, the
+  report's OEM-reserved second byte (HID 1.11) is ignored and sent to the PC
+  as zero; the zero check stays on the legacy
+  length-only and conventional-report-ID paths, where it guards
+  classification (`KeyboardReport::from_identified_bytes` in
+  `src/hid/keyboard.rs`, `KindSource` in `src/hid/mod.rs`; tests in
+  `src/hid_descriptor_tests.rs`;
+  [security](docs/security.md#input-validation-boundaries)).
 - [ ] **P1** **ADR: descriptor-driven HID report translation.** Choose how
   fields are located by usage, bit offset, width, signedness, and report ID, what
   the bounded translation tables look like, and how unsupported layouts fail.
@@ -259,20 +263,6 @@ types. Context: [architecture](docs/architecture.md#hid-path-and-limits) and
   and 16-bit movement. Accept when a fixture corpus covers supported layouts and
   unsupported layouts fail explicitly without misclassifying input
   ([architecture](docs/architecture.md#hid-path-and-limits)).
-- [ ] **P1** **Accept keyboards that use the reserved byte.**
-  `KeyboardReport::from_ble_bytes` in `src/hid/keyboard.rs` drops every
-  keyboard report whose second byte is not zero, on every path in
-  `src/hid/mod.rs`. A keyboard that sends data in that byte, which HID 1.11
-  reserves for OEM use and tells a BIOS to ignore, therefore types nothing
-  through the bridge, although the aggregator already clears the byte before
-  USB ([security](docs/security.md#input-validation-boundaries)). Ignore its
-  value when a keyboard Report Reference or the Report Map identifies the
-  report, and keep the check only on the legacy length-only path, where it
-  guards classification. Accept when classification tests cover a non-zero
-  reserved byte with a keyboard Report Reference, with a numbered Report Map,
-  and on the legacy path, and the input-validation table in
-  [security](docs/security.md#input-validation-boundaries) states the new rule
-  ([features](docs/features.md#translation)).
 
 ## USB HID Device
 
@@ -457,7 +447,8 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   [ADR 0012](docs/adr/0012-bus-powered-no-system-off.md)).
   *(hardware evidence pending)*
 - [ ] **P0** **Power budget and USB suspend current.** *(hardware)* Measure
-  supply current while idle, scanning, with two links, with the OLED on and off,
+  supply current while idle, scanning (at the default duty cycle and at the
+  fast reconnect duty cycle of a 50 ms window every 100 ms), with two links, with the OLED on and off,
   and during USB suspend, where the bridge keeps its BLE links. Compare with the
   100 mA the configuration descriptor declares (`src/usb/hid_device.rs`
   `max_power`) and with the USB suspend-current limit. Accept when the measured
@@ -634,7 +625,9 @@ Getting firmware onto real boards and recording what works. Context:
   [first-flash.md](docs/first-flash.md) on declared keyboard/mouse models,
   Windows/Linux/macOS hosts, monitor hubs, and BIOS/UEFI or KVM targets. Accept
   when the matrix identifies exact versions, pass/fail results, known
-  limitations, and the artifact hash.
+  limitations, the connection parameters each peripheral asked for and was
+  granted ([ADR 0016](docs/adr/0016-bounded-peer-connection-parameters.md)),
+  and the artifact hash.
 - [ ] **P0** **Production hardware definition.** *(hardware)* Choose and
   document the deployed board (the DK or a custom PCB), display module, buttons,
   supply arrangement, and enclosure; move any pin changes into the board setup
@@ -976,6 +969,14 @@ Guides, ADRs, and this plan. Context:
   [features](docs/features.md#current-technical-boundaries) (`TODO.md`,
   `docs/features.md`, `docs/architecture.md`, `docs/hardware.md`,
   `docs/security.md`; 2026-10-09).
+- [x] Recorded the boot and reconnect, lock-key, connection-parameter, and
+  reserved-byte fixes: [ADR 0015](docs/adr/0015-shared-reconnect-scan.md)
+  supersedes the boot-reconnect part of ADR 0005,
+  [ADR 0016](docs/adr/0016-bounded-peer-connection-parameters.md) amends
+  ADR 0007, the lifecycles in [architecture](docs/architecture.md) and the
+  behavior in [features](docs/features.md) follow the code, and
+  [first flash](docs/first-flash.md) gained cold-start, lock-key, and
+  connection-parameter checks (2026-10-09).
 - [ ] **P1** **Automated documentation checks.** Validate local links, command
   examples, and configuration/memory-map consistency in CI. Accept when a broken
   link or stale documented constant produces a targeted failure

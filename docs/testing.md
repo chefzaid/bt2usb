@@ -109,7 +109,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs`, `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`, `src/config.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs`, `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`, `src/config.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `config.rs`, which holds plain constants, and `ui/mod.rs`, which
 only declares modules, everything in the right-hand column depends on
@@ -135,26 +135,29 @@ no coverage percentage.
 
 ## Test Map
 
-Counts below were taken with `grep -c '#\[test\]' <file>` on each file at
-commit `7fc99d6`. The tree holds 232 `#[test]` functions: 219 in files compiled
-into the host library, 3 in `tests/integration.rs`, and 10 in
-`src/ble/scanner.rs`, which never run (see
-[Tests That Do Not Run](#tests-that-do-not-run)). The 219 + 3 split matches the
-[validation record](#validation-record--2026-09-28). There are no `#[ignore]`
-or `#[should_panic]` tests.
+Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
+2026-10-09, in the commit that adds the shared reconnect scan, the host-LED
+forwarding, the bounded connection parameters, and the reserved keyboard byte
+handling. The tree holds 273 `#[test]` functions: 260 in files compiled into
+the host library, 3 in `tests/integration.rs`, and 10 in `src/ble/scanner.rs`,
+which never run (see [Tests That Do Not Run](#tests-that-do-not-run)). The
+260 + 3 split matches the
+[2026-10-09 validation record](#validation-record--2026-10-09). There are no
+`#[ignore]` or `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [lib_tests.rs](../src/lib_tests.rs) | 53 | Keyboard, mouse, and consumer report parsing from BLE bytes and serialization to USB: empty, short, exact, and longer inputs; too-small output buffers; all modifiers and buttons; six-key arrays; negative motion and wheel; 5-byte mouse reports with horizontal pan and back/forward buttons; consumer volume, media, browser, and launcher usages. `classify_report` and `classify_notification` routing by report ID or length, rejecting a keyboard report with a nonzero reserved byte, invalid 2-byte consumer payloads, unknown lengths, and empty or single-byte input. |
-| [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) | 34 | Report-descriptor parsing in `hid/report_protocol.rs`: usage pages, keyboard/mouse/consumer detection, Push/Pop, long items, bounded nesting, overflow-safe report dimensions, constant padding, unsupported applications, extended usages, and every truncated prefix of the firmware's own USB descriptors failing closed. Descriptor-guided routing (`classify_notification_with_hint`, `classify_known`) that rejects unknown or mixed-kind report IDs instead of falling back to another kind. GATT Report Reference parsing, consumer usage range, three-button boot mouse serialization, and GATT values whose first byte resembles a report ID. |
+| [lib_tests.rs](../src/lib_tests.rs) | 53 | Keyboard, mouse, and consumer report parsing from BLE bytes and serialization to USB: empty, short, exact, and longer inputs; too-small output buffers; all modifiers and buttons; six-key arrays; negative motion and wheel; 5-byte mouse reports with horizontal pan and back/forward buttons; consumer volume, media, browser, and launcher usages. `classify_report` and `classify_notification` routing by report ID or length, rejecting a keyboard report with a nonzero reserved byte when its kind is only inferred, invalid 2-byte consumer payloads, unknown lengths, and empty or single-byte input. |
+| [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) | 40 | Report-descriptor parsing in `hid/report_protocol.rs`: usage pages, keyboard/mouse/consumer detection, Push/Pop, long items, bounded nesting, overflow-safe report dimensions, constant padding, unsupported applications, extended usages, and every truncated prefix of the firmware's own USB descriptors failing closed. Descriptor-guided routing (`classify_notification_with_hint`, `classify_known`) that rejects unknown or mixed-kind report IDs instead of falling back to another kind. GATT Report Reference parsing, consumer usage range, three-button boot mouse serialization, and GATT values whose first byte resembles a report ID. The reserved keyboard byte: a keyboard report carrying OEM data there is accepted, with the reserved byte cleared, when `classify_known` is given the keyboard kind, when a Report Reference resolves through a numbered Report Map to the keyboard report as `subscribe_all` resolves it, and when an unnumbered map describes only a keyboard; the check stays when an unnumbered map also has other kinds and on the length- and ID-inferred paths; a declared keyboard report must still be 8 bytes. |
 | [lib_logic_tests.rs](../src/lib_logic_tests.rs) | 14 | `HidReport` serialization, equality, and kind helpers; HID UUID detection, name extraction, malformed lengths, and name truncation through the public `ble::adv_parser` API; scan-dot cycling; `power_logic::screen_should_be_on` auto-off policy. |
 | [hid/aggregate.rs](../src/hid/aggregate.rs) | 5 | Two-source union: a key held by both sources survives one release or disconnect, rollover recovers when a source disconnects, mouse buttons union without replaying the other source's motion, consumer lowest-slot priority with fallback, and out-of-range sources cannot change state or wake the host. |
 | [hid/coalesce.rs](../src/hid/coalesce.rs) | 8 | Per-endpoint coalescing: latest keyboard and consumer state wins but a release survives, mouse motion accumulates with saturation while the latest buttons win, round-robin pop across endpoints, and endpoint independence. |
 | [hid/delivery.rs](../src/hid/delivery.rs) | 6 | `EndpointDelivery` state: short taps keep press/release order, a failed press recovers the latest release rather than the failed packet, relative motion is never replayed after failure, resume, or reset, stale completions cannot erase post-reset input, queue overflow keeps the final release, and a blocked consumer endpoint does not block keyboard or mouse state. |
 | [hid/delivery_tests.rs](../src/hid/delivery_tests.rs) | 4 | The production `run_endpoint` worker, polled by hand with fake queues, sinks, and a fake clock: an unpolled consumer endpoint does not stop keyboard and mouse writes, a press that times out (100 ms write deadline) is replaced by the latest release after a 20 ms backoff, a bus change cancels stale motion, and repeated errors back off 20, 40, 80, 160, 320, 640, then 1000 ms (capped) and recover. |
 | [hid/consumer.rs](../src/hid/consumer.rs) | 4 | Consumer report defaults, a volume-up usage, serialization, and parsing from bytes. |
+| [hid/host_leds.rs](../src/hid/host_leds.rs) | 5 | `forward_host_leds`, polled by hand with a fake host: a new link gets the host's current lock-key state first, a reconnecting keyboard gets a state the slot already forwarded to its previous link, nothing is written before the host sends a state, later changes follow in order, and the host's first state is forwarded when it arrives during the link. |
 | [hid/keyboard.rs](../src/hid/keyboard.rs) | 4 | Host keyboard LED byte decoding: individual LEDs, Caps Lock with Num Lock, masking of undefined upper bits with round trip, and the all-off default. |
 | [hid/wake.rs](../src/hid/wake.rs) | 3 | Remote-wake eligibility: only a new key or modifier wakes (the rollover error code does not); mouse motion, wheel, pan, and releases do not, a new button does; consumer input needs a new nonzero usage. |
 
@@ -166,7 +169,8 @@ or `#[should_panic]` tests.
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 3 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one; a missing, empty, or invalid name does not replace a known one. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
 | [ble/management.rs](../src/ble/management.rs) | 5 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |
-| [ble/reconnect.rs](../src/ble/reconnect.rs) | 6 | Boot reconnect planning: no peers, fallback to the stored address when unmatched, live scan address for a resolved private address, one scan result per peer, targets capped to the two connection slots, and mixed resolved/fallback targets. |
+| [ble/reconnect.rs](../src/ble/reconnect.rs) | 23 | The shared background-reconnect table ([ADR 0015](adr/0015-shared-reconnect-scan.md)): a sighting goes to the slot that owns the device, unregistered devices and slots are ignored, a sighting is used once, replaced by a newer one, fresh at 2 s and discarded after, and dropped with its slot or when the slot changes target; re-registering the same target keeps the outage start, a different one restarts the fast window; the duty cycle is fast while any target is inside its window; after a failed attempt the other slot's scans ignore that device while its own still see it, the holdoff ends on time, survives re-registration, is extended by a new failure, ends for a new target, drops the pending sighting, and ignores unregistered slots; the lower slot wins a tie; out-of-range slots and a clock going backwards are harmless. |
+| [ble/conn_params.rs](../src/ble/conn_params.rs) | 13 | Bounding a peripheral's connection parameter request ([ADR 0016](adr/0016-bounded-peer-connection-parameters.md)): a request inside the limits is granted unchanged, a peripheral asking only for 20–40 ms gets 20 ms, one asking for 50–100 ms gets 30 ms and is flagged as outside its range, an overlapping range is narrowed to 7.5–15 ms, a 32 s supervision timeout is capped at 4 s and a short one raised to 1 s, latency is capped at 20, reversed bounds read as a range (also by `interval_within_request`), a faster request gets 7.5 ms, latency is lowered when 4 s cannot cover it, and the timeout is raised to meet the Core rule. A sweep over every boundary of the policy and over out-of-range values (interval 0 and 0xFFFF, latency 500, timeout 0) checks that every answer stays inside the limits and the Core rule, that a peripheral accepting 15 ms is never slowed, and that any request reaching into the grantable range gets an interval it asked for. |
 
 ### Pairing Storage
 
@@ -588,7 +592,7 @@ Specific to the current workflow and test tree:
   firmware build.
 - `cargo audit` runs without a deny option, so unmaintained-crate warnings do
   not fail the job; see the [validation record](#validation-record--2026-09-28).
-- The ten `scanner.rs` tests are never compiled, so they are not in the 219
+- The ten `scanner.rs` tests are never compiled, so they are not in the 260
   host unit tests ([details](#tests-that-do-not-run)); tracked as
   [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality).
 - Connection workers, the GATT HID client, the storage shell and codec, the USB
@@ -689,6 +693,29 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-09
+
+This record covers the commit that adds the shared reconnect scan
+([ADR 0015](adr/0015-shared-reconnect-scan.md)), host-LED forwarding on every
+new keyboard link, bounded peripheral connection parameters
+([ADR 0016](adr/0016-bounded-peer-connection-parameters.md)), and the reserved
+keyboard byte handling. The checks ran locally on Linux in a container, on the
+working tree just before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 260 unit tests and 3 integration tests |
+| Clippy with warnings denied | Host tests, embedded, simulation | Passed |
+| Formatting and host API documentation | `cargo fmt --package bt2usb -- --check`; rustdoc with warnings denied | Passed |
+| Release bridge and self-test builds | Rust 1.95.0, ARM target | Passed; `.text` 111,616 bytes, `.bss` 23,476 bytes, read from the release ELF's section headers |
+| Simulation build | Rust 1.95.0, ARM target | Passed |
+| Release helper policy/integrity tests | Python 3.13, Linux | Passed: 12 tests |
+| Local Markdown links and anchors | Script over every tracked `.md` file | Passed |
+| Headless Renode scenario | — | Not run: Renode is not installed in this environment; the scenario does not include the SoftDevice, so it would not exercise these changes |
+| Dependency audit, actionlint | — | Not run: neither tool is installed in this environment; `Cargo.lock` and the workflows did not change |
+| Hosted CI | GitHub Actions | Runs on the push; not recorded here |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the changes need the board checks in the [first-flash checklist](first-flash.md) |
+
 ## Validation Record — 2026-09-28
 
 This record covers the current uncommitted hardening changes, not a published
@@ -718,10 +745,12 @@ dependencies. These warnings remain open maintenance work in
 
 Later history: the record was written before the hardening changes were
 committed as `2479c79` and last edited in `8a04b25` (both 2026-09-28). Since
-`2479c79`, Rust sources, tests, Renode files, and scripts have changed only in
-comments that name renamed documents, so the counts above still describe the
-tree (see [Test Map](#test-map)); the checks were not re-run locally for those
-changes. The 219 unit tests do not include the ten `scanner.rs` tests, which
+`2479c79` and until the 2026-10-09 fixes, Rust sources, tests, Renode files,
+and scripts changed only in comments that name renamed documents, so the
+counts above described the tree until then; the checks were not re-run locally
+for those changes. The fixes added tests, which the
+[2026-10-09 record](#validation-record--2026-10-09) and the
+[Test Map](#test-map) count. The 219 unit tests do not include the ten `scanner.rs` tests, which
 are never compiled ([Tests That Do Not Run](#tests-that-do-not-run)). The
 hosted run on `2479c79` failed at the earlier actionlint installation step,
 which `8a04b25` replaced. Hosted runs later passed all five check jobs on

@@ -9,11 +9,13 @@ use crate::hid::consumer::{ConsumerReport, CONSUMER_REPORT_DESCRIPTOR};
 use crate::hid::delivery::{
     run_endpoint, DeliveryQueue, EndpointDelivery, HidEvent, PendingReport, ReportSink, RetryClock,
 };
+use crate::hid::host_leds::HostLeds;
 use crate::hid::keyboard::{KeyboardLeds, KeyboardReport, KEYBOARD_REPORT_DESCRIPTOR};
 use crate::hid::mouse::{MouseReport, MOUSE_REPORT_DESCRIPTOR};
 use crate::hid::HidReport;
 use core::cell::RefCell;
 use core::fmt::Write;
+use core::future::Future;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, warn};
 use embassy_futures::join::join4;
@@ -45,8 +47,21 @@ pub const LED_CONSUMERS: usize = 2;
 /// keyboard's LEDs. `Watch` keeps only the newest value and wakes every slot.
 static KEYBOARD_LEDS: Watch<CriticalSectionRawMutex, KeyboardLeds, LED_CONSUMERS> = Watch::new();
 
-/// Receiver handle a BLE slot task uses to observe host LED changes.
+/// Receiver handle a BLE slot task uses to observe host LED changes. A slot
+/// keeps its receiver across links, so the receiver remembers which state the
+/// slot last saw; [`HostLeds::current`] hands a new link the state anyway.
 pub type LedReceiver = WatchReceiver<'static, CriticalSectionRawMutex, KeyboardLeds, LED_CONSUMERS>;
+
+impl HostLeds for LedReceiver {
+    fn current(&mut self) -> Option<KeyboardLeds> {
+        self.try_get()
+    }
+
+    fn changed(&mut self) -> impl Future<Output = KeyboardLeds> {
+        // Call the receiver's own method, not this trait's.
+        (**self).changed()
+    }
+}
 
 /// Take one of the [`LED_CONSUMERS`] LED receivers (one per BLE slot).
 pub fn keyboard_led_receiver() -> Option<LedReceiver> {

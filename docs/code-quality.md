@@ -18,12 +18,16 @@ Three kinds of rule appear below, and the guide says which kind each one is:
   [Known Gaps](#known-gaps), with the [TODO.md](../TODO.md) item that tracks
   each one.
 
-Facts in this guide were read from the repository at commit `7fc99d6` plus
-the documentation changes in the working tree, and counts say how they were
-taken. The builds, Clippy, tests, and audit were not re-run for this guide.
-The last recorded local run of the full check set is the
-[validation record](testing.md#validation-record--2026-09-28), and no figure
-in this guide was measured on a board.
+Facts in this guide were read from the repository at commit `7fc99d6`, and
+the passages on modules changed since then were updated with the 2026-10-09
+reconnect, lock-key, connection-parameter, and reserved-byte fixes. Counts say
+how they were taken. The builds, Clippy, tests, and audit were not re-run for
+this guide.
+The last recorded local run of the Rust checks is the
+[2026-10-09 validation record](testing.md#validation-record--2026-10-09); the
+last one that also ran Renode, the dependency audit, and actionlint is the
+[2026-09-28 validation record](testing.md#validation-record--2026-09-28). No
+figure in this guide was measured on a board.
 
 ## Quality Gates
 
@@ -352,8 +356,8 @@ figure.
 Coverage measures only the code that host tests compile:
 
 - the host library as built for tests: `src/hid/`, the BLE advertisement
-  parser, coordinator, reconnect planner, long-read assembler, and management
-  logic, `src/power_logic.rs`, and the UI display, input, and state-machine
+  parser, connection-parameter bounds, coordinator, reconnect table,
+  long-read assembler, and management logic, `src/power_logic.rs`, and the UI display, input, and state-machine
   logic
 - `src/storage/framing.rs` and `src/storage/record.rs`, which `lib.rs`
   includes only under `cfg(test)`

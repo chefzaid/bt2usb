@@ -281,7 +281,6 @@ pub struct UiState {
     pub connected_name: heapless::String<32>,
     pub message: heapless::String<32>,
     pub scan_dots: u8,
-    interactive_scan: bool,
 }
 
 impl Default for UiState {
@@ -300,7 +299,6 @@ impl UiState {
             connected_name: heapless::String::new(),
             message: heapless::String::new(),
             scan_dots: 0,
-            interactive_scan: false,
         }
     }
 
@@ -319,9 +317,6 @@ impl UiState {
         if outcome.reset_devices {
             self.devices.clear();
             self.scan_dots = 0;
-        }
-        if outcome.command == Some(UiCommand::StartScan) {
-            self.interactive_scan = true;
         }
         if outcome.command == Some(UiCommand::Dismiss) {
             self.screen = on_connection_status(Screen::Home, !self.connected_name.is_empty());
@@ -351,11 +346,8 @@ impl UiState {
 
     pub fn connection_status(&mut self, name: Option<heapless::String<32>>) {
         self.connected_name = name.unwrap_or_default();
-        // Boot reconnection should reach Connected; a manual scan should retain
-        // its picker even if an existing source reconnects in the background.
-        if !self.interactive_scan && matches!(self.screen, Screen::Scanning | Screen::DeviceList) {
-            self.screen = Screen::Home;
-        }
+        // Every scan is one the user started, so its picker stays on screen
+        // even if a saved device reconnects in the background meanwhile.
         self.screen = on_connection_status(self.screen, !self.connected_name.is_empty());
         if matches!(self.screen, Screen::Home | Screen::Connected) {
             self.devices.clear();
@@ -375,7 +367,7 @@ impl UiState {
     }
 
     pub fn scan_started(&mut self) {
-        // A boot scan can finish after the user opens management. Keep dialogs.
+        // Only Home or Scanning moves to Scanning; menus and dialogs are kept.
         if matches!(self.screen, Screen::Home | Screen::Scanning) {
             self.screen = Screen::Scanning;
             self.devices.clear();

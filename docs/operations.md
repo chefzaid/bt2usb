@@ -171,12 +171,13 @@ about one second after boot and again only when the high-water mark grows.
 
 ### Reconnecting Saved Peripherals
 
-With saved peers, the BLE task runs one 8-second scan at boot to find the two
-most recently added peers, then hands one to each connection slot:
+With saved peers, the BLE task hands the two most recently added peers to the
+two connection slots at once, without a scan. Each slot listens for both saved
+peers and connects to whichever it hears; a slot that hears the other slot's
+peer hands it over and logs `slot N scan found slot M's device`. For a
+keyboard:
 
 ```text
-BLE scan starting (8 s window)
-BLE scan complete - N devices found
 slot 0 connecting to <name>
 BLE security mode updated: <mode>
 Discovering HID service...
@@ -188,9 +189,14 @@ Subscribed to N of M HID report characteristics
 HID notification loop started
 ```
 
-The same sequence follows for slot 1. Scans, resolution scans, and connection
+The same sequence follows for slot 1. Scans, reconnect scans, and connection
 setup take turns on the radio through one GAP procedure lock, so slot 1's
-connection waits until slot 0's connection is established or times out. The
+connection waits until slot 0's connection is established or times out; the
+peer that wakes first connects first. When the peripheral asks for other
+connection parameters, `peer connection parameters granted: …` or
+`peer asked for connection parameters …; granting …` follows the connection
+lines. Once the host has sent its LED state, a keyboard link writes it as soon
+as its notification loop starts. The
 lock is released before security and HID discovery, so the two slots'
 discovery lines can interleave.
 `Set HID protocol to Report mode` appears only when the peer has a Protocol Mode
@@ -218,9 +224,7 @@ A first pairing adds `Added paired device - now storing N` and
 | Situation | Screen |
 | --- | --- |
 | Boot with no saved peers | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` |
-| Boot with saved peers | `Scanning` with animated dots for the boot scan, then `Connected` with the device name, or `2 devices` |
-| Boot scan heard no HID advertisers | `ERROR` / `No devices found`; reconnects still continue in the background, and DOWN returns to the status screen |
-| Boot scan heard other HID devices but no saved peer connected yet | `Select device` list from that scan |
+| Boot with saved peers | The Home screen until a saved peer connects, then `Connected` with the device name, or `2 devices` |
 | 120 seconds without activity | Display off; the first button press only turns it back on |
 | PC asleep (USB suspended) | Display off until the host resumes |
 
@@ -232,8 +236,7 @@ Errors and completion notices stay on screen until acknowledged
 1. The log shows the [boot sequence](#boot-sequence) through
    `UI and isolated OLED tasks started`, with no panic.
 2. `USB configured by host: true` appears and the host lists the device.
-3. `OLED initialized/recovered` appears and the OLED shows the Home screen (or
-   the boot scan, with saved peers).
+3. `OLED initialized/recovered` appears and the OLED shows the Home screen.
 4. Saved peers reconnect, and a held key is released when its link drops.
 
 Anything beyond that is covered by the [first-flash checklist](first-flash.md).
@@ -574,7 +577,7 @@ in `Select device`, the radio hears it and the stored identity is stale.
 the bridge has no matching keys; the new keys replace the stored bond for the
 same identity address. If the peripheral now uses a different identity address,
 a new record is added, so Forget the old one. Private-address resolution is
-implemented and host-tested in its planning logic
+implemented, and the shared reconnect table around it is host-tested
 ([reconnect.rs](../src/ble/reconnect.rs)); it is not hardware-verified. The
 [background reconnect lifecycle](architecture.md#background-reconnect) shows
 the full loop.
@@ -677,7 +680,7 @@ the wanted device is missing from `Select device`.
 - A radio or antenna problem. A scan that fails outright logs
   `BLE scan ended with error` and shows `Scan failed`.
 
-A scan waits for any connection attempt or resolution scan that holds the radio,
+A scan waits for any connection attempt or reconnect scan that holds the radio,
 each limited to 6 seconds, so `Scanning` can last longer than the 8-second
 window while a slot is reconnecting.
 
@@ -743,8 +746,8 @@ and replug the native USB cable.
 
 **Likely causes:** while a saved-device list, Forget, or Factory reset request
 is pending, the UI ignores all buttons until the BLE task replies. The BLE task
-handles one thing at a time: a boot or user scan (8 seconds, plus waiting for
-the radio), or a Forget or reset that first waits for each affected slot to
+handles one thing at a time: a user scan (8 seconds, plus waiting for the
+radio), or a Forget or reset that first waits for each affected slot to
 stop. A slot in the middle of a connection attempt stops only after the
 attempt ends (up to 6 seconds). There is no timeout in the UI.
 
@@ -754,7 +757,7 @@ progress, then for `Saved N devices to flash` or an error. The
 request IDs.
 
 **Fix:** wait for the operation in progress to finish: a scan takes 8 to 10
-seconds, and a connection attempt or resolution scan up to 6 seconds. If the
+seconds, and a connection attempt or reconnect scan up to 6 seconds. If the
 screen never changes, reset the board, then reopen the saved-device list to see
 what was stored. A reset during a flash write is not covered by tested
 power-loss behavior. A bounded wait with a "result unknown" screen is open work

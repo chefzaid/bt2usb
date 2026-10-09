@@ -50,9 +50,10 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 
 | Core module (host-tested) | Decides | Shell (firmware only) |
 | --- | --- | --- |
-| [hid/](../../src/hid/): `report_protocol`, `keyboard`, `mouse`, `consumer`, `coalesce`, `aggregate`, `delivery`, `wake` | Report Map parsing, report classification and serialization, per-source union, endpoint queue and replay policy, wake eligibility | [hid_client.rs](../../src/ble/hid_client.rs), [hid_device.rs](../../src/usb/hid_device.rs) |
+| [hid/](../../src/hid/): `report_protocol`, `keyboard`, `mouse`, `consumer`, `coalesce`, `aggregate`, `delivery`, `wake`, `host_leds` | Report Map parsing, report classification and serialization, per-source union, endpoint queue and replay policy, wake eligibility, host LED forwarding | [hid_client.rs](../../src/ble/hid_client.rs), [hid_device.rs](../../src/usb/hid_device.rs) |
 | [coordinator.rs](../../src/ble/coordinator.rs) | Slot reservation and the `Action`s for each command and slot event | `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
-| [reconnect.rs](../../src/ble/reconnect.rs) | Which stored peer goes to which slot at boot | `ble_task` in `multi_conn.rs` |
+| [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, how long a sighting stays usable, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in `multi_conn.rs` |
+| [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in `multi_conn.rs` |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
@@ -163,8 +164,9 @@ Follow-up obligations:
 ## Implementation
 
 - [lib.rs](../../src/lib.rs) is `#![cfg_attr(not(test), no_std)]`. It exports
-  `hid` verbatim, includes `ble/adv_parser.rs`, `ble/coordinator.rs`,
-  `ble/reconnect.rs`, `ble/long_read.rs`, `ble/management.rs`,
+  `hid` verbatim, includes `ble/adv_parser.rs`, `ble/conn_params.rs`,
+  `ble/coordinator.rs`, `ble/reconnect.rs`, `ble/long_read.rs`,
+  `ble/management.rs`,
   `power_logic.rs`, and the three `ui` logic files through `#[path]`, and
   includes `storage/framing.rs` and `storage/record.rs` only under
   `#[cfg(test)]`.
@@ -186,10 +188,10 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 232 test attributes. Ten of them are in `src/ble/scanner.rs`, which
-  the host library does not compile; the other 222 match the 219 unit and 3
+  finds 273 test attributes. Ten of them are in `src/ble/scanner.rs`, which
+  the host library does not compile; the other 263 match the 260 unit and 3
   integration tests that passed in the
-  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28).
+  [2026-10-09 validation record](../testing.md#validation-record--2026-10-09).
   The CI host-test jobs on Linux and Windows passed on GitHub-hosted runners
   in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
   (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The

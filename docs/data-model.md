@@ -235,8 +235,8 @@ only when the address, name, or bond changed. A new record appended to a full
 store evicts the oldest entry (`"Paired device store full - evicting oldest entry"`).
 Updating an existing record does not move it.
 
-`iter_recent` yields records newest-first by insertion. Boot reconnect takes the
-first two of that order, and the saved-devices list is shown in it. Because an
+`iter_recent` yields records newest-first by insertion. Boot reconnect gives the
+first two of that order to slots 0 and 1 at once, without a scan, and the saved-devices list is shown in it. Because an
 update does not move a record, "recent" means most recently added, not most
 recently connected.
 
@@ -395,7 +395,9 @@ bytes become `0x01` (`ErrorRollOver`) while modifiers are still sent.
 
 `KeyboardLeds` masks the byte to `0x1F`. Each connection worker that found a
 keyboard LED output report on its peer writes the masked byte to that
-characteristic whenever the host changes it.
+characteristic when the link starts, if the host has sent one, and then
+whenever the host changes it (`forward_host_leds` in
+[host_leds.rs](../src/hid/host_leds.rs)).
 
 ### Mouse Interface
 
@@ -429,15 +431,16 @@ Report Map supply the kind ([hid/mod.rs](../src/hid/mod.rs)).
 
 | Kind | Accepted payload | Rejected |
 | --- | --- | --- |
-| Keyboard | Exactly 8 bytes with byte 1 equal to 0 | Any other length, nonzero reserved byte |
+| Keyboard | Exactly 8 bytes. When the characteristic's Report Reference resolves to the keyboard report of a numbered Report Map, or a Report Map without report IDs describes only a keyboard, byte 1 (OEM-reserved in HID 1.11) is ignored and becomes 0; when only the length or a conventional report ID suggests a keyboard, byte 1 must be 0 | Any other length; a nonzero reserved byte on a report nothing declares |
 | Mouse | 3–5 bytes; buttons masked to 5 bits; missing wheel or pan read as 0 | Fewer than 3 or more than 5 bytes |
 | Consumer | Exactly 2 bytes, usage at most `0x0FFF` | Other lengths, larger usages |
 
 A notification longer than 32 bytes (`MAX_REPORT_LEN` in
 [hid_client.rs](../src/ble/hid_client.rs)) is dropped, not truncated. Without a
 Report Map, length alone selects the kind (8 keyboard, 3–5 mouse, 2 consumer
-below `0x1000`). A Report Map without report IDs restricts that fallback to the
-kinds it declares; with report IDs, an input characteristic whose kind cannot
+below `0x1000`). A Report Map without report IDs that declares only a keyboard
+makes every input its keyboard report; any other map without report IDs
+restricts that fallback to the kinds it declares; with report IDs, an input characteristic whose kind cannot
 be resolved is not subscribed at all.
 
 ## Task Channel Contracts
@@ -471,7 +474,9 @@ backpressure ([hid/coalesce.rs](../src/hid/coalesce.rs)).
 | `FRAMES` | `Signal<Frame>` | Main UI loop | Display task | Latest UI snapshot and display power; older frames are overwritten |
 | `USB_SUSPEND_SIGNAL` | `Signal<bool>` | USB event handler | Main UI loop | Suspend or resume for the power manager |
 | `REMOTE_WAKE` | `Signal<()>` | HID dispatcher | USB device task | Request remote wakeup |
-| `KEYBOARD_LEDS` | `Watch<KeyboardLeds>`, 2 receivers | USB control handler | Connection workers | Latest host LED state |
+| `KEYBOARD_LEDS` | `Watch<KeyboardLeds>`, 2 receivers | USB control handler | Connection workers | Latest host LED state, written to each keyboard link when it starts and on every change |
+| `RECONNECTS` | Blocking `Mutex<RefCell<ReconnectTable<SavedPeer, Address>>>` | Connection workers, reconnect scan callback | Same | Each slot's background reconnect target (stored address and identity key), its last sighting, kept 2 s, and how long other slots' scans ignore it after a failed attempt ([reconnect.rs](../src/ble/reconnect.rs)) |
+| `RECONNECT_WAKE` | `[Signal<()>; 2]` | Reconnect scan callback | The other slot's worker | Wake a slot between attempts when its device was seen; reset by the slot when it starts a reconnect scan, when an attempt fails, or when it stops reconnecting |
 | `KEYBOARD_DELIVERY`, `MOUSE_DELIVERY`, `CONSUMER_DELIVERY` | Endpoint mailboxes | HID dispatcher, USB event handler | Endpoint workers | 16-report FIFO, held state, transfer epoch |
 | `USB_CONFIGURED`, `USB_SUSPENDED`, `KEYBOARD_BOOT_PROTOCOL`, `MOUSE_BOOT_PROTOCOL` | `AtomicBool` | USB handlers | USB tasks, self-test | Host-facing state |
 | `HID_ACTIVITY` | `AtomicBool` | HID dispatcher | Power manager tick | Input counts as activity for display power |
@@ -504,7 +509,7 @@ Coordinator to UI, defined in [ble/mod.rs](../src/ble/mod.rs).
 
 | Variant | Fields | Produced when |
 | --- | --- | --- |
-| `ScanStarted` | — | Any scan begins, including the boot reconnect scan |
+| `ScanStarted` | — | A user scan begins; reconnect scans send no UI events |
 | `DeviceFound(DiscoveredDevice)` | Address, name (`"Unknown"` if none advertised), RSSI | Once per HID device at the end of a scan, up to 8 |
 | `ScanComplete` | — | The scan window closed |
 | `Connected(String<32>)` | One device's name, or `"2 devices"` | A slot connected, or a slot changed while another stays connected |
@@ -576,7 +581,7 @@ re-exported in [ble/mod.rs](../src/ble/mod.rs); the OLED text comes from
 
 | Tag | Raised by | OLED message |
 | --- | --- | --- |
-| `ScanFailed` | The SoftDevice refused a user or boot scan or ended it with an error (`scanner::scan`) | `Scan failed` |
+| `ScanFailed` | The SoftDevice refused a user scan or ended it with an error (`scanner::scan`) | `Scan failed` |
 | `ConnectFailed` | `Connect` with an index outside the coordinator's last scan result (for example after Factory reset cleared it) or with no free slot (`plan_connect`); the whitelist connect timed out after 6 seconds or failed, including the MTU exchange; the link was not encrypted within 25 polls 200 ms apart, the pairing request failed, or the link dropped while securing; no keys during a background reconnect, which may not start pairing. A silent attempt that fails this way is retried, not shown | `Connect failed` |
 | `HidNotFound` | GATT discovery of the HID service failed or found no Report characteristic (`discover_and_subscribe`) | `No HID service` |
 | `NotifyFailed` | No input report characteristic could be subscribed | `Notify failed` |
@@ -664,7 +669,7 @@ message. Events change screens as follows:
 | `ScanStarted` | From `Home` or `Scanning`: enter `Scanning` and clear the list; other screens are kept |
 | `DeviceFound` | Name appended only while `Scanning` |
 | `ScanComplete` | From `Scanning`: `DeviceList`, or `Error` with `No devices found` |
-| `Connected` / `Disconnected` | Update `connected_name`; before the first user scan, a boot scan's `Scanning` or `DeviceList` returns to `Home` first; `Home`, `Connecting` and `Connected` then follow the link state; dialogs and errors are kept |
+| `Connected` / `Disconnected` | Update `connected_name`; `Home`, `Connecting` and `Connected` follow the link state; a scan's `Scanning` or `DeviceList`, dialogs, and errors are kept |
 | `Error(tag)` | `Error` with the tag's message |
 | `PairedDevices` (matching ID) | Store names; enter `SavedDevices` unless an error is showing |
 | `ManagementResult` (matching ID) | `Ok`: `Notice` with `Device forgotten` or `Pairings reset` unless an error is showing; `Err`: `Error` |

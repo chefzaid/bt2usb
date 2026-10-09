@@ -5,8 +5,8 @@
 //! reimplementation. This crate root simply exposes the hardware-free modules so
 //! they can be unit-tested on the host with `cargo test` / `mask test`.
 //!
-//! The library compiles `hid`, `ble::{adv_parser, coordinator, reconnect,
-//! long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
+//! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
+//! reconnect, long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
 //! `power_logic`, plus `storage::{framing, record}` under `cfg(test)` only.
 //! The SoftDevice-coupled modules (`ble::{multi_conn, hid_client, scanner}`,
 //! `storage` and `storage::codec`, `usb`, `power`, `sd_setup`, `stack`,
@@ -20,6 +20,9 @@ pub mod hid;
 
 #[path = "ble/adv_parser.rs"]
 mod ble_adv_parser_impl;
+
+#[path = "ble/conn_params.rs"]
+mod ble_conn_params_impl;
 
 #[path = "ble/coordinator.rs"]
 mod ble_coordinator_impl;
@@ -63,11 +66,15 @@ pub mod ble {
             advertised_name, contains_hid_service_uuid, extract_device_name,
         };
     }
+    /// Pure bounds for a peripheral's connection parameter request.
+    pub mod conn_params {
+        pub use crate::ble_conn_params_impl::*;
+    }
     /// Pure BLE coordination core (connection-slot state machine + reducers).
     pub mod coordinator {
         pub use crate::ble_coordinator_impl::*;
     }
-    /// Pure boot-time auto-reconnect planner (RPA resolution sequencing).
+    /// Pure background-reconnect coordination (shared scan, sightings, duty).
     pub mod reconnect {
         pub use crate::ble_reconnect_impl::*;
     }

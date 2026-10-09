@@ -1,6 +1,7 @@
 # ADR 0005: Aggregate Two BLE Sources Into Independent USB Endpoint Workers
 
-- Status: Accepted
+- Status: Accepted; the boot-reconnect bullet is superseded by
+  [ADR 0015](0015-shared-reconnect-scan.md) (2026-10-09)
 - Date: 2026-09-28
 
 ## Context
@@ -56,7 +57,7 @@ Two lower-level facts shape the solution:
 - Serialize scan and connection establishment with the shared `GAP_PROCEDURE`
   mutex, held only for establishment, never for a link's lifetime. Bound the
   whitelist scan of each connection attempt (the `ScanConfig` timeout) and each
-  bonded-peer address resolution (`with_timeout`) by `BLE_CONNECT_TIMEOUT_SECS`
+  reconnect scan (`with_timeout`) by `BLE_CONNECT_TIMEOUT_SECS`
   (6 s), so an absent peer cannot hold the lock indefinitely, and pause
   `BLE_RECONNECT_BACKOFF_MS` (500 ms) between silent retries so a user scan can
   get the lock. A user scan holds the lock for its `BLE_SCAN_DURATION_SECS`
@@ -64,7 +65,9 @@ Two lower-level facts shape the solution:
 - At boot, select up to two most recently stored peers, scan once, match each
   to a live address (resolving private addresses by IRK), and give each a slot;
   a peer not seen in that scan keeps its stored address. Every later silent
-  retry of a bonded peer resolves its current address again.
+  retry of a bonded peer resolves its current address again. *Superseded by
+  [ADR 0015](0015-shared-reconnect-scan.md) on 2026-10-09: there is no boot
+  scan, and one shared reconnect scan looks for both slots' devices.*
 
 **Source-tagged input and a per-source union.**
 
@@ -194,17 +197,16 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | --- | --- |
 | Slot count and reducers | `MAX_CONNECTIONS` and `ConnManager` in [coordinator.rs](../../src/ble/coordinator.rs) |
 | Slot workers, boot reconnect, link end | `connection_slot_task`, `ble_task`, and `connect_and_run_secure` in [multi_conn.rs](../../src/ble/multi_conn.rs); the log line `slot {} link lost; reconnecting` |
-| Boot target matching | `resolve_reconnect_targets` in [reconnect.rs](../../src/ble/reconnect.rs) |
-| Address resolution on retry | `resolve_bonded_peer` in [scanner.rs](../../src/ble/scanner.rs) |
+| Shared reconnect scan and address resolution ([ADR 0015](0015-shared-reconnect-scan.md)) | `ReconnectTable` and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs); `find_saved_peer` in [scanner.rs](../../src/ble/scanner.rs) |
 | GAP serialization | `GAP_PROCEDURE` in [ble/mod.rs](../../src/ble/mod.rs) |
-| Timing constants | `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS`, `BLE_CONN_EVENT_LENGTH` in [config.rs](../../src/config.rs) |
+| Timing constants | `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS`, `BLE_CONN_EVENT_LENGTH`, `BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`, `BLE_FAST_RECONNECT_SECS` in [config.rs](../../src/config.rs) |
 | Synchronous-callback hand-off | `ReportCoalescer` in [coalesce.rs](../../src/hid/coalesce.rs), driven by `run_notification_loop` in [hid_client.rs](../../src/ble/hid_client.rs) |
 | Source tags | `HidEvent` in [delivery.rs](../../src/hid/delivery.rs); `HID_REPORT_CHANNEL` (capacity 16) in [main.rs](../../src/main.rs) |
 | Aggregation | `InputAggregator::apply` and `SOURCES = 2` in [aggregate.rs](../../src/hid/aggregate.rs); `MAX_CONSUMER_USAGE` (`0x0FFF`) in [consumer.rs](../../src/hid/consumer.rs) |
 | Endpoint policy | `EndpointDelivery` (`publish`, `replay`, `failed`, `succeeded`, epochs) and `run_endpoint` in `delivery.rs` |
 | USB side | `dispatch_reports`, `hid_writer_task` (one dispatcher and three workers joined), and `EndpointMailbox` in [hid_device.rs](../../src/usb/hid_device.rs); `UsbPowerHandler` calls `replay_endpoints` from its `reset`, `configured`, and `suspended` callbacks, and `BootRequestHandler::set_protocol` replays the keyboard or mouse endpoint |
 | Wake policy | `new_press` in [wake.rs](../../src/hid/wake.rs); `REMOTE_WAKE` and `run_usb_device` in `hid_device.rs` |
-| Keyboard LEDs | A `Watch` with `LED_CONSUMERS = 2` receivers in `hid_device.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state |
+| Keyboard LEDs | A `Watch` with `LED_CONSUMERS = 2` receivers in `hid_device.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state; `forward_host_leds` in [host_leds.rs](../../src/hid/host_leds.rs) writes the current state when each link starts, then every change |
 
 ### Verification Status
 
@@ -220,7 +222,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   [delivery_tests.rs](../../src/hid/delivery_tests.rs), for example
   `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write` and
   `repeated_usb_errors_use_capped_backoff_and_eventually_recover`. The
-  coordinator and reconnect planner have host tests too, and the Renode
+  coordinator and the reconnect table have host tests too, and the Renode
   scenario drives the coordinator reducers on the ARM target. These passed on
   GitHub-hosted runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and
   37932436721 (`7fc99d6`, 2026-10-09) and scheduled run 37338711407

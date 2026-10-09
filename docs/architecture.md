@@ -65,13 +65,14 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement |
 | [ble/mod.rs](../src/ble/mod.rs) | Board shell | BLE command/event types and the GAP procedure lock |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
+| [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot and event reducers |
-| [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Boot reconnect target planning across scan results |
+| [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: targets, sightings handed between slots, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management quiescence and transactional commit primitives |
-| [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator, two connection workers, and the bond handler |
+| [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator, two connection workers, and the bond and connection-parameter handler |
 | [ble/hid_client.rs](../src/ble/hid_client.rs) | Board shell | GATT discovery, subscriptions, HID classification, notification loop |
-| [ble/scanner.rs](../src/ble/scanner.rs) | Board shell | Scan, HID advertisement filtering, and bonded-peer resolution |
+| [ble/scanner.rs](../src/ble/scanner.rs) | Board shell | User scan with HID advertisement filtering, and the shared reconnect scan |
 | [hid/mod.rs](../src/hid/mod.rs) | Pure core | Internal report type and notification classification |
 | [hid/report_protocol.rs](../src/hid/report_protocol.rs) | Pure core | Report Map parser and Report Reference descriptor |
 | [hid/keyboard.rs](../src/hid/keyboard.rs), [mouse.rs](../src/hid/mouse.rs), [consumer.rs](../src/hid/consumer.rs) | Pure core | Report types, USB report descriptors, serialization |
@@ -79,6 +80,7 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [hid/aggregate.rs](../src/hid/aggregate.rs) | Pure core | Per-source union of held input |
 | [hid/delivery.rs](../src/hid/delivery.rs) | Pure core | Endpoint queue state and the endpoint worker loop |
 | [hid/wake.rs](../src/hid/wake.rs) | Pure core | Remote-wakeup eligibility |
+| [hid/host_leds.rs](../src/hid/host_leds.rs) | Pure core | Host LED forwarding: the current state when a link starts, then each change |
 | [usb/hid_device.rs](../src/usb/hid_device.rs) | Board shell | Composite device, LED output, VBUS, suspend, report writing |
 | [storage.rs](../src/storage.rs) | Board shell | Paired-device persistence with versioned framing and bond codec |
 | [storage/framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs) | Pure core | Versioned frame and record validation |
@@ -98,7 +100,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{framing, record}` | Host crate and each firmware binary that declares them | Host tests |
+| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{framing, record}` | Host crate and each firmware binary that declares them | Host tests |
 | Board shell | `ble::{mod, multi_conn, hid_client, scanner}`, `usb::hid_device`, `storage` and `storage::codec`, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Firmware binaries only | Review; documented in [hardware](hardware.md#configuration-defaults) |
@@ -129,7 +131,7 @@ flowchart TD
         SDS["sd_setup and stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, reconnect, management, long_read, adv_parser"]
+        BC["ble::coordinator, reconnect, conn_params, management, long_read, adv_parser"]
         HID["hid modules"]
         UIL["ui::ui_logic, input_logic, display_logic"]
         PL["power_logic"]
@@ -158,8 +160,10 @@ follow:
   `defmt` appears only behind `#[cfg(feature = "defmt")]` or `cfg_attr`.
 - Where the real type is hardware-bound, the core is generic or takes a
   callback: `DeviceInfo<A>`, `ConnManager<A>`, and `Action<A>` are generic over
-  the address type; `reconnect::resolve_reconnect_targets` takes a matcher so
-  IRK resolution stays in the SoftDevice; `delivery::run_endpoint` takes the
+  the address type; `reconnect::ReconnectTable` is generic over the target and
+  address types and `reconnect::owner_of` takes a matcher, so IRK resolution
+  stays in the SoftDevice; `host_leds::forward_host_leds` takes the `HostLeds`
+  trait and a write closure; `delivery::run_endpoint` takes the
   `DeliveryQueue`, `ReportSink`, and `RetryClock` traits; `management::commit`
   takes an async persist closure; `display_logic::Recovery` takes milliseconds.
 - Pure modules define their own limits (`MAX_CONNECTIONS`,
@@ -284,12 +288,12 @@ runs, then plans boot reconnects:
    first. Updating a record does not move it, so "recent" means most recently
    added, not most recently connected (see the
    [in-memory cache](data-model.md#in-memory-cache)).
-5. If there is at least one, runs an 8-second scan whose events reach the UI,
-   maps each stored peer to a distinct scan result by IRK or by address with
-   `reconnect::resolve_reconnect_targets`, reserves slot *i* for target *i*, and
-   sends it `SlotCommand::Reconnect`. A peer not heard in the scan keeps its
-   stored address. The worker then continues as described in
-   [background reconnect](#background-reconnect).
+5. Reserves slot *i* for record *i* and sends it `SlotCommand::Reconnect` at
+   once, without scanning first. Each worker then finds its device's current
+   address as described in [background reconnect](#background-reconnect):
+   whichever slot holds the radio looks for both saved devices at the fast duty
+   cycle, so a keyboard can connect as soon as it advertises, whether or not
+   the mouse is awake.
 6. Enters its loop, which serves UI commands and slot events one at a time.
 
 ```mermaid
@@ -310,18 +314,17 @@ sequenceDiagram
     F-->>C: records, empty store, or fail-closed
     C->>C: load bonds into Bonder
     opt at least one stored peer
-        C->>SD: 8 s boot scan under GAP lock
-        C->>C: resolve_reconnect_targets
-        C->>W: Reconnect per target slot
+        C->>W: Reconnect per stored peer, no scan first
+        W->>SD: shared reconnect scan, then connect, under GAP lock
     end
     C->>C: serve commands and slot events
 ```
 
-The boot scan publishes `ScanStarted`, `DeviceFound`, and `ScanComplete` like a
-user scan, so the UI shows Scanning. If it hears no HID advertiser, the UI
-shows the "No devices found" error. That error stays until acknowledged even
-after a background reconnect succeeds; acknowledging it with DOWN shows the
-current link state.
+Boot publishes no scan events: the UI stays on Home until a saved device
+connects, and power-up never shows a "No devices found" error. Before
+2026-10-09 the coordinator ran a full 8-second scan before it sent any
+`Reconnect`, so no keyboard could type for at least 8 seconds after power-up,
+which can be too late for a firmware setup key.
 
 ### User Scan, Connect, Pairing And HID Discovery
 
@@ -351,7 +354,10 @@ current link state.
    slot is reserved and sent `SlotCommand::Connect`.
 6. The worker logs `"slot {} connecting to {}"`, takes the GAP lock, and calls
    `central::connect_with_security` with a whitelist of that one address, a
-   6-second scan timeout (`BLE_CONNECT_TIMEOUT_SECS`), a 7.5–15 ms interval,
+   6-second scan timeout (`BLE_CONNECT_TIMEOUT_SECS`) at the fast duty cycle
+   of a 50 ms window every 100 ms (`BLE_FAST_SCAN_INTERVAL`,
+   `BLE_FAST_SCAN_WINDOW`), because the device was just seen advertising, a
+   7.5–15 ms interval,
    zero peripheral latency, and a 4-second supervision timeout. The call also
    performs the MTU exchange. The GAP lock is released when it returns.
 7. Security: `encrypt()` uses stored keys. If the `Bonder` holds no keys for
@@ -426,30 +432,76 @@ fails with `ConnectFailed`.
 
 ```mermaid
 flowchart TD
-    T[Retry target set] --> B{Command during 500 ms backoff}
-    B -->|Disconnect| X[Report Disconnected and drop target]
-    B -->|Other command| N[Handle the command instead]
-    B -->|None| K{Bond known for target}
-    K -->|Yes| R[Resolution scan under GAP lock, up to 6 s]
-    K -->|No| C[Whitelist connect, up to 6 s]
-    R -->|Identity matched| C
+    T[Target registered for the slot] --> B{During the 500 ms backoff}
+    B -->|Disconnect| X[Drop target, report Disconnected]
+    B -->|Other command| N[Drop target, handle the command]
+    B -->|Pause ends, or the other slot saw the device| S{Fresh sighting for this slot}
+    S -->|Yes| C[Whitelist connect to the seen address, up to 6 s]
+    S -->|No| R[Shared reconnect scan under GAP lock, up to 6 s]
+    R -->|This slot's device seen| C
+    R -->|Other slot's device seen: record it, wake that slot| T
     R -->|Timeout or scan error| T
     R -->|Command arrives, report Disconnected| N
-    C -->|Secured and HID ready| L[Connected event and notification loop]
-    C -->|ConnectFailed| T
-    C -->|HID or Report Map error| E[Error event, slot released, retries stop]
+    C -->|Secured and HID ready| L[Drop target, Connected event, notification loop]
+    C -->|ConnectFailed: hide device from other slot's scans 6.5 s| T
+    C -->|HID or Report Map error| E[Drop target, error event, slot released, retries stop]
     L -->|Peer closes link| D[HidEvent Disconnected, then LinkLost]
     D --> T
 ```
 
+- Each silent attempt registers the slot's target in `RECONNECTS`, the
+  `reconnect::ReconnectTable` both slots share in
+  [scanner.rs](../src/ble/scanner.rs): the stored address and, for a bonded
+  peer, its identity key from the `Bonder`. A record saved without a bond is
+  matched by its stored address only. The target is dropped when the slot
+  connects (just before `SlotEvent::Connected`), when a command other than
+  `Reconnect` reaches the slot, and when an attempt ends in an error that
+  stops retries, so a connected or released slot never claims an
+  advertisement.
+- `scanner::find_saved_peer` first takes a sighting that the other slot's scan
+  recorded for this slot in the last 2 seconds (`SIGHTING_TTL_MS`), and
+  connects to it without scanning. Otherwise it runs one passive scan, bounded
+  by `BLE_CONNECT_TIMEOUT_SECS`, that matches every advertisement against
+  every registered target: through the identity key, which follows a rotated
+  private address on every attempt, or by the stored address. For each
+  advertisement it copies the targets out of the table and resolves the
+  address outside the critical section, because `IdentityKey::is_match` calls
+  the SoftDevice's AES block. The scan accepts devices whose advertisement
+  omits the HID UUID and does not change the UI's scan results.
+- The scan stops at the first advertisement from any slot's device. Its own
+  device is connected at once. Another slot's device is recorded for that slot
+  (`"slot {} scan found slot {}'s device"`), which is woken through its
+  `RECONNECT_WAKE` signal, and the scanning slot goes back to its backoff. A
+  saved device that is asleep therefore cannot hold the radio while the other
+  slot's device is already advertising. When both slots would match one
+  advertisement, the lower slot gets it.
+- After a silent attempt fails with `ConnectFailed`, the other slot's scans
+  ignore that slot's device for `BLE_FAILED_RECONNECT_HOLDOFF_MS` (6.5 s: the
+  500 ms pause plus one 6-second scan), through
+  `ReconnectTable::attempt_failed` and the per-slot view
+  `targets(scanning_slot, now)`; the slot's own scans still look for it. A
+  device that advertises but will not connect, for example one paired again
+  with another computer that has a filter accept list, or one that deleted its
+  bond, would otherwise end every scan of the other slot at its first
+  advertisement and wake its own slot for another failing attempt, so the other
+  slot's device would be heard only when it happened to advertise first. With
+  the holdoff the two slots alternate as they did with per-slot scans: one
+  failing attempt, then one full scan for the other device.
+- A slot resets its `RECONNECT_WAKE` signal when it starts a reconnect scan,
+  having taken any pending sighting, when an attempt fails, which drops the
+  sighting, and when its target is cleared, so a wake left from a sighting it
+  already used or lost cannot skip a later backoff.
+- The scan uses the fast duty cycle, a 50 ms window every 100 ms
+  (`BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`), while any target was
+  registered less than `BLE_FAST_RECONNECT_SECS` (30 s) ago, and otherwise
+  the vendored default of a 312.5 ms window every 1.7 s
+  (`central::ScanConfig::default()`). A retry re-registers the same device
+  without restarting that window: a bonded device is the same device under any
+  private address because its identity key identifies it. The window starts
+  again after the device connects and its link is lost again, or at power-up.
 - Between attempts the worker waits `BLE_RECONNECT_BACKOFF_MS` (500 ms) while
-  listening for commands, which leaves the radio free for a user scan.
-- For a bonded target, every attempt starts with
-  `scanner::resolve_bonded_peer`, a scan that stops at the first advertiser
-  whose address matches the stored identity, directly or through its IRK,
-  bounded by `BLE_CONNECT_TIMEOUT_SECS`. A rotated private address is picked up
-  on every attempt, not only at boot. At boot this means a bonded peer is
-  resolved twice: once by the boot scan and again by its worker.
+  listening for commands and for the other slot's wake, which leaves the radio
+  free for a user scan.
 - Background attempts never start pairing. A peer that has lost its keys fails
   encryption with `ConnectFailed`, which a silent attempt retries
   indefinitely; only the RTT log shows `"slot {} failed to secure BLE link"`.
@@ -463,10 +515,59 @@ flowchart TD
   aggregator releases that source's held input, then `SlotEvent::LinkLost`.
   `on_slot_link_lost` keeps the slot reserved in the connecting state, so a new
   connect request cannot take it, and the UI shows only links that are up.
-- A background reconnect that reaches Connected moves the UI from Home,
-  Connecting, or the boot scan's Scanning or device-list screen to Connected.
-  Once the user has started a scan, its picker stays on screen; an error or
-  notice also stays until acknowledged.
+- A background reconnect that reaches Connected moves the UI from Home or
+  Connecting to Connected. A scan the user started keeps its picker on screen;
+  an error or notice also stays until acknowledged.
+
+### Peripheral Connection Parameter Requests
+
+The bridge opens each link with a 7.5 to 15 ms interval, no peripheral
+latency, and a 4-second supervision timeout. A peripheral can ask for other
+values at any time afterwards, with an L2CAP Connection Parameter Update
+Request or the Link Layer Connection Parameters Request procedure; the
+SoftDevice reports both as `BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST` and waits
+for the central to answer.
+
+1. The vendored crate's GAP event handler passes the request to the link's
+   security handler through `SecurityHandler::conn_param_update_request`, a
+   bt2usb patch ([ADR 0007](adr/0007-vendored-softdevice-patch.md)). Upstream
+   granted every request unchanged, so a peripheral could move to a long
+   interval, which delays every report, or to a supervision timeout of up to
+   32 seconds, during which a key held when the link silently fails stays held
+   on the host.
+2. `Bonder` in [multi_conn.rs](../src/ble/multi_conn.rs) answers with
+   `conn_params::bound_request` and `PEER_CONN_PARAM_LIMITS`. The interval
+   range becomes its overlap with 7.5 to 15 ms (`BLE_CONN_INTERVAL_MIN`,
+   `BLE_CONN_INTERVAL_MAX`). A peripheral that asks only for slower intervals
+   gets its own fastest one, up to 30 ms (`BLE_PEER_MAX_CONN_INTERVAL`), as a
+   single value: some peripherals, such as ones built on Nordic's nRF5 SDK
+   `ble_conn_params` module with `disconnect_on_fail`, disconnect after a few
+   attempts when the interval they get lies outside the range they asked for,
+   and the bridge would then lose and reconnect the link every minute or two.
+   Latency is capped at 20 connection events
+   (`BLE_MAX_PERIPHERAL_LATENCY`). The supervision timeout is kept between
+   1 second (`BLE_MIN_SUP_TIMEOUT`) and 4 seconds (`BLE_SUP_TIMEOUT`) and
+   raised when needed to meet the Bluetooth Core rule that it exceeds
+   `(1 + latency) × interval × 2`; latency is lowered first if even 4 seconds
+   could not meet it.
+3. It logs `"peer connection parameters granted: {}"` for a request inside the
+   limits, `"peer asked for connection parameters {}; granting {}"` for one it
+   changed, and, at warning level,
+   `"peer asked for connection parameters {}; granting {}, outside its interval range"`
+   when the interval is outside the requested range (only for a peripheral
+   that wants nothing faster than 30 ms). The event handler then answers with
+   `sd_ble_gap_conn_param_update`.
+
+The bounds hold for the life of every link. A held key is released at most
+4 seconds after a link silently fails. Input still leaves the peripheral at
+the next connection event, at most 15 ms away, or 30 ms for a peripheral that
+refuses anything faster, because latency only lets a peripheral skip events
+when it has nothing to send; what latency delays is traffic to the
+peripheral, so an LED write can wait up to 21 events, about 315 ms at 15 ms.
+The policy is host-tested in [conn_params.rs](../src/ble/conn_params.rs),
+including a sweep over every boundary of the policy and over values outside
+the Core's legal ranges; the parameters real peripherals end up with are not
+recorded yet ([TODO.md](../TODO.md#ble-central-and-pairing)).
 
 ### One Input Report From BLE To USB
 
@@ -554,10 +655,18 @@ touching the other source. The policy is host-tested in
    `BootRequestHandler::set_report` rejects anything else, logs
    `"Host LEDs: num={} caps={} scroll={}"`, and sends the value to the
    `KEYBOARD_LEDS` watch.
-2. Each connection worker holds one of the watch's two receivers. Its
-   notification loop waits for a change and writes the byte to the peer's
-   keyboard LED output report, when discovery found one. A failed write logs
-   `"Failed to write LED state to BLE keyboard"`.
+2. Each connection worker holds one of the watch's two receivers for its
+   whole life, across links. When a link's notification loop starts,
+   `host_leds::forward_host_leds` writes the host's latest LED state, if the
+   host has sent one since enumeration, to the peer's keyboard LED output
+   report, then writes each later change. Taking the latest state marks it
+   seen, so it is not written twice. A keyboard that wakes and reconnects, or
+   connects to a slot that already passed the latest change to an earlier
+   link, therefore shows the host's state at once, as a wired keyboard does
+   when it is plugged in. Writes happen only when discovery found a keyboard
+   LED output report; a failed write logs
+   `"Failed to write LED state to BLE keyboard"` and the next change is still
+   written.
 3. A USB reset publishes the default (all off) LED state the same way.
 
 ### USB Suspend, Remote Wakeup And Resume
@@ -666,7 +775,7 @@ sequenceDiagram
    that peer; Factory reset targets both slots. Each target receives
    `Quiesce(token)`.
 5. A worker acknowledges once it holds nothing. An idle worker acknowledges at
-   once. A worker in backoff or a resolution scan drops its target first. A
+   once. A worker in backoff or a reconnect scan drops its target, and its entry in the shared reconnect table, first. A
    worker in security, discovery, or the run phase closes the link, waits until
    the SoftDevice reports the handle gone, and in the run phase also sends
    `HidEvent::Disconnected`; it then reports `Disconnected` and, on its next
@@ -909,7 +1018,9 @@ The other shared primitives:
 | --- | --- | --- | --- |
 | `USB_SUSPEND_SIGNAL` | `Signal<bool>` | USB handler → UI loop | Latest value |
 | `REMOTE_WAKE` | `Signal<()>` | Dispatcher → `usb_device_task` | Cleared on every suspend change and reset |
-| `KEYBOARD_LEDS` | `Watch<KeyboardLeds, 2>` | USB control handler → connection workers | Latest value, one receiver per slot |
+| `KEYBOARD_LEDS` | `Watch<KeyboardLeds, 2>` | USB control handler → connection workers | Latest value, one receiver per slot; each link reads the latest value when it starts |
+| `RECONNECTS` | Blocking mutex over `ReconnectTable` | Both workers ↔ reconnect scan callback | One registered target, at most one 2 s sighting, and a holdoff after a failed attempt per slot |
+| `RECONNECT_WAKE` | `Signal<()>` per slot | Reconnect scan callback → the other slot's worker | Wake-up between attempts |
 | `FRAMES` | `Signal<Frame>` | UI loop → `display_task` | Latest frame wins |
 | Endpoint `pending` and `lifecycle` | `Signal<()>` per endpoint | Dispatcher and USB handler → endpoint worker | Wake-ups; `lifecycle` is cleared when each transfer starts |
 | Notification `wake` | `Signal<()>` per connection | GATT callback → drain future | Wake-up |
@@ -923,8 +1034,9 @@ Ownership of the data behind them is listed in the
 
 - **Synchronous code blocks everything.** The scan callback, the GATT
   notification callback, and critical sections run without yielding. They do
-  bounded work: merge into at most eight scan entries, or classify at most 32
-  bytes and push one report. The simulation's UART logging is also blocking.
+  bounded work: merge into at most eight scan entries, match one reconnect
+  advertisement against at most two registered targets (one AES block each),
+  or classify at most 32 bytes and push one report. The simulation's UART logging is also blocking.
 - **The UI loop never awaits a send.** BLE commands use `try_send`; the loop
   waits only in its `select4`.
 - **The coordinator works inline.** It awaits sends to the UI event channel
@@ -938,7 +1050,7 @@ Ownership of the data behind them is listed in the
   SoftDevice reports the link gone, with no deadline. The drain blocks while
   `HID_REPORT_CHANNEL` is full.
 - **GAP contention.** A user scan waits for an in-flight connect attempt or
-  resolution scan. Each scans for at most 6 seconds; a connect attempt that
+  reconnect scan. Each scans for at most 6 seconds; a connect attempt that
   finds its peer also holds the lock through connection setup and the MTU
   exchange.
 - **USB.** The dispatcher never waits for an endpoint; each endpoint worker
@@ -974,7 +1086,7 @@ should do about each message is in
 | --- | --- | --- | --- |
 | User scan | 8 s window, 10 s backstop | Results so far are used; a SoftDevice error shows "Scan failed" | [scanner.rs](../src/ble/scanner.rs) |
 | Connect attempt | 6 s whitelist scan | User connect: error. Silent: retry after 500 ms | [multi_conn.rs](../src/ble/multi_conn.rs) |
-| Bonded-peer resolution | 6 s scan | Retry after 500 ms | [scanner.rs](../src/ble/scanner.rs) |
+| Reconnect scan | 6 s; fast duty cycle for 30 s after power-up or a lost link | Retry after 500 ms, or at once when the other slot's scan sees the device | [scanner.rs](../src/ble/scanner.rs), [reconnect.rs](../src/ble/reconnect.rs) |
 | Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [multi_conn.rs](../src/ble/multi_conn.rs) |
 | GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |
 | Flash write | 3 attempts, 20 ms apart | `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
@@ -1146,6 +1258,8 @@ change.
 - [ADR 0012: Stay Connected While Bus-Powered Instead Of Entering System-OFF](adr/0012-bus-powered-no-system-off.md)
 - [ADR 0013: Pin The Toolchain And Wrap Workflows In Mask Tasks](adr/0013-pinned-toolchain-and-mask-tasks.md)
 - [ADR 0014: Model nRF52840 GPIO SENSE/LATCH And GPIOTE PORT Events In Renode](adr/0014-renode-gpio-models.md)
+- [ADR 0015: Reconnect Saved Devices At Power-Up With One Shared Scan](adr/0015-shared-reconnect-scan.md)
+- [ADR 0016: Bound A Peripheral's Connection Parameter Requests In The Application](adr/0016-bounded-peer-connection-parameters.md)
 
 ## Decisions Needed For Roadmap Work
 

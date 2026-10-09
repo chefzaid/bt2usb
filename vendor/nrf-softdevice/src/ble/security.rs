@@ -71,6 +71,17 @@ pub trait SecurityHandler {
     /// Called when the [`SecurityMode`] of a [`Connection`] has changed.
     fn on_security_update(&self, _conn: &Connection, _security_mode: SecurityMode) {}
 
+    /// bt2usb patch: choose the connection parameters to grant when the
+    /// peripheral on a central connection asks to change them. The default
+    /// grants the request unchanged, as upstream does.
+    fn conn_param_update_request(
+        &self,
+        _conn: &Connection,
+        requested: raw::ble_gap_conn_params_t,
+    ) -> raw::ble_gap_conn_params_t {
+        requested
+    }
+
     /// The connection has been bonded and its encryption keys should now be stored.
     ///
     /// Must be implemented if [`can_bond`][Self::can_bond] ever returns `true`.

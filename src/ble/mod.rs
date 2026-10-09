@@ -22,6 +22,7 @@
 // Renode `sim` build). The live BLE tasks below need the Nordic SoftDevice and
 // are only compiled into the real firmware (`embedded` feature).
 pub mod adv_parser;
+pub mod conn_params;
 pub mod coordinator;
 pub mod long_read;
 pub mod management;

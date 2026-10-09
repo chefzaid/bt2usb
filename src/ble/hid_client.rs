@@ -19,6 +19,7 @@ use crate::ble::BleErrorTag;
 use crate::hid;
 use crate::hid::coalesce::ReportCoalescer;
 use crate::hid::delivery::HidEvent;
+use crate::hid::host_leds::forward_host_leds;
 use crate::hid::keyboard::KeyboardLeds;
 use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, ReportType};
 use crate::usb::hid_device::LedReceiver;
@@ -405,16 +406,14 @@ pub async fn run_notification_loop(
         }
     };
 
-    // If this peer has a keyboard LED output report and we hold an LED receiver,
-    // also forward host LED changes to it; otherwise just run producer+consumer.
+    // If this slot holds an LED receiver, also forward the host's LED state to
+    // the peer: the current state first, because a keyboard that reconnects
+    // starts with its LEDs off, then every change. `write_leds` is a no-op for
+    // a peer without a keyboard LED output report. Otherwise just run
+    // producer+consumer.
     match led_rx {
         Some(rx) => {
-            let led_fut = async {
-                loop {
-                    let leds = rx.changed().await;
-                    client.write_leds(conn, leds).await;
-                }
-            };
+            let led_fut = forward_host_leds(rx, move |leds| client.write_leds(conn, leds));
             let _ = select3(gatt_fut, drain_fut, led_fut).await;
         }
         None => {

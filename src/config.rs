@@ -38,6 +38,46 @@ pub const BLE_CONNECT_TIMEOUT_SECS: u16 = 6;
 /// device, leaving the radio free for a user scan in between.
 pub const BLE_RECONNECT_BACKOFF_MS: u64 = 500;
 
+/// How long, after a background reconnect attempt fails, the other slot's
+/// reconnect scans ignore that slot's device: the pause before the failed
+/// slot's next attempt plus one full reconnect scan. A device that advertises
+/// but will not connect, for example one paired again with another computer,
+/// would otherwise end every scan of the other slot at its first
+/// advertisement, so the other slot's own device would rarely be heard.
+pub const BLE_FAILED_RECONNECT_HOLDOFF_MS: u64 =
+    BLE_CONNECT_TIMEOUT_SECS as u64 * 1000 + BLE_RECONNECT_BACKOFF_MS;
+
+/// Scan interval and window (in 0.625 ms units) for a reconnect scan inside
+/// its fast window, and for every connection attempt: a 50 ms window every
+/// 100 ms. A waking keyboard advertises every few tens of milliseconds, so it
+/// is usually seen in the first window; the gaps leave the SoftDevice time for
+/// flash writes.
+pub const BLE_FAST_SCAN_INTERVAL: u32 = 160;
+pub const BLE_FAST_SCAN_WINDOW: u32 = 80;
+
+/// How long reconnect scans keep the fast duty cycle after power-up or after
+/// a link is lost. After that they fall back to the SoftDevice default (a
+/// 312.5 ms window every 1.7 s) until the device returns.
+pub const BLE_FAST_RECONNECT_SECS: u64 = 30;
+
+/// Longest connection interval granted, as a single value, to a peripheral
+/// that asks only for intervals slower than [`BLE_CONN_INTERVAL_MAX`] (in
+/// 1.25 ms units). 24 = 30 ms. Such a peripheral gets its own shortest interval
+/// up to this cap rather than 15 ms, because some peripherals disconnect when
+/// the interval they get lies outside the range they asked for; Nordic's nRF5
+/// SDK `ble_conn_params` module, for one, can be set to do so.
+pub const BLE_PEER_MAX_CONN_INTERVAL: u16 = 24;
+
+/// Largest peripheral latency granted when a peripheral asks to change the
+/// connection parameters (connection events it may skip). A host LED change
+/// reaches a keyboard within (latency + 1) connection intervals, so 20 keeps
+/// that under about 315 ms at the 15 ms maximum interval.
+pub const BLE_MAX_PERIPHERAL_LATENCY: u16 = 20;
+
+/// Shortest supervision timeout granted to a peripheral's request (in 10 ms
+/// units). 100 = 1 s. The longest is [`BLE_SUP_TIMEOUT`].
+pub const BLE_MIN_SUP_TIMEOUT: u16 = 100;
+
 // USB
 
 /// USB VID/PID - use the "pid.codes" open-source test VID.

@@ -1,6 +1,8 @@
 # ADR 0007: Vendor A Minimal nrf-softdevice Patch At A Pinned Revision
 
-- Status: Accepted
+- Status: Accepted; amended by
+  [ADR 0016](0016-bounded-peer-connection-parameters.md) (2026-10-09), which adds
+  one hook outside `gatt_client.rs`
 - Date: 2026-09-28
 
 ## Context
@@ -42,7 +44,10 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
   entry. The sibling crates (`nrf-softdevice-s140`, `nrf-softdevice-macro`)
   stay git dependencies at the same commit.
 - Keep every functional change in `src/ble/gatt_client.rs` of the vendored
-  crate, and keep it minimal:
+  crate, and keep it minimal (since
+  [ADR 0016](0016-bounded-peer-connection-parameters.md), one more change adds
+  `SecurityHandler::conn_param_update_request` in `security.rs` and calls it
+  from `gap.rs`):
   - add `read_by_offset`, which issues one ATT Read or Read Blob at a given
     offset, checks that the response handle and offset match the request
     (`ReadError::InvalidResponse` otherwise), and keeps upstream's
@@ -147,6 +152,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Report Map read | `read_report_map` in [hid_client.rs](../../src/ble/hid_client.rs) maps failures to `BleErrorTag::ReportMapReadFailed`, `ReportMapTooLarge`, or `ReportMapInvalid`, shown as "HID map read failed", "HID map too large", and "Unsupported HID map" |
 | Absent map | Only a missing Report Map characteristic allows legacy classification, logged as `HID report map absent; using legacy report classification` |
 | Discovery failures | `HID discovery failed: {:?}` in `hid_client.rs` |
+| Connection parameter hook ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `SecurityHandler::conn_param_update_request` (default: grant unchanged) in `vendor/nrf-softdevice/src/ble/security.rs`, called from the `CONN_PARAM_UPDATE_REQUEST` arm in `vendor/nrf-softdevice/src/ble/gap.rs` |
 | ATT MTU | `att_mtu: 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
 | Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
 

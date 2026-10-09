@@ -59,6 +59,17 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
                 conn_params.slave_latency,
             );
 
+            // bt2usb patch: let the connection's security handler bound the
+            // request instead of granting it unchanged.
+            #[cfg(feature = "ble-sec")]
+            let conn_params = match Connection::from_handle(conn_handle) {
+                Some(conn) => match conn.security_handler() {
+                    Some(handler) => handler.conn_param_update_request(&conn, conn_params),
+                    None => conn_params,
+                },
+                None => conn_params,
+            };
+
             let ret = raw::sd_ble_gap_conn_param_update(conn_handle, &conn_params);
             if let Err(err) = RawError::convert(ret) {
                 warn!("sd_ble_gap_conn_param_update err {:?}", err);

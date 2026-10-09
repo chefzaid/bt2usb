@@ -44,10 +44,11 @@ are not translated.
 | --- | --- | --- | --- |
 | BLE scan with HID filtering and name merging | Software-verified (parsing, merging) | [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/adv_parser.rs`](../src/ble/adv_parser.rs), [`ble/coordinator.rs`](../src/ble/coordinator.rs) | [Scanning](#scanning) |
 | Just Works bonding with encrypted links required | Implemented | [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
+| Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
 | Report Map long reads up to 512 bytes | Software-verified (fragment assembly) | [`ble/long_read.rs`](../src/ble/long_read.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
-| Two connection slots, boot reconnect, link-loss retry | Software-verified (slot reducers, reconnect planner) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Reconnect And Link Loss](#reconnect-and-link-loss) |
-| Keyboard LED forwarding to the BLE keyboard | Software-verified (LED byte handling) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/keyboard.rs`](../src/hid/keyboard.rs), [`ble/hid_client.rs`](../src/ble/hid_client.rs) | [Keyboard LEDs](#keyboard-leds) |
+| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
+| Keyboard LED forwarding to the BLE keyboard, current state on every link | Software-verified (LED byte handling, forwarding loop) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/host_leds.rs`](../src/hid/host_leds.rs), [`hid/keyboard.rs`](../src/hid/keyboard.rs), [`ble/hid_client.rs`](../src/ble/hid_client.rs) | [Keyboard LEDs](#keyboard-leds) |
 | Composite USB keyboard, mouse, consumer control | Software-verified (descriptors, report formats) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/`](../src/hid/) | [USB HID Device](#usb-hid-device) |
 | Boot protocol, per-unit serial, software VBUS | Implemented (boot mouse format software-verified) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`sd_setup.rs`](../src/sd_setup.rs) | [USB HID Device](#usb-hid-device) |
 | Two-source input aggregation | Software-verified | [`hid/aggregate.rs`](../src/hid/aggregate.rs) | [Two-Source Aggregation](#two-source-aggregation), [ADR 0005](adr/0005-two-slots-and-independent-endpoints.md) |
@@ -207,20 +208,34 @@ Some details matter in daily use:
 
 ### Boot And Reconnect
 
-At power-up the OLED shows Home. If devices are saved, the bridge runs one
-8-second scan (the screen shows Scanning), then assigns the two most recently
-added saved devices to connection slots 0 and 1. "Most recently added" means
-the order in which devices were first saved: reconnecting or renaming a saved
-device does not move it ([data model](data-model.md#in-memory-cache)). A
-device seen in that scan is matched by its identity key, so a rotating private
-address still matches, or by its stored address; one that was not seen is
-tried at its stored address.
+At power-up the OLED shows Home, and the bridge at once assigns the two most
+recently added saved devices to connection slots 0 and 1, without scanning
+first. "Most recently added" means the order in which devices were first
+saved: reconnecting or renaming a saved device does not move it
+([data model](data-model.md#in-memory-cache)).
 
 Each slot then keeps reconnecting in the background until it succeeds or the
-user gives it another command. For a bonded device, every attempt first scans
-for up to 6 seconds to find the device's current address, then connects to that
-address with a 6-second timeout. Between attempts the slot pauses 500 ms so a
-user scan can use the radio. The application does not request a new pairing
+user gives it another command. An attempt listens for up to 6 seconds for the
+saved device, recognizing a bonded device by its identity key, so a rotating
+private address still matches, and any other saved device by its stored
+address. One slot's search also looks for the other slot's device and hands it
+over when it hears it, so a mouse that is asleep never keeps the keyboard
+waiting: whichever device advertises first connects first. A device that
+advertises but fails to connect, for example a mouse paired again with a
+laptop, is left out of the other slot's search for 6.5 seconds after each
+failure, so it cannot keep cutting that search short. The device is then
+connected at the address it was heard on, with a 6-second timeout. Between
+attempts the slot pauses 500 ms so a user scan can use the radio.
+
+For 30 seconds after power-up, and after a link is lost, the search listens
+half of the time (a 50 ms window every 100 ms), so a keyboard that is awake is
+heard within its first few advertisements. After 30 seconds without the device
+the search drops to the SoftDevice default of a 312.5 ms window every 1.7
+seconds to save power, so a device that wakes later is heard within about 1.7
+seconds of starting to advertise. Both figures follow from the scan timing; the
+times from power-up and from a key press on a sleeping keyboard to the first
+keystroke on the PC are not measured yet
+([TODO.md](../TODO.md#ble-central-and-pairing)). The application does not request a new pairing
 for a background attempt (a peer's own Security Request is the exception; see
 [Connection And Security](#connection-and-security)), and a failure to find,
 connect, or secure the device is retried silently. Other failures, such as a
@@ -241,19 +256,17 @@ connect it again from a scan, or after a restart if it is one of the two most
 recently added. Forget and Factory reset also stop the retries of the slots
 they target, and remove the record.
 
-When the boot scan finishes, the screen shows the scan's device list, or the
-`No devices found` error if no device advertised the HID service. When a saved
-device connects, a list from that boot scan is replaced by Connected. An error
-stays until acknowledged with DOWN. A scan you start yourself keeps its list on
-screen even when a saved device reconnects in the background.
+The screen stays on Home until a saved device connects, then shows Connected.
+An error stays until acknowledged with DOWN. A scan you start yourself keeps its
+list on screen even when a saved device reconnects in the background.
 
 When an established link drops, for example because the peripheral went to
 sleep, anything that link was holding down on the PC is released at once, the
 slot stays reserved for the same device, and it reconnects silently once the
 device advertises again. The screen shows only the links that are actually up.
 The log shows `slot N link lost; reconnecting`, with the slot number. A link
-that drops without a disconnect is detected by the supervision timeout, 4
-seconds unless the peripheral has requested a longer one
+that drops without a disconnect is detected by the supervision timeout, which
+is never longer than 4 seconds, whatever the peripheral asks for
 ([Connection And Security](#connection-and-security)).
 
 ### Manage saved devices
@@ -373,10 +386,22 @@ covered by host tests; the tasks that perform them are in
   timeout, a 7.5 ms connection event length, and a 64-byte ATT MTU. The
   SoftDevice is configured for two central links and no advertising or
   peripheral role ([`sd_setup.rs`](../src/sd_setup.rs)).
-- A peripheral can later request other connection parameters, and the
-  vendored crate grants the request unchanged, including a longer interval or
-  a supervision timeout of up to 32 seconds
-  ([TODO.md](../TODO.md#ble-central-and-pairing)).
+- A peripheral can later ask for other connection parameters. The bridge
+  answers with the nearest values inside fixed bounds: an interval of 7.5 to
+  15 ms, a peripheral latency of at most 20 connection events, and a
+  supervision timeout of 1 to 4 seconds that always exceeds
+  `(1 + latency) × interval × 2`, as the Bluetooth Core requires. A peripheral
+  that asks only for slower intervals gets the fastest one it asked for, up to
+  30 ms, because some peripherals disconnect when given an interval outside
+  their range. A request inside the bounds is granted as asked and logged as
+  `peer connection parameters granted: …`; any other is logged as
+  `peer asked for connection parameters …; granting …`, as a warning ending in
+  `outside its interval range` when even 30 ms is too fast for it. So a held
+  key is released within 4 seconds of a link silently failing, input still
+  leaves the peripheral within one 15 ms interval (30 ms for a peripheral that
+  will not go faster), and an LED change reaches the keyboard within about
+  315 ms at 15 ms. The parameters named peripherals end up with are not
+  recorded yet ([architecture](architecture.md#peripheral-connection-parameter-requests)).
 - Pairing is Just Works with bonding: the security handler declares no input
   or output capability ([ADR 0011](adr/0011-interim-just-works-pairing.md)).
   This gives encryption but no protection against an active attacker in radio
@@ -447,17 +472,25 @@ covered by host tests; the tasks that perform them are in
 
 ### Reconnect And Link Loss
 
-- The boot plan in [`ble/reconnect.rs`](../src/ble/reconnect.rs) takes the
-  saved devices most recently added first, matches each to at most one scan
-  result, never gives one scan result to two devices, and caps the plan at two
-  slots.
+- At boot the two most recently added saved devices go to the two slots at
+  once; no scan runs first.
 - A slot that loses an established link reports it, keeps the slot reserved
   for that device, releases the link's held input, and retries every 500 ms
   after each attempt. A user command replaces the retry at any time.
-- Every bonded retry resolves the device's current address first, so a private
-  address that rotates after boot is still followed. This resolution scan
-  accepts the device even if its advertisement omits the HID UUID and does not
-  change the UI's scan results.
+- Retrying slots share one reconnect table
+  ([`ble/reconnect.rs`](../src/ble/reconnect.rs)). Whichever slot holds the
+  radio runs one passive scan for every slot's device, and a device heard for
+  the other slot is handed to it with its address and wakes it, so that slot
+  connects without a scan of its own. A handed-over address is used only
+  within 2 seconds of being heard, and once.
+- Every retry finds the device's current address first, so a private address
+  that rotates after boot is still followed. This scan accepts the device even
+  if its advertisement omits the HID UUID and does not change the UI's scan
+  results.
+- Reconnect scans listen 50 ms of every 100 ms for 30 seconds after power-up
+  or a lost link, then fall back to the default 312.5 ms of every 1.7 s.
+  Connection attempts always listen 50 ms of every 100 ms, because they start
+  right after the device was heard.
 
 ### Keyboard LEDs
 
@@ -467,12 +500,13 @@ logs `Host LEDs: num={} caps={} scroll={}`, and writes the byte to the BLE
 keyboard's own output report: the first Output report that shares the keyboard
 input's report ID in the Report Map, or, for a keyboard-only map without report
 IDs, the first Output report. Both slots watch the latest
-LED state, so it reaches the keyboard whichever slot holds it. Each slot passes
-on a change only once, and consumes it even while it holds a mouse, so a
-keyboard that reconnects after sleeping, or connects to a slot that already saw
-the latest change, shows a stale state until the host's state changes again
-([TODO.md](../TODO.md#ble-central-and-pairing)). A USB reset sends
-all LEDs off. A failed write logs `Failed to write LED state to BLE keyboard`.
+LED state, so it reaches the keyboard whichever slot holds it. When a keyboard
+connects, including one that wakes from sleep and reconnects, the bridge first
+writes the host's current state, then every change, so the keyboard shows the
+right Caps Lock and Num Lock state at once, as a wired keyboard does when it is
+plugged in. Nothing is written before the host has sent a state. A USB reset
+sends all LEDs off. A failed write logs
+`Failed to write LED state to BLE keyboard`; the next change is still written.
 
 Hardware evidence still needed for the BLE central: pairing, reconnect, LED, and
 long Report Map behavior with named peripherals, and the open authentication
@@ -538,13 +572,21 @@ supplies the report kind ([`hid/mod.rs`](../src/hid/mod.rs)):
   kind's fixed layout: exactly 8 bytes for a keyboard, 3 to 5 bytes for a
   mouse, exactly 2 bytes for consumer control. Other lengths are dropped rather
   than partially decoded.
-- A keyboard report whose reserved byte is not zero is rejected. Mouse button
-  bits above the fifth are cleared; absent wheel and pan bytes become zero.
+- A keyboard report that the peer declares as its keyboard report, through a
+  Report Reference naming the keyboard report ID of its Report Map or through
+  a Report Map that describes only a keyboard, is accepted whatever its
+  reserved second byte holds: HID 1.11 reserves that byte for OEM use and tells
+  hosts to ignore it, so the bridge discards it and sends zero to the PC. Where only the length or a
+  conventional report ID suggests a keyboard, a non-zero reserved byte is the
+  best sign that the payload is something else, and the report is rejected.
+  Mouse button bits above the fifth are cleared; absent wheel and pan bytes
+  become zero.
   Consumer usages above `0x0FFF`, the USB descriptor's maximum, are rejected.
 - With a Report Map that uses report IDs, an input must resolve to a known
   kind; an unknown ID or a malformed known report never falls back to another
-  kind. With a map without report IDs, a report is routed by length only to a
-  kind the map advertises.
+  kind. With a map without report IDs, a keyboard-only map declares its 8-byte
+  input as the keyboard report; any other map routes a report by length only to
+  a kind the map advertises.
 - With no Report Map characteristic at all, the legacy fallback routes by
   length: 8 bytes as keyboard, 3 to 5 as mouse, and 2 as consumer control below
   `0x1000`.
@@ -788,14 +830,15 @@ are open work.
 ### Host Tests And Simulation
 
 - The hardware-free modules are shared verbatim between the firmware and the
-  host library [`lib.rs`](../src/lib.rs): HID types and policies, the BLE
-  coordinator, reconnect planner, long-read assembly, management primitives,
+  host library [`lib.rs`](../src/lib.rs): HID types and policies (including
+  host-LED forwarding), the BLE coordinator, the shared reconnect table, the
+  connection parameter policy, long-read assembly, management primitives,
   advertisement parser, storage framing and record validation, power policy,
   and UI logic.
-- The source contains 232 `#[test]` functions, counted with
+- The source contains 273 `#[test]` functions, counted with
   `grep -rh '#\[test\]' src tests | wc -l`. Ten of them are in
   [`ble/scanner.rs`](../src/ble/scanner.rs), an embedded-only module that host
-  runs do not compile; the other 219 unit tests and the 3 integration tests in
+  runs do not compile; the other 260 unit tests and the 3 integration tests in
   [`tests/integration.rs`](../tests/integration.rs) run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
   `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)).
@@ -926,16 +969,15 @@ implemented, so do not describe them as features.
   with deliberate fake advertisers nearby, the device you want may be missing
   from the list; move it closer and scan again
   ([Scan list under crowding](../TODO.md#ble-central-and-pairing)).
-- **A keyboard is not ready right after power-up.** The bridge scans for 8
-  seconds before it starts reconnecting saved devices, then searches for them
-  one at a time, so a keyboard cannot type until at least 8 seconds after the
-  monitor powers the bridge. When the PC powers on at the same moment, that
-  can be too late for a firmware setup key such as F2 or Del
+- **Readiness for firmware setup keys is unmeasured.** The bridge starts
+  reconnecting saved devices at power-up and listens for them half the time,
+  but no board has yet shown that a keyboard types before a PC that powers on
+  with the monitor stops waiting for F2 or Del
   ([Keyboard ready in time for firmware setup keys](../TODO.md#ble-central-and-pairing)).
 - **Only fixed report layouts work.** NKRO keyboards, mice with 16-bit motion
   or packed buttons, and vendor-specific layouts are rejected or not
-  translated, and a keyboard that sends data in its report's reserved byte
-  types nothing
+  translated. A keyboard without a Report Map that sends data in its report's
+  reserved byte types nothing
   ([report translation](../TODO.md#hid-report-parsing-and-translation)).
 - **Some keys and details do not reach the PC.** Power, sleep, and wake keys
   that a keyboard reports as System Control are dropped, more than six keys
@@ -943,10 +985,6 @@ implemented, so do not describe them as features.
   steps without high-resolution scrolling, and neither the PC nor the bridge
   shows the battery level of a keyboard or mouse
   ([input fidelity](../TODO.md#input-fidelity)).
-- **Lock-key lights can be wrong after a reconnect.** A keyboard that
-  reconnects, for example after sleeping, can show the wrong Caps Lock and Num
-  Lock state until the lock state next changes on the PC
-  ([Send the host's lock-key state to every keyboard that connects](../TODO.md#ble-central-and-pairing)).
 - **Bridge settings are fixed in the firmware.** The display timeout and
   orientation cannot be changed on the device, there are no keyboard
   shortcuts for bridge actions, and keys cannot be remapped

@@ -5,18 +5,17 @@
 
 use core::cell::RefCell;
 
+use crate::ble::conn_params::{self, ConnParamLimits, ConnParams};
 use crate::ble::coordinator::{self, Action, ConnManager, UiEvent, MAX_CONNECTIONS};
 use crate::ble::management::Quiescence;
-use crate::ble::scanner::ScanResult;
-use crate::ble::{
-    hid_client, reconnect, scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice,
-};
+use crate::ble::scanner::{SavedPeer, ScanResult};
+use crate::ble::{hid_client, scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config;
 use crate::config::MAX_PAIRED_DEVICES;
 use crate::hid::delivery::HidEvent;
 use crate::storage::{BondInfo, PairedDevice, DEVICE_STORE};
 use defmt::{info, warn};
-use embassy_futures::select::{select, Either};
+use embassy_futures::select::{select, select3, Either, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 use embassy_time::{Duration, Timer};
@@ -28,6 +27,19 @@ use nrf_softdevice::ble::{
 use nrf_softdevice::raw;
 use nrf_softdevice::Softdevice;
 use static_cell::StaticCell;
+
+/// What the bridge grants when a peripheral asks to change the connection
+/// parameters: the configured interval range (or, for a peripheral that asks
+/// only for slower intervals, its fastest one up to 30 ms), a bounded latency,
+/// and a supervision timeout no longer than the one each link is opened with.
+const PEER_CONN_PARAM_LIMITS: ConnParamLimits = ConnParamLimits {
+    min_interval: config::BLE_CONN_INTERVAL_MIN,
+    max_interval: config::BLE_CONN_INTERVAL_MAX,
+    slow_request_max_interval: config::BLE_PEER_MAX_CONN_INTERVAL,
+    max_latency: config::BLE_MAX_PERIPHERAL_LATENCY,
+    min_supervision_timeout: config::BLE_MIN_SUP_TIMEOUT,
+    max_supervision_timeout: config::BLE_SUP_TIMEOUT,
+};
 
 /// The connection-slot state machine, specialised to the SoftDevice address
 /// type. The logic lives in (and is host-tested via)
@@ -174,6 +186,41 @@ impl SecurityHandler for Bonder {
     fn on_security_update(&self, _conn: &Connection, mode: SecurityMode) {
         info!("BLE security mode updated: {}", mode);
     }
+
+    fn conn_param_update_request(
+        &self,
+        _conn: &Connection,
+        requested: raw::ble_gap_conn_params_t,
+    ) -> raw::ble_gap_conn_params_t {
+        let asked = ConnParams {
+            min_interval: requested.min_conn_interval,
+            max_interval: requested.max_conn_interval,
+            latency: requested.slave_latency,
+            supervision_timeout: requested.conn_sup_timeout,
+        };
+        let granted = conn_params::bound_request(asked, &PEER_CONN_PARAM_LIMITS);
+        if granted == asked {
+            info!("peer connection parameters granted: {}", granted);
+        } else if conn_params::interval_within_request(asked, granted) {
+            info!(
+                "peer asked for connection parameters {}; granting {}",
+                asked, granted
+            );
+        } else {
+            // Some peripherals disconnect when the interval is outside the
+            // range they asked for; the compatibility baseline needs to see it.
+            warn!(
+                "peer asked for connection parameters {}; granting {}, outside its interval range",
+                asked, granted
+            );
+        }
+        raw::ble_gap_conn_params_t {
+            min_conn_interval: granted.min_interval,
+            max_conn_interval: granted.max_interval,
+            slave_latency: granted.latency,
+            conn_sup_timeout: granted.supervision_timeout,
+        }
+    }
 }
 
 /// The single BLE bonder/security handler, shared by every connection slot.
@@ -234,59 +281,27 @@ pub async fn ble_task(
 
     // Auto-reconnect the most recently added devices (up to the number of
     // connection slots) so a keyboard + mouse pair both come back after a
-    // reboot without manual re-selection.
-    let peers: Vec<(DiscoveredDevice, Option<BondInfo>), MAX_CONNECTIONS> = {
+    // reboot without manual re-selection. Start at once, without a full scan
+    // first: each slot's reconnect scan resolves a rotating private address
+    // itself, and one slot's scan also finds the other slot's device, so the
+    // keyboard can type as soon as it advertises.
+    let peers: Vec<DiscoveredDevice, MAX_CONNECTIONS> = {
         let store = DEVICE_STORE.lock().await;
-        let mut v = Vec::new();
-        for paired in store.iter_recent().take(MAX_CONNECTIONS) {
-            let device = DiscoveredDevice {
+        store
+            .iter_recent()
+            .take(MAX_CONNECTIONS)
+            .map(|paired| DiscoveredDevice {
                 address: paired.address,
                 name: paired.name.clone(),
                 rssi: paired.last_rssi,
-            };
-            let _ = v.push((device, paired.bond));
-        }
-        v
+            })
+            .collect()
     };
-
-    if !peers.is_empty() {
-        // Devices that use a rotating Resolvable Private Address advertise under
-        // a random address that differs from the one stored at pairing time, so
-        // a whitelist connect to the stored address would never match. Scan
-        // first and resolve each stored peer's IRK against the live
-        // advertisements so we reconnect to its *current* address.
-        let scan = scanner::scan(sd, event_tx).await.ok();
-        let scanned: &[DiscoveredDevice] =
-            scan.as_ref().map(|s| s.devices.as_slice()).unwrap_or(&[]);
-
-        let targets = reconnect::resolve_reconnect_targets(peers.len(), scanned.len(), |p, s| {
-            let (stored, bond) = &peers[p];
-            let advertised = scanned[s].address;
-            // Resolve a rotating RPA by IRK, or match a stable address directly.
-            bond.map(|b| b.peer_id.is_match(advertised))
-                .unwrap_or(false)
-                || stored.address == advertised
-        });
-
-        for (slot, target) in targets.iter().enumerate() {
-            let (stored, _) = &peers[target.peer];
-            let device = match target.scanned {
-                // Connect to the live (resolved) address, keeping the stored name.
-                Some(i) => DiscoveredDevice {
-                    address: scanned[i].address,
-                    name: stored.name.clone(),
-                    rssi: scanned[i].rssi,
-                },
-                // Not seen this scan — fall back to the stored address.
-                None => stored.clone(),
-            };
-            manager.reserve_slot(slot, &device);
-            // A paired device that's asleep or off right now will advertise
-            // once it wakes, so keep trying rather than failing once.
-            send_slot_cmd(slot, SlotCommand::Reconnect(device), slot0_tx, slot1_tx).await;
-        }
-
-        last_scan = scan;
+    for (slot, device) in peers.into_iter().enumerate() {
+        manager.reserve_slot(slot, &device);
+        // A paired device that's asleep or off right now will advertise
+        // once it wakes, so keep trying rather than failing once.
+        send_slot_cmd(slot, SlotCommand::Reconnect(device), slot0_tx, slot1_tx).await;
     }
 
     // The coordinator below is a thin interpreter: it asks the pure
@@ -576,20 +591,27 @@ pub async fn connection_slot_task(
             (None, None) => cmd_rx.receive().await,
             // Between attempts, stay responsive: any command from the
             // coordinator replaces the retry.
+            // The other slot's scan may see this slot's device first; it
+            // wakes the slot so it connects without waiting out the pause.
             (None, Some(device)) => {
                 let backoff = Timer::after(Duration::from_millis(config::BLE_RECONNECT_BACKOFF_MS));
-                match select(cmd_rx.receive(), backoff).await {
-                    Either::First(SlotCommand::Disconnect) => {
+                match select3(cmd_rx.receive(), backoff, scanner::reconnect_sighted(slot)).await {
+                    Either3::First(SlotCommand::Disconnect) => {
+                        scanner::clear_reconnect(slot);
                         // The coordinator still counts this slot as reserved;
                         // tell it the slot is free now that retrying stopped.
                         slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
                         continue;
                     }
-                    Either::First(cmd) => cmd,
-                    Either::Second(()) => SlotCommand::Reconnect(device),
+                    Either3::First(cmd) => cmd,
+                    Either3::Second(()) | Either3::Third(()) => SlotCommand::Reconnect(device),
                 }
             }
         };
+        // Only a background retry keeps this slot's reconnect target.
+        if !matches!(cmd, SlotCommand::Reconnect(_)) {
+            scanner::clear_reconnect(slot);
+        }
 
         let (mut device, silent) = match cmd {
             SlotCommand::Connect(device) => (device, false),
@@ -607,25 +629,30 @@ pub async fn connection_slot_task(
         };
 
         if silent {
-            if let Some(bond) = bonder().bond_for_address(device.address) {
-                // RPA rotation can happen at any time, not just at boot. A
-                // whitelist retry against the previous address never recovers.
-                match select(
-                    cmd_rx.receive(),
-                    scanner::resolve_bonded_peer(sd, &bond.peer_id),
-                )
-                .await
-                {
-                    Either::First(next) => {
-                        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-                        pending_cmd = Some(next);
-                        continue;
-                    }
-                    Either::Second(Some(address)) => device.address = address,
-                    Either::Second(None) => {
-                        retry = Some(device);
-                        continue;
-                    }
+            // RPA rotation can happen at any time, not just at boot. A
+            // whitelist retry against the previous address never recovers, so
+            // find the device's live address first. A record saved without a
+            // bond is matched by its stored address.
+            scanner::register_reconnect(
+                slot,
+                SavedPeer {
+                    address: device.address,
+                    identity: bonder()
+                        .bond_for_address(device.address)
+                        .map(|bond| bond.peer_id),
+                },
+            );
+            match select(cmd_rx.receive(), scanner::find_saved_peer(sd, slot)).await {
+                Either::First(next) => {
+                    scanner::clear_reconnect(slot);
+                    slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                    pending_cmd = Some(next);
+                    continue;
+                }
+                Either::Second(Some(address)) => device.address = address,
+                Either::Second(None) => {
+                    retry = Some(device);
+                    continue;
                 }
             }
         }
@@ -657,8 +684,11 @@ pub async fn connection_slot_task(
                 retry = Some(device);
             }
             // Not found in this attempt's window (or the link couldn't be
-            // secured): nothing new to report, try again.
+            // secured): nothing new to report, try again. Meanwhile the other
+            // slot's scans ignore this device for a while, in case it
+            // advertises but will not connect.
             SlotOutcome::Failed(BleErrorTag::ConnectFailed) if silent => {
+                scanner::reconnect_attempt_failed(slot);
                 retry = Some(device);
             }
             SlotOutcome::Failed(tag) => {
@@ -672,6 +702,9 @@ pub async fn connection_slot_task(
                     pending_cmd = Some(next_cmd);
                 }
             }
+        }
+        if retry.is_none() {
+            scanner::clear_reconnect(slot);
         }
     }
 }
@@ -732,6 +765,11 @@ async fn connect_and_run_secure(
             // Bounded, so an absent peer can't hold the radio (and every other
             // scan/connect) forever. Units of 10 ms.
             timeout: config::BLE_CONNECT_TIMEOUT_SECS * 100,
+            // The device was just chosen from a scan or seen by a reconnect
+            // scan, so it is advertising now: listen often enough to catch
+            // its next advertisement.
+            interval: config::BLE_FAST_SCAN_INTERVAL,
+            window: config::BLE_FAST_SCAN_WINDOW,
             ..Default::default()
         },
         conn_params: raw::ble_gap_conn_params_t {
@@ -790,6 +828,9 @@ async fn connect_and_run_secure(
         }
     };
 
+    // The device is connected: other slots' reconnect scans must stop
+    // claiming its advertisements.
+    scanner::clear_reconnect(slot);
     slot_event_tx
         .send(SlotEvent::Connected {
             slot,

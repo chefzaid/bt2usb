@@ -201,26 +201,47 @@ currently unauthenticated Just Works bonding; see
       shows `Host LEDs: num=… caps=… scroll=…`. The bridge must have logged
       `Found keyboard LED output report` when the keyboard connected; a failed
       write logs `Failed to write LED state to BLE keyboard`.
+- [ ] **Lock keys after a reconnect:** turn Caps Lock on, then leave the
+      keyboard idle until it sleeps (or switch it off and on). Wake it with a
+      key other than a lock key. Once it reconnects, its Caps Lock LED is lit
+      again without pressing anything, because the bridge writes the host's
+      current state to every keyboard link when it starts.
+- [ ] **Connection parameters:** for each peripheral, record the
+      `peer connection parameters granted: …` or
+      `peer asked for connection parameters …; granting …` lines, if any.
+      Typing, mouse movement, and the Caps Lock LED stay responsive afterwards,
+      and the link stays up for at least five minutes; a warning ending in
+      `outside its interval range` names a peripheral that may disconnect.
 - [ ] **Reboot reconnect:** press the DK's reset button. Both devices come
-      back without re-pairing. The log shows a `slot N connecting to NAME` line
-      for each; connection procedures run one at a time.
+      back without re-pairing and without a scan screen. The log shows a
+      `slot N connecting to NAME` line for each, and possibly
+      `slot N scan found slot M's device` when one slot heard the other's
+      device first; connection procedures run one at a time.
 - [ ] **Sleep reconnect:** leave the keyboard idle until it sleeps (or switch
       it off), then press a key (or switch it on). The log shows
       `slot N link lost; reconnecting`, then it reconnects by itself and
       typing works. Nothing needs pressing on bt2usb.
 - [ ] **Absent at boot:** switch the keyboard off, reset the board, wait
-      30 s, and switch the keyboard on. It connects by itself.
+      30 s, and switch the keyboard on. It connects by itself. Repeat with the
+      mouse off instead: the keyboard connects and types within a few seconds
+      of the reset, without waiting for the mouse.
+- [ ] **Saved device that will not connect:** pair the saved mouse with
+      another computer (or clear its pairings) so it advertises but refuses
+      the bridge, switch the keyboard off, reset the board, and switch the
+      keyboard on. The log repeats `slot N failed to secure BLE link` or
+      failed attempts for the mouse, and the keyboard still connects within
+      a few seconds of advertising. Record the time.
 - [ ] **No stuck keys:** hold a key down, and while holding it switch the
       keyboard off (or pull its battery). Within about 4 s the key stops
       repeating on the PC. The 4 s is the BLE supervision timeout
-      (`BLE_SUP_TIMEOUT`); when the link closes, the bridge releases
-      everything that slot was holding.
+      (`BLE_SUP_TIMEOUT`), which a peripheral cannot lengthen; when the link
+      closes, the bridge releases everything that slot was holding.
 - [ ] **No stuck mouse/media input:** repeat link-loss tests while holding a
       mouse button and a consumer-control key. Record release latency.
 - [ ] **Scan while reconnecting:** with one device switched off (so its slot
       is retrying), press SELECT to scan. The scan still runs after queued radio
       procedures complete and lists nearby devices. Record the observed delay;
-      each connection/resolution scan has a 6-second timeout
+      each connection attempt and reconnect scan has a 6-second timeout
       (`BLE_CONNECT_TIMEOUT_SECS`), retries pause 500 ms between attempts, and
       contention between slots can add to the total wait.
 - [ ] **Stack:** after all of the above, the latest `stack high-water` line is
@@ -257,6 +278,13 @@ connected for logs.
 - [ ] **BIOS / boot menu:** reboot the PC and enter its firmware setup with
       the BLE keyboard. This works once the keyboard has reconnected after the
       board powers up, which is when the monitor powers its hub.
+- [ ] **Cold start:** with the PC and the monitor both off and the keyboard
+      awake, power them on together (or let the PC's power-on switch the hub
+      on), and press the firmware setup key (F2, Del, or the PC's own) about
+      twice a second from power-on. Firmware setup opens. Record the time from
+      power-on to the keyboard's `slot N connecting to NAME` and
+      `HID notification loop started` lines, and repeat with the mouse switched
+      off.
 - [ ] **Monitor off and on:** turn the monitor off and on. The board
       power-cycles with the hub, then the devices reconnect by themselves.
 - [ ] **Unit identity:** record the 16-character USB serial. It remains the same

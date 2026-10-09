@@ -9,6 +9,7 @@ pub mod aggregate;
 pub mod coalesce;
 pub mod consumer;
 pub mod delivery;
+pub mod host_leds;
 pub mod keyboard;
 pub mod mouse;
 pub mod report_protocol;
@@ -50,11 +51,23 @@ impl HidReport {
     }
 }
 
+/// How a report's kind was established, which decides how strictly its
+/// payload is checked.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum KindSource {
+    /// The peer declares it: a Report Reference or the Report Map names the
+    /// report's kind.
+    Declared,
+    /// The bridge infers it from a conventional report ID (1, 2, 3) or from
+    /// the payload length, with nothing from the peer to confirm it.
+    Inferred,
+}
+
 pub fn classify_report(report_id: u8, data: &[u8]) -> Option<HidReport> {
     match report_id {
-        1 => parse_by_kind(ReportKind::Keyboard, data),
-        2 => parse_by_kind(ReportKind::Mouse, data),
-        3 => parse_by_kind(ReportKind::Consumer, data),
+        1 => parse_by_kind(ReportKind::Keyboard, data, KindSource::Inferred),
+        2 => parse_by_kind(ReportKind::Mouse, data, KindSource::Inferred),
+        3 => parse_by_kind(ReportKind::Consumer, data, KindSource::Inferred),
         _ => infer_from_length(data),
     }
 }
@@ -73,11 +86,22 @@ pub fn classify_notification_with_hint(
             // Descriptor IDs are device-defined, not conventional 1/2/3 IDs.
             // Unknown IDs or malformed known reports must not become another
             // endpoint's input through a length-based fallback.
-            return parse_by_kind(desc.report_kind_for_id(report_id)?, payload);
+            return parse_by_kind(
+                desc.report_kind_for_id(report_id)?,
+                payload,
+                KindSource::Declared,
+            );
         }
 
-        // No prefix is declared. Only route to a kind actually advertised;
-        // having no report IDs alone does not imply the boot report layout.
+        // No prefix is declared. A map whose only input is a keyboard declares
+        // that this is the keyboard report, as it does for the LED output
+        // report (`subscribe_all` in `ble/hid_client.rs`).
+        if desc.has_keyboard && !desc.has_mouse && !desc.has_consumer {
+            return parse_by_kind(ReportKind::Keyboard, data, KindSource::Declared);
+        }
+
+        // Otherwise only route to a kind actually advertised; having no report
+        // IDs alone does not imply the boot report layout.
         let report = classify_report(0, data)?;
         return match report {
             HidReport::Keyboard(_) if desc.has_keyboard => Some(report),
@@ -99,7 +123,7 @@ pub fn classify_notification_with_hint(
 /// report-ID prefix, so the kind comes from the characteristic's descriptor
 /// rather than from the payload.
 pub fn classify_known(kind: ReportKind, data: &[u8]) -> Option<HidReport> {
-    parse_by_kind(kind, data)
+    parse_by_kind(kind, data, KindSource::Declared)
 }
 
 /// Classify a HID-over-GATT Report characteristic value. GATT values never
@@ -123,13 +147,17 @@ pub fn classify_gatt_notification(
     }
 }
 
-fn parse_by_kind(kind: ReportKind, data: &[u8]) -> Option<HidReport> {
+fn parse_by_kind(kind: ReportKind, data: &[u8], source: KindSource) -> Option<HidReport> {
     // These decoders support only fixed byte-aligned layouts. Silently taking
     // the first bytes of NKRO/16-bit-axis reports generates unintended input.
     match (kind, data.len()) {
-        (ReportKind::Keyboard, keyboard::KEYBOARD_REPORT_SIZE) => {
-            keyboard::KeyboardReport::from_ble_bytes(data).map(HidReport::Keyboard)
+        (ReportKind::Keyboard, keyboard::KEYBOARD_REPORT_SIZE) => match source {
+            // The peer named this its keyboard report, so the OEM-reserved
+            // byte is ignored as HID 1.11 requires.
+            KindSource::Declared => keyboard::KeyboardReport::from_identified_bytes(data),
+            KindSource::Inferred => keyboard::KeyboardReport::from_ble_bytes(data),
         }
+        .map(HidReport::Keyboard),
         (ReportKind::Mouse, 3..=mouse::MOUSE_REPORT_SIZE) => {
             mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse)
         }

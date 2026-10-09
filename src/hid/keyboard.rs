@@ -37,20 +37,31 @@ impl KeyboardReport {
         }
     }
 
-    /// Parse from raw BLE HID notification bytes.
+    /// Parse a payload that only its length or a conventional report ID
+    /// marks as a keyboard report, rejecting it unless the reserved byte is
+    /// zero.
     ///
-    /// BLE HID boot-protocol keyboard reports are identical in layout
-    /// to USB boot-protocol reports, so this is a direct copy.
+    /// Without a Report Reference or Report Map, a non-zero second byte is
+    /// the best sign that an 8-byte payload is some other report, so the
+    /// legacy classification paths keep this check.
     pub fn from_ble_bytes(data: &[u8]) -> Option<Self> {
+        Self::from_identified_bytes(data).filter(|_| data[1] == 0)
+    }
+
+    /// Parse a payload that the peer's Report Reference or Report Map
+    /// identifies as its keyboard report.
+    ///
+    /// BLE HID boot-layout keyboard reports are identical to USB boot-protocol
+    /// reports, so this is a direct copy, except for the reserved byte: HID
+    /// 1.11 (appendix B.1) reserves it for OEM use and tells hosts to ignore
+    /// it, so its value is discarded and the report carries zero.
+    pub fn from_identified_bytes(data: &[u8]) -> Option<Self> {
         if data.len() < KEYBOARD_REPORT_SIZE {
-            return None;
-        }
-        if data[1] != 0 {
             return None;
         }
         Some(Self {
             modifier: data[0],
-            reserved: data[1],
+            reserved: 0,
             keycodes: [data[2], data[3], data[4], data[5], data[6], data[7]],
         })
     }

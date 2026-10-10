@@ -361,10 +361,10 @@ pull request #9 fails embedded Clippy today.
   `0x01`, fail-closed load, the legacy parser, three write attempts, and
   erase-then-write recovery, on `sequential-storage` 7.2.0 with `NoCache`.
 - **Software-verified:** nothing of this proposal. Today 8 framing, 3 record,
-  and 27 device-list host tests (`storage/devices_tests.rs` and
+  and 30 device-list host tests (`storage/devices_tests.rs` and
   `devices_format_tests.rs`: valid, legacy,
-  malformed, and unreadable loads, merge, eviction, Forget and reset
-  candidates, codec) and the `commit` tests in `ble/management.rs`; nothing
+  malformed, and unreadable loads, merge, identity types, eviction, Forget
+  and reset candidates, codec) and the `commit` tests in `ble/management.rs`; nothing
   tests the flash shell, a cut write, collection, or recovery
   ([testing](../testing.md#modules-without-host-tests)).
 - **Hardware-verified:** not yet. No board record covers persistence across a

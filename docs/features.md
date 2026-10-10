@@ -188,7 +188,8 @@ pending stays on screen when the request times out.
 4. To add a second device, press SELECT on Connected, then choose the other
    device. Both links stay up and the screen shows `2 devices`.
 5. The device is saved when its link comes up. It reconnects automatically
-   after a restart and after it sleeps.
+   after a restart and after it sleeps, unless the bridge showed
+   `Pairing not saved` for it ([notices and errors](#notices-and-errors)).
 
 Some details matter in daily use:
 
@@ -337,7 +338,7 @@ otherwise Home. SELECT on an error starts a new scan instead.
 | `HID map too large` | The device is not supported |
 | `Unsupported HID map` | The device's report layout is not supported |
 | `Storage failed` | See [Pairing Storage](#pairing-storage); Factory reset recovers an unreadable store |
-| `Pairing not saved` | The device works until it disconnects but was saved without its keys, because it named an identity the bridge cannot store; it pairs again on its next connection. If it repeats, record the log and report the device |
+| `Pairing not saved` | The device named an identity the bridge cannot store, so its new keys were not saved. It works until it disconnects but does not reconnect by itself; to use it again, select it from a scan, which pairs it again. If the message repeats, record the log and report the device |
 | `Action failed; retry` | Reopen saved devices; the device was already removed |
 | `Busy; try again` | Wait a moment and retry |
 | `Device changed; retry` | Reopen saved devices |

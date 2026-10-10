@@ -327,12 +327,16 @@ async fn execute_action(
         Action::PersistDevice(device) => {
             let mut store = DEVICE_STORE.lock().await;
             let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
-            paired.bond = bonder().bond_for_address(device.address);
+            let bond = bonder().bond_for_address(device.address);
+            paired.bond = bond;
             if store.add(paired).is_err() {
-                // Drop the refused keys from the security handler too, so the
-                // peer pairs again on its next connection, as it must after a
-                // reboot, and the user learns the pairing was not kept.
-                bonder().forget(device.address);
+                // Drop exactly the refused keys from the security handler too,
+                // so it holds what flash will hold after a reboot: once this
+                // link ends, background reconnects fail (they never pair) until
+                // the user connects the device from a scan.
+                if let Some(bond) = bond {
+                    bonder().forget_bond(&bond);
+                }
                 event_tx
                     .send(BleEvent::Error(BleErrorTag::BondRefused))
                     .await;

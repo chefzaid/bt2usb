@@ -72,7 +72,8 @@ path and is a follow-up.
   [code quality guide](../code-quality.md#panic-paths-no-lint-flags) lists
   every unlinted panic construct in the application and every panic path in
   the compiled vendored modules, each with the reason it cannot fire or, for
-  `Address::address_type`, the open FIXME that tracks it. A change
+  `Address::address_type`, the open FIXME that tracks it (closed on
+  2026-10-10; see Follow-ups). A change
   that adds one updates the list ([review checklist](../code-quality.md#review-checklist)).
 - **Check configuration at compile time where Rust allows it.** The link-count
   conversion and the record-size and event-size checks are `const`

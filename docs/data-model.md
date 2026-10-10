@@ -67,7 +67,7 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 8 host tests | None recorded |
 | Record prefix and bond-flag validation | [storage/record.rs](../src/storage/record.rs) | 3 host tests | None recorded |
 | Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
-| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 12 merge, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
+| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 15 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
 | Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
@@ -307,9 +307,17 @@ which then erases pages 240–243 before writing an empty frame. Ordinary saves 
   `Address::address_type`, which panics on one; `DeviceList::add` drops a
   private or anonymous identity the same way. The shell logs
   `Bond refused: identity address is not public or random static; stored without keys`,
-  `execute_action` drops the keys from `Bonder` so the peer pairs again on
-  its next connection, as it must after a reboot, and raises
-  `BleEvent::Error(BondRefused)`.
+  `execute_action` drops exactly those keys from `Bonder` (`forget_bond`),
+  so RAM holds what flash will hold after a reboot, and raises
+  `BleEvent::Error(BondRefused)`. A bond already stored for the same peer
+  stays in flash and is loaded again at the next boot. Once the link ends,
+  background reconnects fail, because they never pair and a record without
+  keys is matched only by its exact address, which a rotating private
+  address soon leaves; the user selects the device from a scan to pair it
+  again. If the device's own address had a reserved type, which the
+  SoftDevice does not report, nothing is stored
+  (`Paired device address has a reserved type; not stored`) and the same
+  error is raised.
 - Forget and Factory reset stop affected workers, build a candidate store,
   write it, and only then replace the in-memory cache and update the SoftDevice
   bonder (`management::commit`). A failed write leaves cached records and bonds
@@ -637,7 +645,7 @@ display line holds. How errors propagate is in
 | `HidNotFound` | GATT discovery of the HID service failed or found no Report characteristic (`discover_and_subscribe`) | `No HID service` |
 | `NotifyFailed` | No input report characteristic could be subscribed | `Notify failed` |
 | `StorageFailed` | The store was unreadable or invalid at boot; saving a device after a connection failed, including every save while the store is read-only; a Forget or Factory reset could not be persisted. Every `StoreError` maps here | `Storage failed` |
-| `BondRefused` | A pairing's bond names an identity that is not a public or random static address, so the device was stored without keys ([write rules](#write-rules)) | `Pairing not saved` |
+| `BondRefused` | A pairing's bond names an identity that is not a public or random static address, so its new keys were not stored; or (which the SoftDevice does not cause) the connected device's own address has a reserved type and nothing was stored ([write rules](#write-rules)) | `Pairing not saved` |
 | `ManagementFailed` | Forget named an identity that `DeviceStore::find` no longer matches | `Action failed; retry` |
 | `ReportMapReadFailed` | The Report Map read returned an error, the ATT MTU is outside the 23–517 bytes the long-read assembler accepts, or a fragment or the end of the value was malformed | `HID map read failed` |
 | `ReportMapTooLarge` | The Report Map is longer than 512 bytes | `HID map too large` |

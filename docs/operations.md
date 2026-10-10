@@ -337,7 +337,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `Added paired device - now storing {}` | New peer cached | A save follows |
 | info | `Updated existing paired device` | Address, name, or keys changed | A save follows |
 | warn | `Paired device store full - evicting oldest entry` | A fifth peer replaced the oldest-added one | Expected at capacity (4) |
-| warn | `Bond refused: identity address is not public or random static; stored without keys` | The peer named a private, anonymous, or reserved identity address during pairing; the device was stored without keys, its keys dropped, and the OLED shows `Pairing not saved` | Record the peripheral and report it; it pairs again on each connection |
+| warn | `Bond refused: identity address is not public or random static; stored without keys` | The peer named a private, anonymous, or reserved identity address during pairing; its new keys were not stored and were dropped from the security handler, and the OLED shows `Pairing not saved` | Record the peripheral and report it. Once the link ends, background reconnects fail with `slot {} failed to secure BLE link`; select the device from a scan to pair it again |
 | error | `Paired device address has a reserved type; not stored` | Should be impossible: the SoftDevice gives every link a defined address type | Report as a defect |
 | info | `Saved {} devices to flash` | The store was written | None |
 | warn | `Flash write busy (attempt {}), retrying` | A write attempt failed; retried after 20 ms | [Flash incident](#flash-writes-report-busy-or-fail) |
@@ -369,7 +369,7 @@ message:
 | `No HID service`, `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `HID map read failed`, `HID map too large`, `Unsupported HID map` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `Storage failed` | [Storage](#storage-unreadable-and-writes-disabled) and [flash](#flash-writes-report-busy-or-fail) incidents |
-| `Pairing not saved` | Record the peripheral and the `Bond refused` log line and report it; the device keeps working until it disconnects, then pairs again |
+| `Pairing not saved` | Record the peripheral and the `Bond refused` log line and report it; the device keeps working until it disconnects and then does not reconnect by itself; select it from a scan to pair it again |
 | `Action failed; retry` | Reopen the saved-device list and retry |
 | `Busy; try again` | Wait a few seconds and retry |
 | `Device changed; retry` | Reopen the saved-device list |
@@ -457,10 +457,8 @@ handler (`Softdevice assertion failed:` or `Softdevice memory access
 violation.`). The panic lists
 ([application](code-quality.md#panic-paths-no-lint-flags) and
 [vendored](code-quality.md#vendored-nrf-softdevice)) name every panic path the
-code review found and why it should not fire. The one exception is open: a
-peer that sends a reserved identity address type during pairing panics the
-bond save (the FIXME in [TODO.md](../TODO.md#fixme)). Any other panic at
-runtime means one of those reasons is wrong; quote the message in the report.
+code review found and why it should not fire. Any panic at runtime means one
+of those reasons is wrong; quote the message in the report.
 There is no watchdog, so the core stays stopped. A USB host
 generally keeps the last report it received from a device that stops
 responding, which is why a held key can keep repeating.

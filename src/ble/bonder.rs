@@ -77,6 +77,13 @@ impl Bonder {
             .retain(|bond| !bond.peer_id.is_match(address));
     }
 
+    /// Drop exactly `bond`. [`Self::forget`] drops every bond whose key matches
+    /// an address, and peers that distributed no IRK all hold the all-zero
+    /// key, which resolves any private address built from it.
+    pub(crate) fn forget_bond(&self, bond: &BondInfo) {
+        self.peers.borrow_mut().retain(|kept| kept != bond);
+    }
+
     pub(crate) fn clear(&self) {
         self.peers.borrow_mut().clear();
     }

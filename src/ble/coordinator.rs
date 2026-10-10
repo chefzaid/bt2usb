@@ -31,7 +31,8 @@ pub enum ErrorTag {
     NotifyFailed,
     StorageFailed,
     /// A pairing's bond names an identity address the store cannot keep (not
-    /// public or random static); the device was stored without keys.
+    /// public or random static), so its new keys were not stored; or the
+    /// device's own address has a reserved type and nothing was stored.
     BondRefused,
     ManagementFailed,
     ReportMapReadFailed,

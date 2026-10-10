@@ -421,8 +421,8 @@ which can be too late for a firmware setup key.
     connection summary. The UI shows Connected after the flash write finishes;
     a failed write shows "Storage failed" while the link stays up. A bond whose
     identity is not a public or random static address is not stored: the
-    device is saved without keys, `Bonder` drops them, and the UI shows
-    "Pairing not saved" ([write rules](data-model.md#write-rules)).
+    device is saved without the new keys, `Bonder` drops them, and the UI
+    shows "Pairing not saved" ([write rules](data-model.md#write-rules)).
 11. The worker enters the notification loop (`"HID notification loop started"`),
     described in [one input report](#one-input-report-from-ble-to-usb).
 
@@ -1173,8 +1173,7 @@ Data from a BLE peer, the USB host, or flash must not be able to reach a
 panic. Since 2026-10-10 Clippy rejects indexing, slicing, `unwrap`, `expect`,
 and the panic macros outside tests, and the
 [code quality guide](code-quality.md#panic-paths-no-lint-flags) lists every
-remaining panic path, application and vendored, with the reason it cannot fire,
-except one open vendored panic
+remaining panic path, application and vendored, with the reason it cannot fire
 ([ADR 0025](adr/0025-panic-lints-and-inventory.md)). What remains:
 
 - `Softdevice::enable` when the RAM reservation is too small (`"too little RAM

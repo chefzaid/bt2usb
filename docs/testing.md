@@ -705,6 +705,32 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-10
+
+This record covers the FIXME fixes of 2026-10-10, from "Decide the keyboard
+report in one place" (`e1447c7`) through "Set the sighting lifetime in
+config.rs" (`6e1b8b4`): the keyboard-only Report Map rule in one place, the
+connectable-only reconnect scan, the reconnect wakes and saved-device identity
+in the pure table, the simplified connection-parameter helpers, the sighting
+lifetime in `config.rs`, and the tests and documentation fixes listed under
+[FIXME](../TODO.md#fixme). The checks ran locally on Linux in a container, on
+the tree at `6e1b8b4`; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 291 unit tests and 3 integration tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 97.59% of lines, 98.17% of regions, 98.67% of functions |
+| Clippy with warnings denied | Host tests, embedded, simulation | Passed |
+| Formatting and host API documentation | `cargo fmt --package bt2usb -- --check`; rustdoc with warnings denied | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five ([commands](code-quality.md#documentation-comments)) |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A` on the release ELF: with `DEFMT_LOG=debug` (the `.cargo/config.toml` default), `.text` 110,812 bytes, `.rodata` 11,688, `.data` 1,624, `.bss` 23,300, `.uninit` 1,024; with `DEFMT_LOG=info`, the release setting, `.text` 109,584 bytes and the other sections unchanged |
+| Release helper policy/integrity tests | Python 3.13, Linux | Passed: 12 tests |
+| Local Markdown links and anchors | Script over every tracked `.md` file | Passed: 1,968 links in 35 files |
+| Headless Renode scenario | — | Not run locally: Renode is not installed in this environment; the scenario does not include the SoftDevice, so it would not exercise the reconnect changes |
+| Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change |
+| Hosted CI | GitHub Actions | Passed on `6e1b8b4` ([run 38064576663](https://github.com/chefzaid/bt2usb/actions/runs/38064576663)) and on every earlier commit in the range that was not superseded by a newer push |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the reconnect handover, the connectable-only scan, and the LED start state need the board checks in the [first-flash checklist](first-flash.md) |
+
 ## Validation Record — 2026-10-09
 
 This record covers the commit that adds the shared reconnect scan
@@ -719,7 +745,7 @@ working tree just before that commit; nothing ran on a board.
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 260 unit tests and 3 integration tests |
 | Clippy with warnings denied | Host tests, embedded, simulation | Passed |
 | Formatting and host API documentation | `cargo fmt --package bt2usb -- --check`; rustdoc with warnings denied | Passed |
-| Release bridge and self-test builds | Rust 1.95.0, ARM target | Passed; `.text` 111,616 bytes, `.bss` 23,476 bytes, read from the release ELF's section headers |
+| Release bridge and self-test builds | Rust 1.95.0, ARM target | Passed; `.text` 111,616 bytes, `.bss` 23,476 bytes, read from the release ELF's section headers, with the default `DEFMT_LOG=debug` (the level was not recorded at the time; a rebuild of that commit on 2026-10-10 reproduced these figures at `debug` and gave `.text` 110,400 bytes at `info`) |
 | Simulation build | Rust 1.95.0, ARM target | Passed |
 | Release helper policy/integrity tests | Python 3.13, Linux | Passed: 12 tests |
 | Local Markdown links and anchors | Script over every tracked `.md` file | Passed |

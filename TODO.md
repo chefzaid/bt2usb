@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 17 | 2 | 0 |
+| [FIXME](#fixme) | 18 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **93** | **84** | **22** |
+| **Total** | **94** | **83** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -226,12 +226,14 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   is granted it inside its range. Fixed: both name the two cases, and host
   tests now pin the 7.5 ms case as flagged and the 30 ms case as inside its
   range.
-- [ ] **P3** **The recorded firmware size omits `DEFMT_LOG` and is stale.**
-  The [2026-10-09 validation record](docs/testing.md#validation-record--2026-10-09) gives
+- [x] **P3** **The recorded firmware size omitted `DEFMT_LOG` and was stale.**
+  The [2026-10-09 validation record](docs/testing.md#validation-record--2026-10-09) gave
   `.text` and `.bss` for the release build without the log level, which
   [code quality](docs/code-quality.md#measuring) requires, and the code has
-  changed since. Close when the figures are measured at the current head and
-  name `DEFMT_LOG` for each.
+  changed since. Fixed: that record now names `debug`, and the
+  [2026-10-10 validation record](docs/testing.md#validation-record--2026-10-10)
+  gives every loaded section at `6e1b8b4` for both `debug` and `info`
+  (`.text` 110,812 and 109,584 bytes).
 
 ## Needs Your Input
 

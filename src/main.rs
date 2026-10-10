@@ -64,6 +64,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use nrf_softdevice::SocEvent;
 
+use crate::ble::coordinator::MAX_CONNECTIONS;
 use crate::ble::multi_conn::{self, SlotCommand, SlotEvent};
 use crate::ble::{BleCommand, BleEvent};
 use crate::hid::delivery::HidEvent;
@@ -82,11 +83,9 @@ static BLE_CMD_CHANNEL: Channel<CriticalSectionRawMutex, BleCommand, 4> = Channe
 /// BLE → UI events (device found, connected, error).
 static BLE_EVENT_CHANNEL: Channel<CriticalSectionRawMutex, BleEvent, 8> = Channel::new();
 
-/// Coordinator -> BLE slot 0 command channel.
-static BLE_SLOT0_CMD_CHANNEL: Channel<CriticalSectionRawMutex, SlotCommand, 2> = Channel::new();
-
-/// Coordinator -> BLE slot 1 command channel.
-static BLE_SLOT1_CMD_CHANNEL: Channel<CriticalSectionRawMutex, SlotCommand, 2> = Channel::new();
+/// Coordinator -> BLE slot command channels, one per link, indexed by slot.
+static BLE_SLOT_CMD_CHANNELS: [Channel<CriticalSectionRawMutex, SlotCommand, 2>; MAX_CONNECTIONS] =
+    [const { Channel::new() }; MAX_CONNECTIONS];
 
 /// BLE slot workers -> coordinator event channel.
 static BLE_SLOT_EVENT_CHANNEL: Channel<CriticalSectionRawMutex, SlotEvent, 8> = Channel::new();
@@ -121,31 +120,19 @@ async fn ble_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
         sd,
         &BLE_CMD_CHANNEL.receiver(),
         &BLE_EVENT_CHANNEL.sender(),
-        &BLE_SLOT0_CMD_CHANNEL.sender(),
-        &BLE_SLOT1_CMD_CHANNEL.sender(),
+        &BLE_SLOT_CMD_CHANNELS.each_ref().map(Channel::sender),
         &BLE_SLOT_EVENT_CHANNEL.receiver(),
     )
     .await
 }
 
-#[embassy_executor::task]
-async fn ble_slot0_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
+/// One connection worker per link; `main` spawns one for each slot.
+#[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
+async fn ble_slot_task(slot: usize, sd: &'static nrf_softdevice::Softdevice) -> ! {
     multi_conn::connection_slot_task(
-        0,
+        slot,
         sd,
-        &BLE_SLOT0_CMD_CHANNEL.receiver(),
-        &BLE_SLOT_EVENT_CHANNEL.sender(),
-        &HID_REPORT_CHANNEL.sender(),
-    )
-    .await
-}
-
-#[embassy_executor::task]
-async fn ble_slot1_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
-    multi_conn::connection_slot_task(
-        1,
-        sd,
-        &BLE_SLOT1_CMD_CHANNEL.receiver(),
+        &BLE_SLOT_CMD_CHANNELS[slot].receiver(),
         &BLE_SLOT_EVENT_CHANNEL.sender(),
         &HID_REPORT_CHANNEL.sender(),
     )
@@ -218,8 +205,9 @@ async fn main(spawner: Spawner) {
     )));
     info!("USB HID device started");
 
-    spawner.spawn(unwrap!(ble_slot0_task(sd)));
-    spawner.spawn(unwrap!(ble_slot1_task(sd)));
+    for slot in 0..MAX_CONNECTIONS {
+        spawner.spawn(unwrap!(ble_slot_task(slot, sd)));
+    }
     spawner.spawn(unwrap!(ble_task(sd)));
     info!("BLE task started");
 
@@ -245,7 +233,7 @@ async fn main(spawner: Spawner) {
     info!("UI and isolated OLED tasks started");
 
     let mut state = ui::ui_logic::UiState::new();
-    let mut paired: Vec<ble::DiscoveredDevice, 4> = Vec::new();
+    let mut paired: Vec<ble::DiscoveredDevice, { config::MAX_PAIRED_DEVICES }> = Vec::new();
     let mut management = ui::ui_logic::ManagementRequests::default();
     let mut power = PowerManager::new();
     let mut stack_reported = 0;

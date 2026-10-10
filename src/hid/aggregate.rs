@@ -12,7 +12,8 @@ use super::mouse::MouseReport;
 use super::{wake, HidReport};
 use heapless::Vec;
 
-pub const SOURCES: usize = 2;
+/// One source per BLE link ([`crate::config::BLE_MAX_CONNECTIONS`]).
+pub const SOURCES: usize = crate::config::BLE_MAX_CONNECTIONS;
 
 #[derive(Clone, Copy, Default)]
 struct Source {

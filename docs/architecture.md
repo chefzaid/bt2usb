@@ -103,7 +103,7 @@ module that imports a hardware crate stops `cargo test` from building.
 | Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{framing, record}` | Host crate and each firmware binary that declares them | Host tests |
 | Board shell | `ble::{mod, multi_conn, hid_client, scanner}`, `usb::hid_device`, `storage` and `storage::codec`, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` | One binary each | Embedded or simulation build; Renode for `sim.rs` |
-| Constants | `config.rs` | Firmware binaries only | Review; documented in [hardware](hardware.md#configuration-defaults) |
+| Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
 `lib.rs` mounts the shared files with `#[path]` attributes and re-exports them
 through `pub mod ble`, `pub mod ui`, and `pub mod power_logic` facades, so a
@@ -166,9 +166,13 @@ follow:
   trait and a write closure; `delivery::run_endpoint` takes the
   `DeliveryQueue`, `ReportSink`, and `RetryClock` traits; `management::commit`
   takes an async persist closure; `display_logic::Recovery` takes milliseconds.
-- Pure modules define their own limits (`MAX_CONNECTIONS`,
-  `ENDPOINT_QUEUE_CAPACITY`, `MAX_ATTRIBUTE_LEN`) or take them as parameters, so
-  `config.rs` is not part of the host crate.
+- Pure modules size their buffers from `config.rs` where a value is shared
+  with the shell (the link count `BLE_MAX_CONNECTIONS` behind
+  `coordinator::MAX_CONNECTIONS` and `aggregate::SOURCES`, and the
+  `UiState` list capacities `BLE_MAX_DISCOVERED` and `MAX_PAIRED_DEVICES`).
+  Limits only one module uses stay in that module (`ENDPOINT_QUEUE_CAPACITY`,
+  `MAX_ATTRIBUTE_LEN`) or come in as parameters. `config.rs` holds constants
+  only, with no imports, because `build.rs` compiles it as well.
 - Two shell links cross subsystem boundaries on purpose: the connection
   workers take a `usb::hid_device::LedReceiver` for host keyboard LEDs, and the
   USB dispatcher calls `power::note_hid_activity`.
@@ -209,7 +213,7 @@ wait for an in-flight connection attempt.
 | `HID_REPORT_CHANNEL` | BLE workers → input aggregator/dispatcher | 16 |
 | `BLE_CMD_CHANNEL` | UI → coordinator | 4 |
 | `BLE_EVENT_CHANNEL` | Coordinator → UI | 8 |
-| `BLE_SLOT0_CMD_CHANNEL` / `BLE_SLOT1_CMD_CHANNEL` | Coordinator → worker | 2 each |
+| `BLE_SLOT_CMD_CHANNELS` (one per link) | Coordinator → worker | 2 each |
 | `BLE_SLOT_EVENT_CHANNEL` | Workers → coordinator | 8 |
 | `BUTTON_CHANNEL` | GPIO tasks → UI | 4 |
 
@@ -956,7 +960,7 @@ The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
 | `main` | Setup, then the UI loop: owns `UiState`, `PowerManager`, management IDs, and the saved-device snapshot | Suspend signal, 1 s ticker, `BUTTON_CHANNEL`, `BLE_EVENT_CHANNEL` |
 | `softdevice_task` | Pulls SoftDevice BLE and SoC events and dispatches them; forwards USB power events to the VBUS detector; scan and GATT callbacks run inside it | SWI2/EGU2 wake-ups |
 | `ble_task` | Coordinator: owns the `ConnManager`, flash handle, scan snapshot, and management token; runs scans itself | `BLE_CMD_CHANNEL`, `BLE_SLOT_EVENT_CHANNEL` |
-| `ble_slot0_task`, `ble_slot1_task` | Connection workers: connect, secure, discover, then the notification loop, coalescer drain, and LED writer | Slot command channel, SoftDevice, `HID_REPORT_CHANNEL` space |
+| `ble_slot_task` (one per link, slots 0 and 1) | Connection workers: connect, secure, discover, then the notification loop, coalescer drain, and LED writer | Slot command channel, SoftDevice, `HID_REPORT_CHANNEL` space |
 | `usb_device_task` | `run_usb_device`: enumeration, control requests, suspend, resume, remote wakeup | USB bus events, `REMOTE_WAKE` |
 | `hid_writer_task` | `join4` of the dispatcher and the keyboard, mouse, and consumer endpoint workers | `HID_REPORT_CHANNEL`, endpoint signals, host polling |
 | `display_task` | Sole owner of TWIM0 and the OLED | `FRAMES`, I2C DMA, retry timer |
@@ -1169,8 +1173,9 @@ setting means rebuilding and reflashing.
 
 - **Constants.** Shared timing, scan, connection, USB identity, button,
   display, and storage constants live in [src/config.rs](../src/config.rs),
-  which only the firmware binaries compile. Limits that a pure module enforces
-  are defined in that module, so the host crate never depends on `config.rs`
+  which the firmware binaries, the host crate, and `build.rs` compile. Pure
+  modules size shared buffers from it (the link count and the UI list
+  capacities); limits only one pure module enforces are defined in that module
   (see [module layers](#module-layers-and-dependency-rules)). Pins are chosen
   where each binary claims its peripherals, in `main.rs`, `selftest.rs`, and
   `sim.rs`. The values are listed in

@@ -15,8 +15,8 @@
 use core::fmt::Write;
 use heapless::{String, Vec};
 
-/// Maximum simultaneous BLE connections.
-pub const MAX_CONNECTIONS: usize = 2;
+/// Maximum simultaneous BLE connections ([`crate::config::BLE_MAX_CONNECTIONS`]).
+pub const MAX_CONNECTIONS: usize = crate::config::BLE_MAX_CONNECTIONS;
 
 /// Lightweight error tag surfaced to the UI (no dynamic allocation).
 ///
@@ -120,7 +120,7 @@ impl<A: Clone + PartialEq> Default for ConnManager<A> {
 impl<A: Clone + PartialEq> ConnManager<A> {
     pub const fn new() -> Self {
         Self {
-            slots: [Slot::empty(), Slot::empty()],
+            slots: [const { Slot::empty() }; MAX_CONNECTIONS],
         }
     }
 

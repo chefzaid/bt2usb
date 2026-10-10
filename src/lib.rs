@@ -7,14 +7,19 @@
 //!
 //! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
 //! reconnect, long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
-//! `power_logic`, plus `storage::{framing, record}` under `cfg(test)` only.
+//! `power_logic`, plus `storage::{framing, record}` under `cfg(test)` only, and
+//! `config`, whose capacities the pure modules size their buffers from.
 //! The SoftDevice-coupled modules (`ble::{multi_conn, hid_client, scanner}`,
 //! `storage` and `storage::codec`, `usb`, `power`, `sd_setup`, `stack`,
-//! `ui::{display, buttons}`) and `config` are *not* included here.
+//! `ui::{display, buttons}`) are *not* included here.
 
 #![cfg_attr(not(test), no_std)]
 // The shared pure modules stay free of `unsafe` (docs/code-quality.md).
 #![forbid(unsafe_code)]
+
+// The firmware's constants. The pure modules read capacities such as the link
+// count from here, as they do in the firmware.
+pub mod config;
 
 // The HID module is entirely hardware-free, so it is shared verbatim with the
 // firmware (`defmt::Format` is feature-gated inside it).

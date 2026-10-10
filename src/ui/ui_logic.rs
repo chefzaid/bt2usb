@@ -276,8 +276,8 @@ pub fn on_connection_status(screen: Screen, connected: bool) -> Screen {
 pub struct UiState {
     pub screen: Screen,
     pub selected: usize,
-    pub devices: heapless::Vec<heapless::String<32>, 8>,
-    pub paired_names: heapless::Vec<heapless::String<32>, 4>,
+    pub devices: heapless::Vec<heapless::String<32>, { crate::config::BLE_MAX_DISCOVERED }>,
+    pub paired_names: heapless::Vec<heapless::String<32>, { crate::config::MAX_PAIRED_DEVICES }>,
     pub connected_name: heapless::String<32>,
     pub message: heapless::String<32>,
     pub scan_dots: u8,

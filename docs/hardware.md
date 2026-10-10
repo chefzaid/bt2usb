@@ -246,7 +246,7 @@ The SoftDevice configuration is shared by the bridge and the self-test in
 | Temperature-based calibration | `rc_temp_ctiv = 2` | Calibrate when the temperature changed, and at least every second interval |
 | Declared LF accuracy | 500 ppm | Used by the SoftDevice for timing windows |
 | High-frequency crystal | Not requested by the application | The SoftDevice manages it around radio activity |
-| Link count | `conn_count = 2`, `central_role_count = 2`, `central_sec_count = 2` | Two central links, both able to use security |
+| Link count | `conn_count`, `central_role_count`, and `central_sec_count` all equal `BLE_MAX_CONNECTIONS` (2) | Two central links, both able to use security |
 | Advertising and peripheral role | `adv_set_count = 0`, `periph_role_count = 0` | The bridge never advertises |
 | Connection event length | 6 (`BLE_CONN_EVENT_LENGTH`), 7.5 ms | Short enough for two links to interleave |
 | ATT MTU | 64 bytes, requested on each connection by `connect_with_security` | Bounds GATT fragments; Report Maps are read in pieces |
@@ -293,8 +293,9 @@ These are compile-time settings from [config.rs](../src/config.rs).
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
+| `BLE_MAX_CONNECTIONS` | 2 | Simultaneous links; sizes the coordinator slots, slot workers and channels, report-merger sources, host-LED receivers, and SoftDevice link counts |
 | `BLE_SCAN_DURATION_SECS` | 8 | Scan window in seconds |
-| `BLE_MAX_DISCOVERED` | 8 | Maximum cached scan results |
+| `BLE_MAX_DISCOVERED` | 8 | Maximum cached scan results; also the Devices screen's list capacity |
 | `BLE_CONN_INTERVAL_MIN` / `MAX` | 6 / 12 | 7.5–15 ms, in 1.25 ms units |
 | `BLE_SLAVE_LATENCY` | 0 | Connection events a peripheral may skip |
 | `BLE_CONN_EVENT_LENGTH` | 6 | 7.5 ms SoftDevice event length, in 1.25 ms units |
@@ -307,7 +308,7 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `BLE_PEER_MAX_CONN_INTERVAL` | 24 | Longest interval (30 ms) granted to a peripheral that asks only for intervals slower than 15 ms |
 | `BLE_MAX_PERIPHERAL_LATENCY` | 20 | Largest peripheral latency granted to a peripheral's request |
 | `BLE_MIN_SUP_TIMEOUT` | 100 | Shortest supervision timeout granted to a peripheral's request (1 s); the longest is `BLE_SUP_TIMEOUT` |
-| `MAX_PAIRED_DEVICES` | 4 | Stored peers; active slots are separately limited to two |
+| `MAX_PAIRED_DEVICES` | 4 | Stored peers, and the capacity of the Saved Devices list and the UI's snapshot of it; active slots are separately limited by `BLE_MAX_CONNECTIONS` |
 | `FLASH_PAGE_SIZE` | 4096 | nRF52840 flash page (erase unit) in bytes |
 | `STORAGE_FLASH_PAGE_START` / `COUNT` | 240 / 4 | Pairing storage reservation |
 | `STORAGE_FLASH_START` / `END` | `0x000F0000` / `0x000F4000` | Pairing storage byte range, derived from the pages; the linker checks `FLASH` against it |
@@ -328,7 +329,6 @@ These hardware-relevant values live next to the code that uses them:
 
 | Value | Default | Source |
 | --- | --- | --- |
-| Simultaneous BLE links (`MAX_CONNECTIONS`) | 2 | [ble/coordinator.rs](../src/ble/coordinator.rs) |
 | Idle timeout (`IDLE_TIMEOUT_SECS`) | 60 s | [power.rs](../src/power.rs) |
 | Flash write attempts and retry pause | 3, 20 ms apart | [storage.rs](../src/storage.rs) |
 | Pairing item size limit (`MAX_RECORD_SIZE`) | 512 bytes | [storage.rs](../src/storage.rs) |

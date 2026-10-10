@@ -28,6 +28,10 @@ use nrf_softdevice::raw;
 use nrf_softdevice::Softdevice;
 use static_cell::StaticCell;
 
+/// Command senders to the slot workers, one per link, indexed by slot. An
+/// array of [`MAX_CONNECTIONS`] makes `main.rs` build one channel per link.
+pub type SlotSenders = [Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>; MAX_CONNECTIONS];
+
 /// What the bridge grants when a peripheral asks to change the connection
 /// parameters: the configured interval range (or, for a peripheral that asks
 /// only for slower intervals, its fastest one up to 30 ms), a bounded latency,
@@ -259,8 +263,7 @@ pub async fn ble_task(
     sd: &'static Softdevice,
     cmd_rx: &Receiver<'static, CriticalSectionRawMutex, BleCommand, 4>,
     event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
-    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot_txs: &SlotSenders,
     slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
 ) -> ! {
     let mut flash = nrf_softdevice::Flash::take(sd);
@@ -301,7 +304,7 @@ pub async fn ble_task(
         manager.reserve_slot(slot, &device);
         // A paired device that's asleep or off right now will advertise
         // once it wakes, so keep trying rather than failing once.
-        send_slot_cmd(slot, SlotCommand::Reconnect(device), slot0_tx, slot1_tx).await;
+        send_slot_cmd(slot, SlotCommand::Reconnect(device), slot_txs).await;
     }
 
     // The coordinator below is a thin interpreter: it asks the pure
@@ -312,7 +315,7 @@ pub async fn ble_task(
             Either::First(cmd) => match cmd {
                 BleCommand::StartScan => {
                     for action in coordinator::plan_start_scan(&manager) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
+                        execute_action(action, event_tx, slot_txs, &mut flash).await;
                     }
                     match scanner::scan(sd, event_tx).await {
                         Ok(result) => last_scan = Some(result),
@@ -325,12 +328,12 @@ pub async fn ble_task(
                         None => &[],
                     };
                     for action in coordinator::plan_connect(&mut manager, devices, index) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
+                        execute_action(action, event_tx, slot_txs, &mut flash).await;
                     }
                 }
                 BleCommand::Disconnect => {
                     for action in coordinator::plan_disconnect(&manager) {
-                        execute_action(action, event_tx, slot0_tx, slot1_tx, &mut flash).await;
+                        execute_action(action, event_tx, slot_txs, &mut flash).await;
                     }
                 }
                 BleCommand::ListPaired { id } => publish_paired_devices(id, event_tx).await,
@@ -341,8 +344,7 @@ pub async fn ble_task(
                         management_token,
                         &mut manager,
                         event_tx,
-                        slot0_tx,
-                        slot1_tx,
+                        slot_txs,
                         slot_event_rx,
                         &mut flash,
                     )
@@ -358,8 +360,7 @@ pub async fn ble_task(
                         management_token,
                         &mut manager,
                         event_tx,
-                        slot0_tx,
-                        slot1_tx,
+                        slot_txs,
                         slot_event_rx,
                         &mut flash,
                     )
@@ -372,15 +373,7 @@ pub async fn ble_task(
                 }
             },
             Either::Second(event) => {
-                handle_slot_event(
-                    event,
-                    &mut manager,
-                    event_tx,
-                    slot0_tx,
-                    slot1_tx,
-                    &mut flash,
-                )
-                .await;
+                handle_slot_event(event, &mut manager, event_tx, slot_txs, &mut flash).await;
             }
         }
     }
@@ -390,8 +383,7 @@ async fn handle_slot_event(
     event: SlotEvent,
     manager: &mut MultiConnectionManager,
     event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
-    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot_txs: &SlotSenders,
     flash: &mut nrf_softdevice::Flash,
 ) {
     let actions: Vec<Action<Address>, 2> = match event {
@@ -410,7 +402,7 @@ async fn handle_slot_event(
         SlotEvent::Quiesced { .. } => return,
     };
     for action in actions {
-        execute_action(action, event_tx, slot0_tx, slot1_tx, flash).await;
+        execute_action(action, event_tx, slot_txs, flash).await;
     }
 }
 
@@ -441,8 +433,7 @@ async fn manage_devices(
     token: u32,
     manager: &mut MultiConnectionManager,
     event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
-    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot_txs: &SlotSenders,
     slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
     flash: &mut nrf_softdevice::Flash,
 ) -> Result<(), BleErrorTag> {
@@ -467,7 +458,7 @@ async fn manage_devices(
             }),
         };
         if *target {
-            send_slot_cmd(slot, SlotCommand::Quiesce(token), slot0_tx, slot1_tx).await;
+            send_slot_cmd(slot, SlotCommand::Quiesce(token), slot_txs).await;
         }
     }
     let mut barrier = Quiescence::new(targets, token);
@@ -487,7 +478,7 @@ async fn manage_devices(
             SlotEvent::Quiesced { .. } => unreachable!(),
         };
         if !barrier.suppresses(slot) {
-            handle_slot_event(event, manager, event_tx, slot0_tx, slot1_tx, flash).await;
+            handle_slot_event(event, manager, event_tx, slot_txs, flash).await;
         }
     }
     // No targeted worker can reconnect, emit a stale connection save or invoke
@@ -520,16 +511,15 @@ async fn manage_devices(
 async fn execute_action(
     action: Action<Address>,
     event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
-    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
+    slot_txs: &SlotSenders,
     flash: &mut nrf_softdevice::Flash,
 ) {
     match action {
         Action::DisconnectSlot(slot) => {
-            send_slot_cmd(slot, SlotCommand::Disconnect, slot0_tx, slot1_tx).await;
+            send_slot_cmd(slot, SlotCommand::Disconnect, slot_txs).await;
         }
         Action::ConnectSlot { slot, device } => {
-            send_slot_cmd(slot, SlotCommand::Connect(device), slot0_tx, slot1_tx).await;
+            send_slot_cmd(slot, SlotCommand::Connect(device), slot_txs).await;
         }
         Action::PersistDevice(device) => {
             let mut store = DEVICE_STORE.lock().await;
@@ -709,16 +699,9 @@ pub async fn connection_slot_task(
     }
 }
 
-async fn send_slot_cmd(
-    slot: usize,
-    cmd: SlotCommand,
-    slot0_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
-    slot1_tx: &Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>,
-) {
-    match slot {
-        0 => slot0_tx.send(cmd).await,
-        1 => slot1_tx.send(cmd).await,
-        _ => {}
+async fn send_slot_cmd(slot: usize, cmd: SlotCommand, slot_txs: &SlotSenders) {
+    if let Some(tx) = slot_txs.get(slot) {
+        tx.send(cmd).await;
     }
 }
 

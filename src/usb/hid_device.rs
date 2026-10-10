@@ -37,10 +37,10 @@ use embassy_usb::control::OutResponse;
 use embassy_usb::{Builder, Config, UsbDevice};
 use static_cell::StaticCell;
 
-/// Number of BLE connection slots that may consume host LED updates. Must be ≥
-/// the BLE `MAX_CONNECTIONS` (a keyboard occupies one slot; mice/consumer slots
-/// simply ignore the updates).
-pub const LED_CONSUMERS: usize = 2;
+/// Number of BLE connection slots that consume host LED updates, one per link
+/// ([`crate::config::BLE_MAX_CONNECTIONS`]). A keyboard occupies one slot;
+/// mouse and consumer-control slots ignore the updates.
+pub const LED_CONSUMERS: usize = crate::config::BLE_MAX_CONNECTIONS;
 
 /// Latest host keyboard-LED (Caps/Num/Scroll) state, published by the USB
 /// control handler and consumed by the BLE slot tasks to drive the BLE

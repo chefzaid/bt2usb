@@ -4,8 +4,14 @@
 use crate::config;
 use defmt::{info, warn};
 
-/// SoftDevice configuration: two central links (keyboard + mouse), no
-/// advertising or peripheral role. The RAM this needs is logged by
+/// The link count as the SoftDevice's `u8` connection and role counts.
+const LINKS: u8 = {
+    assert!(config::BLE_MAX_CONNECTIONS <= u8::MAX as usize);
+    config::BLE_MAX_CONNECTIONS as u8
+};
+
+/// SoftDevice configuration: [`config::BLE_MAX_CONNECTIONS`] central links
+/// (keyboard + mouse), no advertising or peripheral role. The RAM this needs is logged by
 /// `Softdevice::enable` ("softdevice RAM: N bytes") and must fit below
 /// `ORIGIN(RAM)` in `memory_sd.x`.
 pub fn softdevice_config() -> nrf_softdevice::Config {
@@ -17,15 +23,15 @@ pub fn softdevice_config() -> nrf_softdevice::Config {
             accuracy: nrf_softdevice::raw::NRF_CLOCK_LF_ACCURACY_500_PPM as u8,
         }),
         conn_gap: Some(nrf_softdevice::raw::ble_gap_conn_cfg_t {
-            conn_count: 2,
+            conn_count: LINKS,
             event_length: config::BLE_CONN_EVENT_LENGTH,
         }),
         conn_gatt: Some(nrf_softdevice::raw::ble_gatt_conn_cfg_t { att_mtu: 64 }),
         gap_role_count: Some(nrf_softdevice::raw::ble_gap_cfg_role_count_t {
-            adv_set_count: 0,      // we don't advertise
-            periph_role_count: 0,  // we don't act as peripheral
-            central_role_count: 2, // up to two central connections
-            central_sec_count: 2,
+            adv_set_count: 0,          // we don't advertise
+            periph_role_count: 0,      // we don't act as peripheral
+            central_role_count: LINKS, // one central role per link
+            central_sec_count: LINKS,
             _bitfield_1: nrf_softdevice::raw::ble_gap_cfg_role_count_t::new_bitfield_1(0),
         }),
         ..Default::default()

@@ -198,7 +198,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Identity resolution on reconnect | `SavedPeer` and `find_saved_peer` in [scanner.rs](../../src/ble/scanner.rs); the shared reconnect table in [reconnect.rs](../../src/ble/reconnect.rs) ([ADR 0015](0015-shared-reconnect-scan.md)) |
 | Persistence and eviction | `Action::PersistDevice` in `execute_action` (`multi_conn.rs`); `DeviceStore::add` in [storage.rs](../../src/storage.rs) |
 | Binding behavior relied on | `security_params` in [security.rs](../../vendor/nrf-softdevice/src/ble/security.rs); `default_security_params` and the Security Request handler in [gap.rs](../../vendor/nrf-softdevice/src/ble/gap.rs) |
-| SoftDevice security contexts | `central_sec_count: 2` in `softdevice_config()` ([sd_setup.rs](../../src/sd_setup.rs)) |
+| SoftDevice security contexts | `central_sec_count`, one per link (`BLE_MAX_CONNECTIONS`), in `softdevice_config()` ([sd_setup.rs](../../src/sd_setup.rs)) |
 
 Useful log lines: `Loaded {} BLE bonds into security handler` at startup,
 `BLE security mode updated: {}` whenever a link's security mode changes, and

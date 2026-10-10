@@ -576,27 +576,37 @@ Files:
   (BLE, USB, GPIO, paired-device storage) with a `///` comment that states the
   unit. Existing names carry the unit (`_SECS`, `_MS`) or say it in the comment
   ("1.25 ms units", "10 ms units").
-- The task-layer module that uses it. `config.rs` is compiled into the three
-  binaries (`mod config;` in `main.rs`, `selftest.rs`, and `sim.rs`) but not
-  into the host library, so a pure module receives the value as a parameter.
+- The module that uses it. `config.rs` is compiled into the three binaries
+  (`mod config;` in `main.rs`, `selftest.rs`, and `sim.rs`), the host library
+  (`pub mod config;` in `lib.rs`), and `build.rs`, so it holds `pub const`
+  items only, with no imports. A pure module may read a capacity from it,
+  such as `crate::config::BLE_MAX_CONNECTIONS`, so the host tests and the
+  firmware use the same size. Behavior settings are better passed in as
+  parameters, which lets a host test try other values:
   [power.rs](../src/power.rs) passes `SCREEN_AUTO_OFF_ENABLED` and
-  `SCREEN_AUTO_OFF_TIMEOUT_SECS` into `power_logic::screen_should_be_on`, which
-  keeps the boundary testable on the host.
+  `SCREEN_AUTO_OFF_TIMEOUT_SECS` into `power_logic::screen_should_be_on`.
 
 The bridge has no crate-level `dead_code` allowance, so a constant that
 `main.rs`'s module tree never reads fails `mask clippy`. The self-test and
 simulation allow dead code at crate level and will not flag it.
 
-Some values are repeated as literals, mostly where a pure module cannot see
-`config.rs`. No compile-time check ties them together, so change them
-together (the [hardware guide](hardware.md#constants-outside-configrs) lists
-other constants defined outside `config.rs`):
+Shared capacities are derived from `config.rs`, so a change follows
+everywhere (the [hardware guide](hardware.md#constants-outside-configrs) lists
+constants defined outside `config.rs`). `config.rs` must keep holding
+constants only: `build.rs` compiles it too, so an import or a reference to
+another module fails every build.
 
-| Value | Also written as |
+| Value | Derived from it |
 | --- | --- |
-| `BLE_MAX_DISCOVERED` (8) | `UiState::devices` capacity in `ui/ui_logic.rs` |
-| `MAX_PAIRED_DEVICES` (4) | `UiState::paired_names` capacity, `paired` in `main.rs` |
-| Two connection slots | `coordinator::MAX_CONNECTIONS`, `hid::aggregate::SOURCES`, `usb::hid_device::LED_CONSUMERS`, `conn_count`/`central_role_count`/`central_sec_count` in `sd_setup.rs`, the two slot tasks and channels in `main.rs` |
+| `BLE_MAX_CONNECTIONS` (2) | `coordinator::MAX_CONNECTIONS`, `hid::aggregate::SOURCES`, `usb::hid_device::LED_CONSUMERS`, `multi_conn::SlotSenders`, `conn_count`/`central_role_count`/`central_sec_count` in `sd_setup.rs`, and in `main.rs` the `BLE_SLOT_CMD_CHANNELS` array and the `ble_slot_task` pool, spawned once per slot |
+| `BLE_MAX_DISCOVERED` (8) | `UiState::devices` capacity in `ui/ui_logic.rs`, the scan result list in `scanner.rs` |
+| `MAX_PAIRED_DEVICES` (4) | `UiState::paired_names` capacity, the `paired` snapshot in `main.rs`, the saved-device list in `BleEvent`, and the store |
+| `STORAGE_FLASH_PAGE_START`/`COUNT` | `STORAGE_FLASH_START`/`END`, used by the store, the self-test, and `build.rs`; the linker fails if `FLASH` in `memory_sd.x` disagrees |
+
+The firmware and simulation build with any link count. The host tests encode
+the two-link behavior (two-slot arrays and expectations in `reconnect.rs` and
+`management.rs`), so they stop compiling when `BLE_MAX_CONNECTIONS` changes
+and must be revised with it.
 
 Tests: a boundary test in the pure module that consumes the value. Docs: the
 [configuration defaults](hardware.md#configuration-defaults) table, and any

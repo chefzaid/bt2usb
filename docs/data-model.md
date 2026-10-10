@@ -88,7 +88,7 @@ pairing region with a scratch key, not this record format.
 | Container | One `sequential-storage` map item, key `0x01`, no cache (`NoCache`) | `KEY_PAIRED_DEVICES` in [storage.rs](../src/storage.rs) |
 | Flash access | SoftDevice flash API (`nrf_softdevice::Flash`), so writes wait for radio-idle time | [ble/multi_conn.rs](../src/ble/multi_conn.rs) |
 | Maximum item size | 512 bytes, checked at compile time against four bonded records with 32-byte names | `MAX_RECORD_SIZE` |
-| Capacity | 4 peers; 2 can be connected at once | `MAX_PAIRED_DEVICES`, `MAX_CONNECTIONS` |
+| Capacity | 4 peers; 2 can be connected at once | `MAX_PAIRED_DEVICES`, `BLE_MAX_CONNECTIONS` in [config.rs](../src/config.rs) |
 | Other keys | `0xFE` is written, read back and removed by the self-test image only | `SELFTEST_KEY` in [selftest.rs](../src/selftest.rs) |
 
 The linker script excludes these pages from application flash, so firmware
@@ -456,7 +456,7 @@ request. Forget names a stable peer identity, never a list index.
 | `BUTTON_CHANNEL` | `ButtonEvent` | Three button tasks | Main UI loop | 4 | Sender waits |
 | `BLE_CMD_CHANNEL` | `BleCommand` | Main UI loop | BLE coordinator | 4 | `try_send`; the UI shows `"Busy; try again"` and abandons the request |
 | `BLE_EVENT_CHANNEL` | `BleEvent` | BLE coordinator, including its scans | Main UI loop | 8 | Sender waits |
-| `BLE_SLOT0_CMD_CHANNEL`, `BLE_SLOT1_CMD_CHANNEL` | `SlotCommand` | BLE coordinator | Connection worker 0 or 1 | 2 each | Sender waits |
+| `BLE_SLOT_CMD_CHANNELS[slot]`, one per link | `SlotCommand` | BLE coordinator | That slot's connection worker | 2 each | Sender waits |
 | `BLE_SLOT_EVENT_CHANNEL` | `SlotEvent` | Both connection workers | BLE coordinator | 8 | Sender waits |
 | `HID_REPORT_CHANNEL` | `HidEvent` | Both connection workers | HID dispatcher in `hid_writer_task` | 16 | Sender waits; a per-link coalescer absorbs bursts |
 

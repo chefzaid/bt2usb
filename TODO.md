@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 6 | 10 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 7 | 9 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **75** | **84** | **22** |
+| **Total** | **76** | **83** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -725,6 +725,17 @@ Host tests, simulation, and code-health work. Context:
   were deleted. Every `#[test]` in `src/` and `tests/` now runs under
   `cargo test --locked --lib --tests`
   ([testing](docs/testing.md#tests-that-do-not-run)).
+- [x] Single source for the link count and UI capacities.
+  `BLE_MAX_CONNECTIONS` in `src/config.rs` now sizes `MAX_CONNECTIONS`,
+  `SOURCES`, `LED_CONSUMERS`, the SoftDevice connection and role counts, the
+  `SlotSenders` array, and in `main.rs` the slot command channel array and a
+  `ble_slot_task` pool spawned once per slot. The `UiState` lists and the
+  `paired` snapshot take their capacities from `BLE_MAX_DISCOVERED` and
+  `MAX_PAIRED_DEVICES`, and the host crate compiles `config.rs` so the pure
+  modules can. The firmware and simulation were shown to build with one and
+  three links; the host tests assume two links and stop compiling when the
+  count changes (2026-10-10;
+  [development](docs/development.md#add-a-configuration-constant)).
 - [ ] **P1** **Parser fuzzing and property tests.** Add bounded fuzz targets for
   HID descriptors, advertisements, report classification, and persistence
   framing. Accept when CI runs a seed corpus and scheduled fuzzing records no
@@ -770,18 +781,6 @@ Host tests, simulation, and code-health work. Context:
   recorded, and build firmware rustdoc with warnings denied. Accept when a
   coverage drop below the threshold or a firmware rustdoc warning fails CI
   ([code quality](docs/code-quality.md)).
-- [ ] **P1** **Single source for the link count and UI capacities.** The
-  two-link limit is written separately as `MAX_CONNECTIONS` in
-  `src/ble/coordinator.rs`, `SOURCES` in `src/hid/aggregate.rs`,
-  `LED_CONSUMERS` in `src/usb/hid_device.rs`, and the literal `conn_count`,
-  `central_role_count`, and `central_sec_count` values of 2 in
-  `src/sd_setup.rs`. The `UiState` capacities in `src/ui/ui_logic.rs`
-  (`devices` holds 8, `paired_names` holds 4) repeat `BLE_MAX_DISCOVERED` and
-  `MAX_PAIRED_DEVICES` from `src/config.rs` as literals. Derive each from one
-  constant, or add `const _: () = assert!(…)` checks like the one on the
-  pairing record size in `src/storage.rs`. Accept when changing any one of
-  these values alone fails the build or changes the others with it
-  ([code quality](docs/code-quality.md#known-gaps)).
 - [ ] **P2** **Inventory panic sites in firmware paths.** The
   [panic table](docs/code-quality.md#panics-allocation-and-arithmetic) lists
   the application's `unwrap!`, `expect`, and `unreachable!` sites, but not slice
@@ -1285,15 +1284,16 @@ in by cable or paired directly.
 ### More Peripherals And Form Factors
 
 - [ ] **P2** **ADR: more than two simultaneous peripherals.** Decide the link
-  count and what it costs in SoftDevice RAM (`conn_count` and
-  `central_role_count` are 2 in `src/sd_setup.rs`), aggregation sources and
+  count and what it costs in SoftDevice RAM (`BLE_MAX_CONNECTIONS` in
+  `src/config.rs` sizes every per-link array and the SoftDevice counts, so the
+  code follows it; the host tests assume two links), aggregation sources and
   consumer priority, endpoint fairness, the saved-device capacity
   (`MAX_PAIRED_DEVICES` is 4, and all records share one item of at most 512
   bytes, `MAX_RECORD_SIZE`, which fits at most five full records), and the UI.
   The decision would supersede
   [ADR 0005](docs/adr/0005-two-slots-and-independent-endpoints.md) in part and
-  follows "Single source for the link count and UI capacities" under
-  [Verification And Code Quality](#verification-and-code-quality). Accept when
+  builds on the single link-count constant (done under
+  [Verification And Code Quality](#verification-and-code-quality)). Accept when
   the ADR is Accepted and listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
 - [ ] **P2** **More simultaneous peripherals and saved devices.** *(hardware)*

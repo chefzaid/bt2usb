@@ -5,6 +5,13 @@
 
 // BLE
 
+/// Simultaneous BLE links (central connections), typically a keyboard and a
+/// mouse. The coordinator's slots, the slot workers and their command
+/// channels, the USB report merger's sources, the host-LED receivers, and the
+/// SoftDevice's connection and role counts all follow this value. Raising it
+/// also needs more SoftDevice RAM, which `memory_sd.x` reserves.
+pub const BLE_MAX_CONNECTIONS: usize = 2;
+
 /// Duration of a BLE scan window (seconds).
 pub const BLE_SCAN_DURATION_SECS: u64 = 8;
 

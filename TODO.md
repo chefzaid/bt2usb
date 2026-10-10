@@ -84,7 +84,8 @@ it becomes workable again.
 
 | Item | What is needed | Options (recommendation first) |
 | --- | --- | --- |
-| — | Nothing yet | — |
+| [Security maintenance ownership](#release-provenance-and-supply-chain) (P0) | A private reporting channel, which versions get fixes, who triages, and how fast reporters hear back. SECURITY.md cannot name a channel until one exists | 1. Enable GitHub private vulnerability reporting as the only channel; fix only the latest release tag and `main`; you triage; acknowledge within 7 days and give a fix or plan within 30 days. 2. Publish a security email address instead, with the same policy |
+| [Hardware-evidence label and private reporting](#release-provenance-and-supply-chain) (P2) | Two repository settings no tool here can change: create the `hardware-evidence` label (Issues, Labels, New label) that the hardware-result template applies, and turn on private vulnerability reporting (Settings, Code security) | 1. Do both; the loop then updates SECURITY.md and checks a new hardware-result issue. 2. Create only the label and choose an email channel in the row above |
 
 ## Contribution Rules For This Plan
 
@@ -888,7 +889,8 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   contact, supported-version policy, triage ownership, and response/update
   expectations. Accept when dependency/advisory review, license inventory, and
   remediation tracking are part of a documented release procedure
-  ([security policy](SECURITY.md)).
+  ([security policy](SECURITY.md)). Waiting on the owner's choice in
+  [Needs Your Input](#needs-your-input).
 - [ ] **P2** **Create the hardware-evidence issue label and enable private
   vulnerability reporting.** The
   [hardware-result template](.github/ISSUE_TEMPLATE/hardware-result.md) applies
@@ -897,7 +899,8 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   GitHub REST API on 2026-10-09), so [SECURITY.md](SECURITY.md) has no private
   channel to point to. Accept when a new hardware-result issue carries the
   label, the **Report a vulnerability** button opens a private advisory, and
-  SECURITY.md names that channel.
+  SECURITY.md names that channel. Waiting on the owner in
+  [Needs Your Input](#needs-your-input).
 - [ ] **P1** **Supply-chain and tooling maintenance.** Extend the dependency
   audit and update automation with license checks, an SBOM artifact, and
   verified digests for downloaded non-Cargo tooling/SoftDevice inputs; today

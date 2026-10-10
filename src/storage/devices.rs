@@ -91,6 +91,14 @@ impl PeerAddress {
     }
 }
 
+/// Whether `irk` is a key. The vendored crate stores an all-zero IRK for a
+/// peer that distributed no identity key, and treating it as a key would let
+/// any device that builds a private address from it pass for that peer.
+/// Nordic's nRF5 SDK peer manager also treats an all-zero IRK as none.
+pub fn irk_present(irk: &[u8; 16]) -> bool {
+    irk.iter().any(|&byte| byte != 0)
+}
+
 /// The keys of one bond: the LTK the peer distributed, with its master ID
 /// (EDIV and RAND), and the peer's identity (IRK and identity address).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -108,11 +116,14 @@ impl StoredBond {
     /// Whether `address` belongs to this peer, decided as
     /// `IdentityKey::is_match` decides it: a public or static address must
     /// equal the identity address, a resolvable private address must resolve
-    /// with the IRK, and any other address never matches.
+    /// with the IRK, and any other address never matches. An all-zero IRK
+    /// resolves nothing ([`irk_present`]).
     pub fn matches(&self, address: PeerAddress, resolve: &impl Resolve) -> bool {
         match address.kind {
             AddressKind::Public | AddressKind::RandomStatic => self.identity == address,
-            AddressKind::RandomPrivateResolvable => resolve(&self.irk, &address.bytes),
+            AddressKind::RandomPrivateResolvable => {
+                irk_present(&self.irk) && resolve(&self.irk, &address.bytes)
+            }
             AddressKind::RandomPrivateNonResolvable | AddressKind::Anonymous => false,
         }
     }

@@ -67,7 +67,7 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 8 host tests | None recorded |
 | Record prefix and bond-flag validation | [storage/record.rs](../src/storage/record.rs) | 3 host tests | None recorded |
 | Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
-| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 15 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
+| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 16 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
 | Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
@@ -247,7 +247,9 @@ the hardware-free `StoredDevice` form and converts them to `PairedDevice` and
 `DeviceList::add` merges a new record into an existing one when the addresses
 are equal or either side's IRK resolves the other's address; the IRK check is
 the `resolve` function the shell passes in, which asks the SoftDevice's AES
-block. A merge marks the store dirty only when the address, name, or bond
+block. An all-zero IRK, which the vendored crate stores for a peer that
+distributed no identity key, resolves no address (`irk_present`), so a device
+that builds a private address from it cannot pass for such a peer. A merge marks the store dirty only when the address, name, or bond
 changed. A new record appended to a full store evicts the oldest entry.
 Updating an existing record does not move it. `add` returns an `AddOutcome`,
 and `DeviceStore::add` logs it: `"Updated existing paired device"`,

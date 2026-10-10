@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 39 | 1 | 0 |
+| [FIXME](#fixme) | 40 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **126** | **72** | **21** |
+| **Total** | **127** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -490,26 +490,33 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   rule for `with_state` closures and lists the three sites left in code
   bt2usb does not compile. Checked by the embedded builds and Clippy; the
   vendored code has no tests.
-- [ ] **P2** **An all-zero IRK resolves private addresses.** A peer that
+- [x] **P2** **An all-zero IRK resolved private addresses.** A peer that
   distributes no identity key during pairing gets the vendored
   `IdentityKey::from_addr`, whose IRK is all zeros, and its bond keeps that
-  IRK. Every resolution in bt2usb treats it as a real key:
+  IRK. Every resolution in bt2usb treated it as a real key:
   `IdentityKey::is_match` in `Bonder` (`on_bonded`, `bond_for_address`,
   `get_key`, `get_peripheral_key`, `forget`), `StoredBond::matches` through
   `storage::resolve`, the reconnect scan's `SavedPeer::matches`, and the
   Forget targets in `manage_devices`. A device that builds a resolvable
   private address from the all-zero IRK, which anyone can do, therefore
-  matches every bond made without an IRK, such as a keyboard on a public
-  address. Paired, it replaces that keyboard's keys in `Bonder`
-  (`on_bonded` replaces the first match), and its record merges into the
+  matched every bond made without an IRK, such as a keyboard on a public
+  address. Paired, it replaced that keyboard's keys in `Bonder`
+  (`on_bonded` replaces the first match), and its record merged into the
   keyboard's in the store, overwriting its address and name
-  (`DeviceList::add`); merely advertising, it counts as the keyboard during a
-  background reconnect scan, so the slot connects to it and fails to encrypt
-  instead of reaching the keyboard. Nordic's nRF5 SDK peer manager treats an
-  all-zero IRK as no IRK. Found by the review of the bond identity fix.
-  Accept when a bond whose IRK is all zeros matches only its identity
-  address in each of those places, with host tests for `StoredBond::matches`
-  and `SavedPeer::matches`.
+  (`DeviceList::add`); merely advertising, it counted as the keyboard during
+  a background reconnect scan, so the slot connected to it and failed to
+  encrypt instead of reaching the keyboard. Nordic's nRF5 SDK peer manager
+  treats an all-zero IRK as no IRK. Found by the review of the bond identity
+  fix. Fixed: `irk_present` in `src/storage/devices.rs` decides whether an
+  IRK is a key, `StoredBond::matches` resolves a private address only with
+  one, and `bonder::key_matches`, which `Bonder`, the reconnect scan, and
+  Forget's slot selection now use instead of `IdentityKey::is_match`, does
+  the same ([security](docs/security.md#pairing-and-authentication)). Host
+  tests cover `irk_present`, `StoredBond::matches`, `DeviceList::find`, and
+  `DeviceList::add` with such a device. `SavedPeer::matches` is generic over
+  the resolver it is given, so the rule is tested where it lives, and the
+  firmware passes it `key_matches`; that shell code is checked by the
+  embedded builds and Clippy.
 
 ## Needs Your Input
 

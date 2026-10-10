@@ -8,7 +8,7 @@
 //! [`slot_worker`](crate::ble::slot_worker) and the security handler in
 //! [`bonder`](crate::ble::bonder).
 
-use crate::ble::bonder::bonder;
+use crate::ble::bonder::{bonder, key_matches};
 use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
 use crate::ble::management::{self, Quiescence};
 use crate::ble::scanner::ScanResult;
@@ -264,7 +264,7 @@ async fn manage_devices(
             *current == peer.address
                 || peer
                     .bond
-                    .is_some_and(|bond| bond.peer_id.is_match(*current))
+                    .is_some_and(|bond| key_matches(&bond.peer_id, *current))
         }),
     };
     for (slot, _) in targets.iter().enumerate().filter(|(_, &target)| target) {

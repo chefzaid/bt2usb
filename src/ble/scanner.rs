@@ -7,6 +7,7 @@
 
 use core::cell::RefCell;
 
+use crate::ble::bonder::key_matches;
 use crate::ble::coordinator::{merge_advertisement, MAX_CONNECTIONS};
 use crate::ble::reconnect::{self, owner_of, ReconnectTable, Recorded, ScanDuty};
 use crate::ble::{BleErrorTag, BleEvent, DiscoveredDevice};
@@ -145,7 +146,7 @@ pub async fn find_saved_peer(sd: &Softdevice, slot: usize) -> Option<Address> {
         // SoftDevice, which must not happen inside the critical section.
         let targets = RECONNECTS.lock(|table| table.borrow().targets(slot, now_ms()));
         let owner = owner_of(&targets, address, |peer: &SavedPeer, seen| {
-            peer.matches(seen, IdentityKey::is_match)
+            peer.matches(seen, key_matches)
         })?;
         // A handover wakes the owner; an owner that stopped reconnecting since
         // the copy was taken records nothing, and the scan goes on.

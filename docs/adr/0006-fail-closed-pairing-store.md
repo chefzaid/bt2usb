@@ -230,7 +230,7 @@ and `Paired device address has a reserved type; not stored`.
   `reconnect_events_are_suppressed_until_matching_cancellation_ack` in
   `management.rs`. They passed on GitHub-hosted runners in push runs
   36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09)
-  and scheduled run 37338711407 (2026-10-05). Since 2026-10-10 the 30 tests
+  and scheduled run 37338711407 (2026-10-05). Since 2026-10-10 the 31 tests
   in `storage/devices_tests.rs` and `devices_format_tests.rs` also cover loading valid, legacy, malformed,
   and unreadable stores (each invalid one refusing saves until reset),
   identity merge, bond replacement, eviction, Forget and reset candidates

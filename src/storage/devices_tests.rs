@@ -208,6 +208,35 @@ fn a_refused_bond_leaves_the_stored_bond_of_the_same_peer() {
     assert_eq!(list.bonds().next(), Some(bond(1, 0x77)));
 }
 
+#[test]
+fn an_all_zero_irk_resolves_no_private_address() {
+    assert!(!irk_present(&[0; 16]));
+    let mut one_bit = [0u8; 16];
+    one_bit[15] = 1;
+    assert!(irk_present(&one_bit));
+
+    // A keyboard on a public address that distributed no IRK, and a device
+    // whose private address the fake resolver resolves with the zero IRK.
+    let mut keyless = bond(1, 0x77);
+    keyless.irk = [0; 16];
+    keyless.identity = address(AddressKind::Public, 1);
+    let crafted = PeerAddress::new(AddressKind::RandomPrivateResolvable, [0, 0, 0, 9, 0, 0x40]);
+    assert!(resolve(&keyless.irk, &crafted.bytes));
+    assert!(!keyless.matches(crafted, &resolve));
+    assert!(keyless.matches(keyless.identity, &resolve));
+
+    let mut list = DeviceList::new();
+    let mut keyboard = device(keyless.identity, "Keyboard");
+    keyboard.bond = Some(keyless);
+    list.add(keyboard.clone(), &resolve);
+    assert!(list.find(crafted, &resolve).is_none());
+    assert_eq!(
+        list.add(device(crafted, "Other"), &resolve),
+        AddOutcome::Added
+    );
+    assert_eq!(list.find(keyless.identity, &resolve), Some(&keyboard));
+}
+
 // ── Capacity, lookup, and removal ──────────────────────────────────────
 
 #[test]

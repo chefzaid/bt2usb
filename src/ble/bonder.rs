@@ -13,7 +13,7 @@ use core::cell::RefCell;
 use crate::ble::conn_params::{self, ConnParamLimits, ConnParams};
 use crate::config;
 use crate::config::MAX_PAIRED_DEVICES;
-use crate::storage::BondInfo;
+use crate::storage::{irk_present, BondInfo};
 use defmt::{info, warn};
 use heapless::Vec;
 use nrf_softdevice::ble::security::{IoCapabilities, SecurityHandler};
@@ -35,6 +35,15 @@ const PEER_CONN_PARAM_LIMITS: ConnParamLimits = ConnParamLimits {
     min_supervision_timeout: config::BLE_MIN_SUP_TIMEOUT,
     max_supervision_timeout: config::BLE_SUP_TIMEOUT,
 };
+
+/// Whether `key` belongs to the device at `address`, as
+/// `IdentityKey::is_match` decides, except that an all-zero IRK, which the
+/// vendored crate stores for a peer that distributed no identity key, resolves
+/// no private address ([`irk_present`]). Every match of a bond against an
+/// address goes through it.
+pub(crate) fn key_matches(key: &IdentityKey, address: Address) -> bool {
+    key.is_match(address) && (irk_present(&key.as_raw().id_info.irk) || key.addr == address)
+}
 
 pub(crate) struct Bonder {
     peers: RefCell<Vec<BondInfo, MAX_PAIRED_DEVICES>>,
@@ -67,14 +76,14 @@ impl Bonder {
         self.peers
             .borrow()
             .iter()
-            .find(|p| p.peer_id.is_match(address))
+            .find(|p| key_matches(&p.peer_id, address))
             .copied()
     }
 
     pub(crate) fn forget(&self, address: Address) {
         self.peers
             .borrow_mut()
-            .retain(|bond| !bond.peer_id.is_match(address));
+            .retain(|bond| !key_matches(&bond.peer_id, address));
     }
 
     /// Drop exactly `bond`. [`Self::forget`] drops every bond whose key matches
@@ -109,10 +118,9 @@ impl SecurityHandler for Bonder {
         // MasterId is not a peer identity (LE Secure Connections can use the
         // same all-zero EDIV/RAND for multiple peers). Re-pairing replaces only
         // this peer's keys and must not overwrite another keyboard's bond.
-        if let Some(existing) = peers
-            .iter_mut()
-            .find(|p| p.peer_id.addr == peer_id.addr || p.peer_id.is_match(conn.peer_address()))
-        {
+        if let Some(existing) = peers.iter_mut().find(|p| {
+            p.peer_id.addr == peer_id.addr || key_matches(&p.peer_id, conn.peer_address())
+        }) {
             existing.master_id = master_id;
             existing.key = key;
             existing.peer_id = peer_id;
@@ -132,15 +140,14 @@ impl SecurityHandler for Bonder {
 
     fn get_key(&self, conn: &Connection, master_id: MasterId) -> Option<EncryptionInfo> {
         self.peers.borrow().iter().find_map(|p| {
-            (p.master_id == master_id && p.peer_id.is_match(conn.peer_address())).then_some(p.key)
+            (p.master_id == master_id && key_matches(&p.peer_id, conn.peer_address()))
+                .then_some(p.key)
         })
     }
 
     fn get_peripheral_key(&self, conn: &Connection) -> Option<(MasterId, EncryptionInfo)> {
         self.peers.borrow().iter().find_map(|p| {
-            p.peer_id
-                .is_match(conn.peer_address())
-                .then_some((p.master_id, p.key))
+            key_matches(&p.peer_id, conn.peer_address()).then_some((p.master_id, p.key))
         })
     }
 

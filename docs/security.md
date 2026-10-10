@@ -212,6 +212,13 @@ Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
   ([data model](data-model.md#write-rules)).
 - `get_key` requires both the master ID and an identity match;
   `get_peripheral_key` matches identity only.
+- Every match of a bond against an address goes through `key_matches`, which
+  decides as `IdentityKey::is_match` except that an all-zero IRK resolves no
+  private address. The vendored crate stores that IRK for a peer that
+  distributed no identity key, and any device can build a private address
+  from it; before 2026-10-10 such a device could replace that peer's keys,
+  overwrite its stored record, and draw its background reconnects. The
+  reconnect scan and Forget's slot selection use the same check.
 - `DeviceStore::add` evicts the oldest record when a fifth device is added,
   logging only `Paired device store full - evicting oldest entry`.
 
@@ -262,7 +269,7 @@ applied and the result of a violation:
 | Boundary | Source | Bound applied | On violation |
 | --- | --- | --- | --- |
 | Advertising and scan-response data | [adv_parser.rs](../src/ble/adv_parser.rs), `merge_advertisement` in [coordinator.rs](../src/ble/coordinator.rs) | AD walk stops at a zero length or a structure that runs past the end; UUID lists read in 2-byte chunks; names must be UTF-8 and are cut at a character boundary to 32 bytes; only HID UUID `0x1812` creates an entry; list capped at 8, where a new HID advertiser replaces the weakest entry only when received more strongly, and an unavailable RSSI (127) ranks below every measured one; name-only responses update existing entries only | Structure ignored; name shown as `Unknown`; device not listed |
-| Reconnect scan | `find_saved_peer` in [scanner.rs](../src/ble/scanner.rs); `ReconnectTable` in [reconnect.rs](../src/ble/reconnect.rs) | Accepts only a connectable report whose address a registered slot's stored identity key resolves or that equals its stored address; non-connectable and scannable-only reports are ignored; a sighting is handed only to the slot whose target matched, used once, and dropped after 2 s; bounded by `BLE_CONNECT_TIMEOUT_SECS` (6 s) | Silent retry after the 500 ms backoff |
+| Reconnect scan | `find_saved_peer` in [scanner.rs](../src/ble/scanner.rs); `ReconnectTable` in [reconnect.rs](../src/ble/reconnect.rs) | Accepts only a connectable report whose address a registered slot's stored identity key resolves (an all-zero IRK resolves none, `key_matches`) or that equals its stored address; non-connectable and scannable-only reports are ignored; a sighting is handed only to the slot whose target matched, used once, and dropped after 2 s; bounded by `BLE_CONNECT_TIMEOUT_SECS` (6 s) | Silent retry after the 500 ms backoff |
 | Connection parameter requests | `Bonder::conn_param_update_request` in [bonder.rs](../src/ble/bonder.rs); `bound_request` in [conn_params.rs](../src/ble/conn_params.rs) | Any 16-bit values accepted as input; interval kept within 7.5–15 ms, or the request's fastest up to 30 ms when it asks only for slower ones, latency at most 20, supervision timeout 1–4 s and always above `(1 + latency) × interval × 2`; reversed interval bounds read as a range | Nearest bounded values granted instead |
 | GATT discovery | Vendored `gatt_client::discover`; `HidServiceClient` in [hid_client.rs](../src/ble/hid_client.rs) | Six characteristic declarations kept per response, resuming after the last kept handle; six descriptors per characteristic; declarations must lie in range and advance; empty responses rejected; saturating handle arithmetic; ATT timeouts return errors; at most `MAX_REPORTS` (8) Report characteristics tracked, at least one required | Discovery fails; UI shows `No HID service`; the cause is logged as `HID discovery failed: {:?}` |
 | Report Map long read | [long_read.rs](../src/ble/long_read.rs), `read_report_map` | ATT MTU must be 23–517; each fragment at most MTU − 1 bytes; total at most 512 bytes; an exact-MTU end needs Invalid Offset, or Attribute Not Long after the first fragment only; response handle and offset must match the request; a partial value is never exposed | `HID map too large` or `HID map read failed`; only an absent Report Map permits legacy classification |

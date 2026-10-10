@@ -21,7 +21,7 @@ mod devices;
 mod framing;
 mod record;
 
-pub use devices::StoreError;
+pub use devices::{irk_present, StoreError};
 use devices::{
     truncated_name, AddOutcome, AddressKind, DeviceList, PeerAddress, StoredBond, StoredDevice,
     MAX_RECORD_SIZE,

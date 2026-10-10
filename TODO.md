@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 20 | 0 | 0 |
+| [FIXME](#fixme) | 21 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **99** | **79** | **22** |
+| **Total** | **100** | **79** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -248,6 +248,13 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   [2026-10-10 validation record](docs/testing.md#validation-record--2026-10-10)
   gives every loaded section at `6e1b8b4` for both `debug` and `info`
   (`.text` 110,812 and 109,584 bytes).
+- [x] **P3** **Three modules had no module comment.** The
+  [review rule](docs/code-quality.md#documentation-comments) says every module
+  starts with a `//!` comment, but `src/ble/adv_parser.rs`,
+  `src/ui/input_logic.rs` (a plain `//` note instead), and
+  `src/ble/coordinator_tests.rs` had none, and nothing checked the rule.
+  Fixed: each now says what it owns, and the Linux host job fails on any Rust
+  file under `src/`, `tests/`, or `build.rs` without a `//!` line.
 
 ## Needs Your Input
 

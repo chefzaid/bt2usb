@@ -1,3 +1,7 @@
+//! Host tests for the pure connection coordinator: the slot manager, the
+//! scan, connect, and disconnect plans, the slot event reducers, and scan
+//! results that update or enroll a device.
+
 use super::*;
 
 // Trivial stand-in for the embedded `Address` type.

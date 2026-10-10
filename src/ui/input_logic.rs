@@ -1,6 +1,9 @@
-// Note: list-selection movement (previously `select_prev`/`select_next`) now
-// lives inside the UI transition reducer `ui::ui_logic::on_button`, where it is
-// tested directly against the screen state machine.
+//! Pure helpers for what the UI task draws.
+//!
+//! [`next_scan_dots`] animates the Scanning screen, and [`device_list_window`]
+//! chooses which rows of a device list fit the four-row OLED. List-selection
+//! movement is not here: it lives in the UI reducer, `ui_logic::on_button`,
+//! where it is tested against the screen state machine.
 
 /// Advance the scanning "spinner" dot count, cycling 0 -> 1 -> 2 -> 3 -> 0.
 ///

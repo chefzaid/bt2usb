@@ -56,6 +56,7 @@ Clippy warning into an error.
 | File length | `find src tests build.rs -name '*.rs' -exec wc -l {} +`, failing above 500 lines ([File Length](#file-length)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file over the limit |
 | Documentation checks | `python scripts/check_docs.py` ([Markdown Checks](#markdown-checks)) | `mask ci`, `mask docs-check` | Host tests, Linux only | Fails the Linux job and lists each finding as file, line, and the value or name the repository has instead |
 | Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
+| Module comments | `find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`, failing when it lists a file ([Documentation Comments](#documentation-comments)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file without a `//!` line |
 | Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 12 tests (`grep -c 'def test' scripts/release_test.py`) |
 | Tag matches version | `python scripts/release.py validate-tag --tag "$RELEASE_TAG"` | None | Host tests and the packaging job, `v*` tags only | Fails the tag run |
 | Release staging | `python scripts/release.py stage …` | None | Embedded build & clippy | Refuses a modified tracked source tree, an existing output directory, an empty firmware file, or a commit that differs from `GITHUB_SHA` |
@@ -241,9 +242,10 @@ coordinator, power policy, and `ble` module docs mention `ble::multi_conn` and
 contain them and the link would not resolve there.
 
 **Review rule.** Every module starts with a `//!` comment that says what it
-owns and what it must not depend on. Three files have none today, found with
-`grep -L '^//!'` over `src/`: `src/ui/input_logic.rs`, `src/ble/adv_parser.rs`,
-and `src/ble/coordinator_tests.rs`. Public items in pure
+owns and what it must not depend on. Since 2026-10-10 the Linux host job fails
+on any Rust file under `src/`, `tests/`, or `build.rs` that has no `//!` line
+(`find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`); whether the
+comment says enough is still the reviewer's call. Public items in pure
 modules carry `///` comments that state units, bounds, and error meanings.
 
 ### Other Files

@@ -55,6 +55,15 @@ jobs:
             echo "$over"
             exit 1
           fi
+      - name: Require a module comment in every Rust source file
+        if: runner.os == 'Linux'
+        run: |
+          missing=$(find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +)
+          if [ -n "$missing" ]; then
+            echo "Start these files with a //! comment (docs/code-quality.md#documentation-comments):"
+            echo "$missing"
+            exit 1
+          fi
       - name: Test release consistency and artifact integrity helpers
         run: python -m unittest discover -s scripts -p "release_test.py" -v
       - name: Test the documentation checker

@@ -1,3 +1,13 @@
+//! Read the advertising data of a scanned peripheral.
+//!
+//! Advertising and scan-response payloads are a sequence of length-type-value
+//! structures (Bluetooth Core Specification, Vol 3, Part C, Section 11). The
+//! bridge needs two of them: whether the 16-bit HID service UUID (0x1812) is
+//! listed, and the complete or shortened local name. A structure whose length
+//! is zero or runs past the buffer ends the walk, so malformed data cannot
+//! index out of bounds. The module is pure; the coordinator's scan reducer
+//! uses it in the firmware, the Renode build, and the host tests.
+
 use heapless::String;
 
 /// Check if raw advertisement data contains the HID Service UUID (0x1812).

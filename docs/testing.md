@@ -687,6 +687,10 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
   line endings. [.gitattributes](../.gitattributes) forces LF for scripts, Renode
   files, `maskfile.md`, and sources; re-checkout the affected files if the
   working tree was created without it.
+- A mask recipe failing with `./scripts/run-tool.sh: Permission denied` has
+  lost the executable bit. Both scripts in `scripts/` are committed as mode
+  `100755` (`git ls-files -s scripts`); a copy that drops the mode, such as an
+  archive extracted on Windows, needs `chmod +x scripts/*.sh`.
 
 ### Coverage Tool Missing
 

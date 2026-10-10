@@ -24,6 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
+| [FIXME](#fixme) | 1 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -38,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 7 | 2 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **72** | **86** | **22** |
+| **Total** | **73** | **86** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -48,8 +49,38 @@ record turns most *(hardware evidence pending)* marks into evidence or into
 concrete defects, and it supplies the SoftDevice RAM and stack numbers the
 memory budget needs.
 
+## FIXME
+
+Defects found in the current tree while working through this plan, including
+code that breaks the [coding-agent checklist](#how-this-plan-is-worked). They
+are fixed before any other open item. Each entry says what is wrong, how it
+shows, and what closes it; a fixed entry is checked and names the change that
+fixed it.
+
+- [x] **P1** **Scripts lacked the executable bit.** Git recorded every file in
+  the repository as mode `100644`, including `scripts/run-tool.sh` and
+  `scripts/install-renode.sh`. Almost every `maskfile.md` recipe runs
+  `./scripts/run-tool.sh …`, so on a fresh Linux, macOS, or WSL clone each one
+  stopped with `./scripts/run-tool.sh: Permission denied`, and `mask coverage`
+  reported "No coverage tool found" even with `cargo-llvm-cov` installed (seen
+  on 2026-10-10). CI was unaffected because it calls Cargo directly. Fixed by
+  committing both scripts as `100755`; `mask coverage` then ran and reported
+  96.16% host line coverage ([testing](docs/testing.md#troubleshooting)).
+
+## Needs Your Input
+
+Decisions and actions only the project owner can take. The loop skips each
+item listed here and moves on; answer in the item's row (or in the thread) and
+it becomes workable again.
+
+| Item | What is needed | Options (recommendation first) |
+| --- | --- | --- |
+| — | Nothing yet | — |
+
 ## Contribution Rules For This Plan
 
+- Work one item at a time with the coding-agent loop described in
+  [How This Plan Is Worked](#how-this-plan-is-worked).
 - Keep this file the single plan. Add new work here before starting it, as an
   unchecked item with a priority and an acceptance criterion; do not track open
   work only in a guide, an issue, or a code comment.
@@ -1334,6 +1365,34 @@ in by cable or paired directly.
   implementing the tray UI. Accept when it performs every operation the
   browser configuration page does against the same firmware versions, and
   every change waits for confirmation on the bridge.
+
+## How This Plan Is Worked
+
+Items are taken one at a time with the owner's coding-agent loop
+([CODING_AGENT.md](https://github.com/chefzaid/agents/blob/main/CODING_AGENT.md)):
+
+1. Pick an open [FIXME](#fixme) first; otherwise the simplest open item that
+   needs neither a board nor a decision from the owner. Items tagged
+   *(hardware)* wait for a board, and items listed under
+   [Needs Your Input](#needs-your-input) wait for an answer.
+2. Plan it, implement it, and pass it through the checklist below.
+3. Check it here with the implementing paths, update the guide that owns the
+   behavior, and commit it on its own with a short message.
+4. Record any defect found on the way under [FIXME](#fixme), and any question
+   for the owner under [Needs Your Input](#needs-your-input), then repeat.
+
+The checklist, adapted to this firmware:
+
+| Phase | What it requires here |
+| --- | --- |
+| Implementation | Fully implemented, no dead code, edge cases handled, no stand-in values. The OLED UI is English only, so localization does not apply; any user-visible state is reachable from the three buttons |
+| Decomposition | No modified or new file over 500 lines; readable control flow; decisions in hardware-free modules ([ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)) |
+| Reuse | No duplicated logic; existing helpers and constants are reused |
+| Static analysis | `cargo fmt`, and host, firmware, and simulation Clippy with `-D warnings`, rustdoc with warnings denied |
+| Security | Every peer-, host-, or flash-controlled value bounded and validated; no key material or keystrokes logged; no unreviewed dependency |
+| Robustness | No lost wakeups, unbounded waits, or panics reachable from outside input; bounded work in callbacks |
+| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 96.1% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
+| Documentation | The owning guide, ADRs, and this plan match the code; dependencies pinned and current |
 
 ## Updating This Checklist
 

@@ -332,7 +332,49 @@ fn malformed_known_id_never_falls_back_to_another_kind() {
 
 #[test]
 fn unnumbered_descriptor_rejects_unadvertised_kind() {
-    assert!(classify_notification_with_hint(&[1, 2, 3], Some(&kbd_desc(None))).is_none());
+    let mouse = [0x01, 0x10, 0x20];
+    let consumer = [0xE9, 0x00];
+    let key_a = [0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00];
+    let keyboard_and_consumer = HidDescriptor {
+        has_consumer: true,
+        ..kbd_desc(None)
+    };
+    let keyboard_and_mouse = HidDescriptor {
+        has_mouse: true,
+        ..kbd_desc(None)
+    };
+    let mouse_and_consumer = HidDescriptor {
+        has_keyboard: false,
+        has_mouse: true,
+        has_consumer: true,
+        ..kbd_desc(None)
+    };
+    // A mixed map without report IDs routes by length, then drops any kind it
+    // does not declare.
+    let classify =
+        |data: &[u8], desc: &HidDescriptor| classify_notification_with_hint(data, Some(desc));
+    assert!(classify(&mouse, &keyboard_and_consumer).is_none());
+    assert!(classify(&consumer, &keyboard_and_mouse).is_none());
+    assert!(classify(&key_a, &mouse_and_consumer).is_none());
+    assert!(matches!(
+        classify(&consumer, &keyboard_and_consumer),
+        Some(HidReport::Consumer(_))
+    ));
+    assert!(matches!(
+        classify(&key_a, &keyboard_and_consumer),
+        Some(HidReport::Keyboard(_))
+    ));
+    assert!(matches!(
+        classify(&mouse, &keyboard_and_mouse),
+        Some(HidReport::Mouse(_))
+    ));
+    assert!(matches!(
+        classify(&mouse, &mouse_and_consumer),
+        Some(HidReport::Mouse(_))
+    ));
+    // A keyboard-only map reads every report as the keyboard's, so a
+    // mouse-sized one is dropped rather than moving the pointer.
+    assert!(classify(&mouse, &kbd_desc(None)).is_none());
 }
 
 #[test]

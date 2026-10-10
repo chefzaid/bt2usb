@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 6 | 13 | 0 |
+| [FIXME](#fixme) | 7 | 12 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **82** | **95** | **22** |
+| **Total** | **83** | **94** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -129,14 +129,16 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   their lists, and the highlight across a connect and a drop, and
   `a_dropped_link_returns_connecting_to_home_and_clears_the_list` covers the
   drop on Connecting.
-- [ ] **P2** **The advertised-kind filter for unnumbered maps lost its test.**
-  `unnumbered_descriptor_rejects_unadvertised_kind` feeds a 3-byte report to a
+- [x] **P2** **The advertised-kind filter for unnumbered maps lost its test.**
+  `unnumbered_descriptor_rejects_unadvertised_kind` fed a 3-byte report to a
   keyboard-only map, which now takes the keyboard-only shortcut in
   `classify_notification_with_hint` and never reaches the filter that drops a
-  report of a kind the map does not declare. No test covers that filter for a
-  mixed map, so removing it would let a keyboard-and-consumer device's
-  mouse-sized vendor report move the host's pointer. Close when tests send
-  undeclared kinds to mixed unnumbered maps and declared kinds still pass.
+  report of a kind the map does not declare. No test covered that filter for a
+  mixed map, so removing it would have let a keyboard-and-consumer device's
+  mouse-sized vendor report move the host's pointer. Fixed: the test now sends
+  each undeclared kind to three mixed maps without report IDs and checks the
+  declared kinds still pass; with the filter removed, it is the one test that
+  fails.
 - [ ] **P2** **Reconnect decisions in the scan shell have no host tests.**
   `SavedPeer` equality (`src/ble/scanner.rs`) decides whether re-registering a
   device keeps its slot's failure holdoff and fast-scan window: the same

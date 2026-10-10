@@ -4,9 +4,11 @@ This crate is copied from embassy-rs/nrf-softdevice commit
 `47d6121c6e823120e8b883a7ac75f44ce7daa3aa` under its original MIT / Apache-2.0
 licenses. Sibling crates remain git dependencies at the same commit.
 
-The GATT client changes are all in `src/ble/gatt_client.rs`; one further
-change, described at the end, adds a connection-parameter hook in
-`src/ble/security.rs` and `src/ble/gap.rs`. The first GATT change adds
+The GATT client changes are all in `src/ble/gatt_client.rs`. Two further
+changes are described at the end: a connection-parameter hook in
+`src/ble/security.rs` and `src/ble/gap.rs`, and a `log-sensitive-data` feature
+that keeps peer addresses, passkeys, and notification bytes out of the logs by
+default. The first GATT change adds
 `gatt_client::read_by_offset` and makes `read`
 delegate to it with offset zero. It exposes the SoftDevice's ATT Read Blob
 support through the existing response portal; the response handle and offset
@@ -37,7 +39,19 @@ security handler returns. bt2usb's `Bonder` uses it to keep the interval,
 latency and supervision timeout inside fixed bounds
 (`src/ble/conn_params.rs` in the application; ADR 0016).
 
+Sensitive log values: upstream logs the peer address of every connection at
+debug (`connected role={:?} peer_addr={:?}` in `src/ble/central.rs`), and at
+trace each notification's bytes (`GATT_HVX ... data={:?}` in
+`src/ble/gatt_client.rs`), which on a keyboard are keystrokes, and any
+displayed passkey (`on_passkey_display passkey={}` in `src/ble/gap.rs`). The
+patch adds a `log-sensitive-data` feature to `Cargo.toml`, off by default.
+Without it the three lines log the role, the notification length
+(`len={}`), and the bare event name instead. bt2usb forwards its own
+`log-sensitive-data` feature to it; `docs/security.md` ("Logging And Privacy")
+lists every dependency log line and when the opt-in is acceptable.
+
 Remove this patch only when the pinned upstream provides equivalent offset
-reads, timeout errors, bounded discovery, and a way for the application to
-answer connection parameter requests. Do not edit the Cargo checkout to deploy this change; the root Cargo
+reads, timeout errors, bounded discovery, a way for the application to
+answer connection parameter requests, and a way to keep peer addresses,
+passkeys, and notification bytes out of debug and trace logs. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

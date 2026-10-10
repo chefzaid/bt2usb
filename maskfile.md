@@ -205,10 +205,12 @@ echo "Done! Run 'mask coverage' to generate reports."
 
 ## clippy
 
-> Run clippy lints on embedded build
+> Run clippy lints on the embedded build, with and without the sensitive-logging opt-in
 
 ```bash
+set -e
 ./scripts/run-tool.sh cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
+./scripts/run-tool.sh cargo clippy --locked --features embedded,log-sensitive-data --target thumbv7em-none-eabihf -- -D warnings
 ```
 
 ## fmt
@@ -448,6 +450,7 @@ echo "=== Checking format ==="
 echo "=== Running clippy ==="
 ./scripts/run-tool.sh cargo clippy --locked --lib --tests -- -D warnings
 ./scripts/run-tool.sh cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
+./scripts/run-tool.sh cargo clippy --locked --features embedded,log-sensitive-data --target thumbv7em-none-eabihf -- -D warnings
 ./scripts/run-tool.sh cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
 echo "=== Running tests ==="
 ./scripts/run-tool.sh cargo test --locked --lib --tests

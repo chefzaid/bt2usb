@@ -2,7 +2,9 @@
 
 - Status: Accepted; amended by
   [ADR 0016](0016-bounded-peer-connection-parameters.md) (2026-10-09), which adds
-  one hook outside `gatt_client.rs`
+  one hook outside `gatt_client.rs`, and on 2026-10-10 by a log-only change that
+  keeps peer addresses, passkeys, and notification bytes out of default logs
+  ([logging and privacy](../security.md#logging-and-privacy))
 - Date: 2026-09-28
 
 ## Context
@@ -61,6 +63,12 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
     buffer, return `DiscoverError::InvalidResponse` for an empty, out-of-range,
     out-of-order, or non-advancing response, and saturate handle arithmetic
 - Assemble and bound long values in bt2usb, not in the vendored crate.
+- Since 2026-10-10, print a peer address, a displayed passkey, or notification
+  bytes only with the vendored crate's `log-sensitive-data` feature, which
+  bt2usb's feature of the same name forwards. Without it the three upstream
+  log lines that printed them (`central.rs`, `gap.rs`, `gatt_client.rs`) log
+  the role, the bare event name, and the notification length. This changes
+  log output only, never behavior.
 - Record the base commit, every change, and the removal condition in
   [vendor/nrf-softdevice/README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md).
 - Remove the patch only when the pinned upstream provides equivalent offset
@@ -146,13 +154,14 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Concern | Where |
 | --- | --- |
 | Pin and patch | `nrf-softdevice` and `nrf-softdevice-s140` with `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"` and the `[patch]` entry in [Cargo.toml](../../Cargo.toml); the resolved graph in `Cargo.lock` |
-| Vendored crate | `vendor/nrf-softdevice/` with `LICENSE-MIT`, `LICENSE-APACHE`, and its own `Cargo.toml`, which differs from upstream only in turning the sibling crates' `path` dependencies into git dependencies at the same `rev` |
+| Vendored crate | `vendor/nrf-softdevice/` with `LICENSE-MIT`, `LICENSE-APACHE`, and its own `Cargo.toml`, which differs from upstream only in turning the sibling crates' `path` dependencies into git dependencies at the same `rev` and in adding the `log-sensitive-data` feature |
 | Patched functions | `read_by_offset` (new), `read`, the new variants `ReadError::{Timeout, InvalidResponse}`, `DiscoverError::{Timeout, InvalidResponse, TooManyAttributes}`, and `MtuExchangeError::Timeout` (`ReadError::Truncated` is upstream's), in `vendor/nrf-softdevice/src/ble/gatt_client.rs` |
 | Fragment assembly | `LongRead` in [long_read.rs](../../src/ble/long_read.rs): `MAX_ATTRIBUTE_LEN = 512`, MTU accepted only in `23..=517`, completion only on a short final fragment or a valid end-of-value response |
 | Report Map read | `read_report_map` in [hid_client.rs](../../src/ble/hid_client.rs) maps failures to `BleErrorTag::ReportMapReadFailed`, `ReportMapTooLarge`, or `ReportMapInvalid`, shown as "HID map read failed", "HID map too large", and "Unsupported HID map" |
 | Absent map | Only a missing Report Map characteristic allows legacy classification, logged as `HID report map absent; using legacy report classification` |
 | Discovery failures | `HID discovery failed: {:?}` in `hid_client.rs` |
 | Connection parameter hook ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `SecurityHandler::conn_param_update_request` (default: grant unchanged) in `vendor/nrf-softdevice/src/ble/security.rs`, called from the `CONN_PARAM_UPDATE_REQUEST` arm in `vendor/nrf-softdevice/src/ble/gap.rs` |
+| Sensitive log gate | `#[cfg(feature = "log-sensitive-data")]` pairs on the connect line in `vendor/nrf-softdevice/src/ble/central.rs`, the passkey-display line in `gap.rs`, and the notification line in `gatt_client.rs`; the root feature in [Cargo.toml](../../Cargo.toml); a Clippy run with the feature in the CI "Embedded build & clippy" job |
 | ATT MTU | `att_mtu: 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
 | Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
 
@@ -166,7 +175,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and scheduled run
   37338711407 (2026-10-05). The CI format check covers only the application
   package, and no test exercises the patched functions; they were reviewed,
-  not tested.
+  not tested. The log gate was checked on 2026-10-10 by listing the defmt
+  format strings of `debug`, `trace`, and `info` builds with and without the
+  feature ([logging and privacy](../security.md#logging-and-privacy)).
 - **Hardware-verified:** not yet. The vendored functions run only on the
   board, and the repository holds no record of long Report Map reads,
   discovery, or timeouts against real peripherals.

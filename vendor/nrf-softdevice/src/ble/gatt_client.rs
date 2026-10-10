@@ -690,11 +690,19 @@ where
                 raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_HVX => {
                     let params = get_union_field(ble_evt, &gattc_evt.params.hvx);
                     let v = get_flexarray(ble_evt, &params.data, params.len as usize);
+                    #[cfg(feature = "log-sensitive-data")]
                     trace!(
                         "GATT_HVX write handle={:?} type={:?} data={:?}",
                         params.handle,
                         params.type_,
                         v
+                    );
+                    #[cfg(not(feature = "log-sensitive-data"))]
+                    trace!(
+                        "GATT_HVX write handle={:?} type={:?} len={}",
+                        params.handle,
+                        params.type_,
+                        v.len()
                     );
 
                     match params.type_.try_into() {

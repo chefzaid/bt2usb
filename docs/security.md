@@ -55,7 +55,9 @@ Known limitations:
   [Physical Access And Debug Port](#physical-access-and-debug-port))
 - no signed update verification, secure boot, anti-rollback, or DFU
 - logical deletion is not physical key erasure
-- a trace-level build of the vendored BLE crate logs raw notification bytes
+- a `trace`-level build records typing rhythm through per-notification log
+  lines, and the `log-sensitive-data` opt-in adds keystroke bytes and peer
+  addresses
 - a stable, factory-derived USB serial number is visible to every host
 - no published support lifetime, security contact, or response SLA, and
   GitHub private vulnerability reporting is not enabled for the repository
@@ -67,7 +69,7 @@ Known limitations:
 | --- | --- | --- | --- |
 | Long-term key (LTK) and master ID per bonded peer | RAM in `Bonder` ([bonder.rs](../src/ble/bonder.rs)) and `DEVICE_STORE`; flash pages 240–243 (`0xF0000–0xF4000`) as a 50-byte bond record ([codec.rs](../src/storage/codec.rs)) | Decrypts that link's recorded traffic and lets an attacker impersonate either side of the bond | Never logged by application code; internal flash only. Not encrypted at rest, not readout-protected |
 | Identity resolving key (IRK) and identity address | Same record and RAM copies as the LTK | Resolves the peripheral's private addresses, so the holder can track or impersonate its identity | Same as LTK |
-| Keystroke and pointer stream | Transient: notification buffer (at most 32 bytes), per-link coalescer, 16-entry HID channel, aggregator, endpoint mailboxes | Passwords and private text pass through the bridge | Encrypted BLE link required; never persisted; not logged by application code (a trace-level dependency log is the exception, see [Logging And Privacy](#logging-and-privacy)) |
+| Keystroke and pointer stream | Transient: notification buffer (at most 32 bytes), per-link coalescer, 16-entry HID channel, aggregator, endpoint mailboxes | Passwords and private text pass through the bridge | Encrypted BLE link required; never persisted; content not logged by default. A `trace` build logs each notification's length and time, and only the `log-sensitive-data` opt-in logs its bytes (see [Logging And Privacy](#logging-and-privacy)) |
 | Host access | The three USB HID interfaces ([hid_device.rs](../src/usb/hid_device.rs)) | Anything that can feed input can type commands as the logged-in user | Input comes only from bonded, encrypted peers; pairing needs a button press on the bridge |
 | Paired-device metadata | Flash record (address, name, RSSI hint), OLED, RTT logs | Reveals which devices a person owns and uses | None beyond physical control of the unit |
 | Firmware image | Application flash `0x27000–0xF0000` ([memory_sd.x](../memory_sd.x)); release ELF/HEX | Replacement firmware can log keystrokes or inject input | Attested release provenance checked by people before flashing; the device itself verifies nothing |
@@ -384,16 +386,64 @@ logs them. What application code does log:
 | warn/error | Failure causes | `HID discovery failed: {:?}`, `Flash read error: {:?}` | Error codes only |
 | debug | Store and descriptor diagnostics | `DeviceStore: no changes to save`, `HID descriptor: no recognized usages found` | None |
 
-Logs from the vendored `nrf-softdevice` crate need more care:
+### Dependency Logs
 
-- At **debug**, `central.rs` logs `connected role={:?} peer_addr={:?}`, so every
-  local build records peer BLE addresses.
-- At **trace**, `gatt_client.rs` logs `GATT_HVX write handle={:?} type={:?} data={:?}`
-  with the raw notification bytes, which are keystrokes. Never build with
-  `DEFMT_LOG=trace`, or a trace filter for `nrf_softdevice`, on a unit used for
-  real typing, and never share such a log.
-- Debug and trace output of `embassy-usb`, `embassy-nrf`, and
-  `sequential-storage` has not been audited.
+Dependency log statements were reviewed on 2026-10-10 by listing every `defmt`
+macro in the crates the firmware builds, at the versions in `Cargo.lock`. Only
+the rows below print values; every other dependency line is a fixed string.
+
+| Crate | Level | What it logs | Sensitivity |
+| --- | --- | --- | --- |
+| `nrf-softdevice` (vendored) | info, warn | The SoftDevice's RAM requirement and the error codes of rejected SoftDevice calls | None |
+| `nrf-softdevice` (vendored) | debug | `connected role={:?}`, then connection-parameter, ATT MTU, and data-length values | None |
+| `nrf-softdevice` (vendored) | trace | Connection handles, PHY and pairing-procedure flags, `on_passkey_display`, and `GATT_HVX write handle={:?} type={:?} len={}` for every notification | Notification lengths and their uptime timestamps show when keys go down and up, so a trace log records typing rhythm |
+| `embassy-usb` 0.6.0 | info, warn | A Boot-protocol request rejected on an interface without a request handler; oversized or failed control transfers | None |
+| `embassy-usb` 0.6.0 | debug | `SET_CONFIGURATION` state | None |
+| `embassy-usb` 0.6.0 | trace | Every control request and the bytes of each control OUT data stage (`control out data: {:02x}`, `HID control_out {:?} {=[u8]:x}`) | Output reports from the host, which are the lock-key LED state the application already logs at info |
+| `embassy-nrf` 0.7.0 | warn | UICR already holds a different reset-pin or NFC-pin setting ([Physical Access And Debug Port](#physical-access-and-debug-port)) | None |
+| `embassy-nrf` 0.7.0 | debug, trace | USB endpoint enable state, aborted control transfers, and DMA buffer copies | None |
+| `embassy-sync`, `embassy-hal-internal` | trace | Ring-buffer indices, not contents | None |
+| `sequential-storage` 7.2.0, `embassy-executor`, `embassy-time`, `ssd1306` | None | No log statements; `sequential-storage` is also built without its `defmt` feature | None |
+
+Three lines of the vendored `nrf-softdevice` print a peer address, a passkey,
+or input bytes. bt2usb patches them so that only its `log-sensitive-data`
+Cargo feature prints those values
+([README.bt2usb.md](../vendor/nrf-softdevice/README.bt2usb.md)):
+
+| Source line | Level | Default build | With `log-sensitive-data` |
+| --- | --- | --- | --- |
+| `central.rs`, on connect | debug | `connected role={:?}` | `connected role={:?} peer_addr={:?}` |
+| `gatt_client.rs`, every notification | trace | `GATT_HVX write handle={:?} type={:?} len={}` | `GATT_HVX write handle={:?} type={:?} data={:?}`, the raw report bytes: keystrokes and pointer motion |
+| `gap.rs`, passkey display | trace | `on_passkey_display` | `on_passkey_display passkey={}` |
+
+The Just Works pairing used today
+([ADR 0011](adr/0011-interim-just-works-pairing.md)) never displays a passkey,
+so the third line matters only once authenticated pairing lands. The trace line
+that prints a bond's master ID and peer address (`ble evt sec info request` in
+`gap.rs`) is compiled only with the crate's `ble-peripheral` feature, which
+bt2usb does not enable, and no vendored line prints an LTK or IRK.
+
+The feature exists to debug a peripheral's reports on a bench unit:
+
+```sh
+DEFMT_LOG=trace cargo build --locked --features embedded,log-sensitive-data --target thumbv7em-none-eabihf
+```
+
+Release artifacts cannot carry these values: CI builds them with
+`--features embedded` at `info`, where defmt removes every debug and trace
+statement. CI also runs Clippy with the feature, so the opt-in branches keep
+compiling. Never build at `trace` on a unit used for real typing, with or
+without the feature, and never share such a log; even without the feature, it
+records typing rhythm.
+
+Checked on 2026-10-10 by building `bt2usb` and listing the defmt format strings
+in the ELF with `llvm-nm`: the default `debug` build has `connected role={:?}`
+and no `peer_addr`; a `trace` build has the `len={}` form and no notification
+bytes or passkey; only a `trace` build with `log-sensitive-data` has
+`peer_addr`, `data={:?}`, and `passkey={}`; an `info` build has none of the
+three lines.
+
+### Data Outside The Logs
 
 Data that leaves the device without a probe: the USB descriptors (including the
 per-unit serial) go to every host, the OLED shows device names, and stored

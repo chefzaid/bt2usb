@@ -42,6 +42,7 @@ Clippy warning into an error.
 | Formatting | `cargo fmt --package bt2usb -- --check` | `mask ci`, `mask fmt-check` (`cargo fmt -- --check`, the same files) | Host tests, Linux and Windows | Fails the job |
 | Host Clippy | `cargo clippy --locked --lib --tests -- -D warnings` | `mask ci` | Host tests, Linux and Windows | Fails on any warning |
 | Embedded Clippy | `cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings` | `mask ci`, `mask clippy` | Embedded build & clippy | Fails on any warning |
+| Embedded Clippy, sensitive-logging opt-in | The same command with `--features embedded,log-sensitive-data` | `mask ci`, `mask clippy` | Embedded build & clippy | Fails on any warning; keeps the vendored opt-in branches compiling ([dependency logs](security.md#dependency-logs)) |
 | Simulation Clippy | `cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings` | `mask ci` | Renode simulation test | Fails on any warning |
 | Host rustdoc | `cargo doc --locked --no-deps --document-private-items --lib` with `RUSTDOCFLAGS=-D warnings` | `mask ci`, `mask rustdoc-check` | Host tests, Linux and Windows | Fails on any rustdoc warning |
 | Firmware rustdoc | The same flags with `--features embedded --target thumbv7em-none-eabihf`, once for `--lib` and once for `--bin bt2usb --bin bt2usb-selftest` | `mask ci`, `mask rustdoc-check` | Embedded build & clippy | Fails on any rustdoc warning |
@@ -97,7 +98,7 @@ jobs reuse the embedded job's bytes instead of rebuilding.
 
 ### Local Checks Before A Pull Request
 
-`mask ci` covers formatting, the three Clippy configurations, host tests,
+`mask ci` covers formatting, the four Clippy configurations, host tests,
 rustdoc for every build with warnings denied, the Markdown checks, and both
 firmware builds. It does not run the coverage floor, actionlint, the Python
 and shell linters, the release-helper, documentation-checker, or script-linter
@@ -171,7 +172,7 @@ host library also carries `#![forbid(unsafe_code)]` in
 [lib.rs](../src/lib.rs). There is no `clippy.toml`, and no other pedantic,
 restriction, or nursery lint is enabled.
 
-Clippy runs in three configurations because `cfg` gating means each one sees
+Clippy runs in four configurations because `cfg` gating means each one sees
 different code:
 
 | Configuration | Targets checked | Code only this configuration sees |
@@ -179,6 +180,7 @@ different code:
 | Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs` | `#[cfg(test)]` modules and test files |
 | Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, and GATT HID client modules |
 | Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs` and its UART output path |
+| Embedded with the opt-in (`--features embedded,log-sensitive-data`) | Library; `bt2usb`; `bt2usb-selftest` | No bt2usb code. It compiles the opt-in branches of three log lines in the vendored `nrf-softdevice` ([dependency logs](security.md#dependency-logs)); Clippy does not lint that crate, which is a path dependency rather than a workspace member |
 
 The display driver and button tasks in `src/ui/` are compiled by both the
 embedded and the simulation configurations (`sim.rs` declares `mod ui`), but

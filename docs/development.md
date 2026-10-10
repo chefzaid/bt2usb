@@ -64,7 +64,7 @@ it, and every command runs from the repository root.
    1.95.0 with rustfmt, Clippy, and the ARM target; if that toolchain is
    missing, install it as shown under [Toolchain](#toolchain). Then run
    `mask test`, or without mask (for example in PowerShell)
-   `cargo test --locked --lib --tests`. `mask ci` adds formatting, the three
+   `cargo test --locked --lib --tests`. `mask ci` adds formatting, the four
    Clippy configurations, the rustdoc checks, and the firmware and simulation
    builds. The
    release-helper tests also need Python 3.11 or newer.
@@ -173,7 +173,11 @@ skips them; that is why host tests never try to link firmware. `embedded` also
 turns on `cortex-m-rt/paint-stack`, which the
 [stack high-water log](code-quality.md#binary-size-and-memory-budgets) relies
 on; `sim` does not. The `defmt` feature, enabled by both firmware features,
-switches on `defmt::Format` derives in the shared modules.
+switches on `defmt::Format` derives in the shared modules. The
+`log-sensitive-data` feature, added to `embedded` only for bench debugging,
+makes the vendored `nrf-softdevice` log peer addresses, passkeys, and
+notification bytes; [logging and privacy](security.md#logging-and-privacy)
+says what it adds and why it must never reach a unit used for real typing.
 
 [build.rs](../build.rs) chooses the memory map by feature and refuses the
 combined configuration:
@@ -210,6 +214,7 @@ cargo fmt --package bt2usb -- --check
 cargo clippy --locked --lib --tests -- -D warnings
 cargo test --locked --lib --tests
 cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
+cargo clippy --locked --features embedded,log-sensitive-data --target thumbv7em-none-eabihf -- -D warnings
 cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
 cargo build --locked --features sim --target thumbv7em-none-eabihf
@@ -307,11 +312,11 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | --- | --- | --- |
 | `mask test` | `cargo test --locked --lib --tests` | Native host; library unit tests and `tests/integration.rs` |
 | `mask test-verbose` | Same with `-- --nocapture` | Shows test output |
-| `mask clippy` | `cargo clippy --locked --features embedded --target <arm> -- -D warnings` | Embedded configuration only; host and simulation Clippy run in `mask ci` |
+| `mask clippy` | `cargo clippy --locked --features embedded --target <arm> -- -D warnings`, then the same with `--features embedded,log-sensitive-data` | Embedded configuration only; host and simulation Clippy run in `mask ci` |
 | `mask fmt` | `cargo fmt` | Formats the bt2usb package only |
 | `mask fmt-check` | `cargo fmt -- --check` | Same files as CI's `--package bt2usb` with the current manifest |
 | `mask lint-scripts` | `python3 -m unittest discover -s scripts -p "lint_scripts_test.py"`, then `python3 scripts/lint_scripts.py` (or `python` where `python3` is missing) | `ruff check` and `ruff format --check` over every tracked Python file, and ShellCheck over every `*.sh` file and every Bash recipe in `maskfile.md`; exits 2 when Ruff or ShellCheck is not on `PATH` ([code quality](code-quality.md#python-and-shell-checks)) |
-| `mask ci` | Format check; Clippy for host, embedded, and simulation; host tests; the four rustdoc builds of `mask rustdoc-check`; `scripts/check_docs.py`; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
+| `mask ci` | Format check; Clippy for host, embedded (with and without `log-sensitive-data`), and simulation; host tests; the four rustdoc builds of `mask rustdoc-check`; `scripts/check_docs.py`; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
 
 `mask ci` does not run the release-helper, documentation-checker, or
 script-linter tests, actionlint, Ruff, ShellCheck, the coverage floor, the
@@ -437,7 +442,7 @@ the level is chosen; what each level reveals about peers and typing is in
 | `debug` | Local default from `.cargo/config.toml`. Adds the application's two `debug!` sites and debug output from dependencies built with their `defmt` feature |
 | `info` | CI and release builds. `release.py package` rejects build metadata whose `defmt_log` is not `info` |
 | `warn` | Hides the self-test's `[PASS]` lines, which are `info`; avoid for bring-up |
-| `trace` | Never on a unit used for real typing ([why](security.md#logging-and-privacy)) |
+| `trace` | Never on a unit used for real typing: it logs every BLE notification's length, which records typing rhythm ([why](security.md#logging-and-privacy)) |
 
 Cargo's `[env]` does not override a variable that is already set, so an
 exported `DEFMT_LOG` wins over the config file:
@@ -449,7 +454,9 @@ DEFMT_LOG=info cargo build --locked --features embedded --target thumbv7em-none-
 `release.py stage` records `DEFMT_LOG` from its own environment and assumes
 `info` when it is unset; it cannot see the value Cargo applied from the config
 file. Set `DEFMT_LOG` explicitly for both the build and the staging command
-when you reproduce the CI staging step locally.
+when you reproduce the CI staging step locally. It likewise records the
+features as `["embedded"]` without inspecting the ELF, so never stage a build
+made with `log-sensitive-data` or any other extra feature.
 
 ## Devcontainer And WSL2
 

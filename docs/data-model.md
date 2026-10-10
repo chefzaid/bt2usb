@@ -738,18 +738,21 @@ Factory reset of a readable store appends an empty item rather than erasing
 pages.
 
 Which logs may contain this data, and at which level, is defined in
-[security: logging and privacy](security.md#logging-and-privacy). In short, the
-application's own log statements print no addresses, keys, or keystrokes, but
-the vendored `nrf-softdevice` does: at debug, the default for local builds, it
-logs every peer address, and at trace it logs raw notification bytes
-(`GATT_HVX write handle={:?} type={:?} data={:?}` in
-[gatt_client.rs](../vendor/nrf-softdevice/src/ble/gatt_client.rs)), which are
-keystrokes, and any displayed passkey (`on_passkey_display passkey={}` in
-[gap.rs](../vendor/nrf-softdevice/src/ble/gap.rs)). The Just Works pairing used
-today displays no passkey, and the trace line that prints a peer's master ID
-(`ble evt sec info request`) is compiled only with the crate's
-`ble-peripheral` feature, which bt2usb does not enable. No vendored log line
-prints an LTK or IRK.
+[security: logging and privacy](security.md#logging-and-privacy). In short,
+no default build logs an address, key, passkey, or keystroke. The application's
+own statements never print them, and the three vendored `nrf-softdevice` lines
+that could (`connected role={:?} peer_addr={:?}` in
+[central.rs](../vendor/nrf-softdevice/src/ble/central.rs), the notification
+bytes of `GATT_HVX write handle={:?} type={:?} data={:?}` in
+[gatt_client.rs](../vendor/nrf-softdevice/src/ble/gatt_client.rs), and
+`on_passkey_display passkey={}` in
+[gap.rs](../vendor/nrf-softdevice/src/ble/gap.rs)) print those values only
+when the firmware is built with the `log-sensitive-data` feature. Without it, a
+`trace` build still logs every notification's length, which records typing
+rhythm. The trace line that prints a peer's master ID
+(`ble evt sec info request`) is compiled only with the crate's `ble-peripheral`
+feature, which bt2usb does not enable. No vendored log line prints an LTK or
+IRK.
 
 ## Related Guides
 

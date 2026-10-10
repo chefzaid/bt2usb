@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 24 | 0 | 0 |
+| [FIXME](#fixme) | 25 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -32,14 +32,14 @@ probe, or USB host to close.
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
 | [UI, Display And Power](#ui-display-and-power) | 9 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
-| [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
+| [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 10 | 6 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 8 | 8 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **106** | **76** | **22** |
+| **Total** | **108** | **75** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -272,6 +272,15 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   `mask rustdoc-check` and `mask ci` built the rustdoc command in word-split
   strings. Both were found by the first Ruff and ShellCheck run below and fixed:
   the import is gone, and the recipes use Bash arrays.
+- [x] **P3** **The operations runbook overstated what `trace` logs.** Its
+  log-sharing advice said a `trace` build also logs "security-request details,
+  including the bond's master identifier (EDIV and RAND) and peer addresses".
+  That line (`ble evt sec info request` in `vendor/nrf-softdevice/src/ble/gap.rs`)
+  is compiled only with the crate's `ble-peripheral` feature, which bt2usb does
+  not enable, and the boot-sequence note still said dependency logs were not
+  audited. Found while reviewing the vendored logs below; fixed in the same
+  change, which rewrote both passages from the
+  [dependency log review](docs/security.md#dependency-logs).
 
 ## Needs Your Input
 
@@ -844,10 +853,10 @@ Physical access, key protection, and production provisioning. Context:
   threat model and provisioning procedure are reviewed and readout/recovery
   behavior is demonstrated on a production-equivalent board
   ([security](docs/security.md#key-storage-and-deletion)).
-- [ ] **P1** **Vendored debug and trace logs.** Local builds log at `debug`
-  (`.cargo/config.toml`), where the vendored `nrf-softdevice` records each peer
+- [x] **P1** **Vendored debug and trace logs.** Local builds log at `debug`
+  (`.cargo/config.toml`), where the vendored `nrf-softdevice` recorded each peer
   address (`connected role={:?} peer_addr={:?}` in
-  `vendor/nrf-softdevice/src/ble/central.rs`), and at `trace` it logs raw
+  `vendor/nrf-softdevice/src/ble/central.rs`), and at `trace` it logged raw
   notification bytes, which are keystrokes
   (`GATT_HVX write handle={:?} type={:?} data={:?}` in
   `vendor/nrf-softdevice/src/ble/gatt_client.rs`).
@@ -855,6 +864,23 @@ Physical access, key protection, and production provisioning. Context:
   data can be logged only through an explicit, documented opt-in, and the debug
   output of `embassy-usb`, `embassy-nrf`, and `sequential-storage` has been
   reviewed ([security](docs/security.md#logging-and-privacy)).
+  Done: the vendored crate has a `log-sensitive-data` feature, forwarded by
+  bt2usb's feature of the same name and off by default. Without it the connect
+  line logs only the role, the notification line logs `len={}` instead of the
+  bytes, and the passkey-display line (unused by Just Works pairing) omits the
+  passkey. Listing the defmt strings of built ELFs confirmed that the default
+  `debug` build has no `peer_addr`, a `trace` build has no notification bytes
+  or passkey, and an `info` build has none of the three lines. CI and
+  `mask clippy` also run embedded Clippy with the feature. The review of every
+  crate the firmware builds with `defmt` found no other line that prints an
+  address, key, or input: `embassy-usb` traces control OUT data, which is the
+  host's LED output report; `embassy-nrf` logs peripheral state and UICR
+  warnings; `sequential-storage` has no log statements
+  ([dependency logs](docs/security.md#dependency-logs),
+  [vendored patch notes](vendor/nrf-softdevice/README.bt2usb.md),
+  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). A `trace` build
+  still records typing rhythm through one line per notification, so the
+  guides keep `trace` off units used for real typing.
 
 ## Board Bring-Up And Hardware Acceptance
 

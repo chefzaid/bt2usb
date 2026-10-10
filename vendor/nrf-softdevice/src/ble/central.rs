@@ -95,7 +95,10 @@ where
                     let role = Role::from_raw(params.role);
                     let peer_address = Address::from_raw(params.peer_addr);
                     let conn_params = params.conn_params;
+                    #[cfg(feature = "log-sensitive-data")]
                     debug!("connected role={:?} peer_addr={:?}", role, peer_address);
+                    #[cfg(not(feature = "log-sensitive-data"))]
+                    debug!("connected role={:?}", role);
 
                     match new_conn(conn_handle, role, peer_address, conn_params) {
                         Ok(conn) => Ok(conn),

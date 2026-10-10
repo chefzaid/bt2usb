@@ -51,6 +51,11 @@ embedded = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
             "dep:static_cell", "heapless/defmt-03", "defmt"]
 # Enable defmt formatting (for embedded builds)
 defmt = ["dep:defmt"]
+# Opt-in for debugging the BLE link: the vendored nrf-softdevice then logs peer
+# addresses (debug), pairing passkeys and notification payloads, which are
+# keystrokes (trace). Never use it on a unit used for real typing; release
+# builds cannot enable it (docs/security.md#logging-and-privacy).
+log-sensitive-data = ["nrf-softdevice?/log-sensitive-data"]
 # SoftDevice-free build for Renode simulation: same MCU + Embassy + display +
 # peripherals as `embedded`, but no nrf-softdevice / USB / flash-storage stack.
 # Brings its own critical-section impl (cortex-m single-core) since the

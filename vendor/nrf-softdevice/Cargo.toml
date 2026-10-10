@@ -15,6 +15,10 @@ default = ["macros"]
 
 defmt = ["dep:defmt", "heapless/defmt"]
 
+# bt2usb patch: log peer addresses, pairing passkeys, and notification payloads
+# (keystrokes and pointer motion). Off by default; see README.bt2usb.md.
+log-sensitive-data = []
+
 nrf52805 = []
 nrf52810 = []
 nrf52811 = []

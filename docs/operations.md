@@ -83,10 +83,11 @@ When `probe-rs run` is attached, the session ends with the panic message.
 `DEFMT_LOG` filters log statements at compile time, so changing it needs a
 rebuild and a reflash. Local builds log at `debug` and CI and release
 artifacts at `info`; [development](development.md#log-levels) owns how the
-level is set and overridden. What each level reveals, including the peer
-addresses and raw keystroke bytes that the vendored SoftDevice wrapper logs at
-`debug` and `trace`, is in [security](security.md#logging-and-privacy). Note
-the level with any log you share ([reporting a defect](#reporting-a-defect)).
+level is set and overridden. What each level reveals, including the typing
+rhythm that any `trace` build records and the peer addresses and keystroke
+bytes that only the `log-sensitive-data` build feature adds, is in
+[security](security.md#logging-and-privacy). Note the level and any extra
+feature with any log you share ([reporting a defect](#reporting-a-defect)).
 
 ### Renode UART
 
@@ -115,10 +116,12 @@ firmware, so flash the bridge again afterwards. The
 ### Boot Sequence
 
 The main task logs these lines in this order, with no `.await` between them, so
-no other task can interleave. At the release `info` level neither this
-firmware nor the vendored SoftDevice wrapper logs anything else between them
-(other dependencies' log statements were not audited); a local `debug` build
-adds dependency lines. Placeholders are shown as `N`, `X`, and `<...>`.
+no other task can interleave. At the release `info` level no other line
+appears between them, except an `embassy-nrf` warning right after
+`bt2usb firmware starting` when UICR already holds a different reset-pin or
+NFC-pin setting ([dependency logs](security.md#dependency-logs)); a local
+`debug` build adds dependency lines. Placeholders are shown as `N`, `X`, and
+`<...>`.
 
 ```text
 bt2usb firmware starting
@@ -948,17 +951,18 @@ records a completed first-flash checklist. A useful log interval starts at
 `DEFMT_LOG` level and the uptime timestamps of the failing steps.
 
 At `info` and `debug`, the firmware's own lines carry device names and slot
-numbers but no key material or keystroke content. At `debug`, which local
-builds use by default, the vendored SoftDevice wrapper adds
-`connected role={:?} peer_addr={:?}` with the peer's BLE address. At `trace`,
-it also logs every HID notification's raw bytes
-(`GATT_HVX write handle={:?} type={:?} data={:?}`), which are the user's
-keystrokes, and security-request details, including the bond's master
-identifier (EDIV and RAND) and peer addresses. Never use a `trace` build on a
-unit used for real typing
-([logging and privacy](security.md#logging-and-privacy)). Mask addresses, device names, and the USB
-serial, remove any `trace` output and any output added locally for debugging,
-and follow the checklist in the bug template before sharing a log.
+numbers but no key material, addresses, or keystroke content. At `trace`, the
+vendored SoftDevice wrapper logs one
+`GATT_HVX write handle={:?} type={:?} len={}` line per HID notification, whose
+timestamps record when keys go down and up. Only a build with the
+`log-sensitive-data` feature adds the peer's BLE address on connect
+(`connected role={:?} peer_addr={:?}`, at `debug`) and each notification's raw
+bytes (`data={:?}`, at `trace`), which are the user's keystrokes. Never use a
+`trace` build, or one with that feature, on a unit used for real typing
+([logging and privacy](security.md#logging-and-privacy)). Mask addresses,
+device names, and the USB serial, remove any `trace` output and any output
+added locally for debugging, and follow the checklist in the bug template
+before sharing a log.
 
 ## Related Guides
 

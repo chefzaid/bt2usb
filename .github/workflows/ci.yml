@@ -213,6 +213,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Clippy (embedded, deny warnings)
         run: cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
+      # The vendored crate's sensitive-logging opt-in must keep compiling; it is
+      # never part of a release build (docs/security.md#dependency-logs).
+      - name: Clippy (embedded with log-sensitive-data, deny warnings)
+        run: cargo clippy --locked --features embedded,log-sensitive-data --target thumbv7em-none-eabihf -- -D warnings
       # The library and the binary share the name bt2usb, so document them apart.
       - name: Build firmware documentation (deny warnings)
         env:

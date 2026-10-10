@@ -221,10 +221,13 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_PASSKEY_DISPLAY => {
             let params = &gap_evt.params.passkey_display;
             debug_assert_eq!(params.match_request(), 0);
+            #[cfg(feature = "log-sensitive-data")]
             trace!(
                 "on_passkey_display passkey={}",
                 core::str::from_utf8_unchecked(&params.passkey)
             );
+            #[cfg(not(feature = "log-sensitive-data"))]
+            trace!("on_passkey_display");
             #[cfg(feature = "ble-sec")]
             connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| {
                 if let Some(handler) = state.security.handler {

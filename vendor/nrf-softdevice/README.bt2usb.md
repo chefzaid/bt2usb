@@ -97,10 +97,10 @@ response can be a 132-byte event, over the default 128-byte buffer, and
 `events::run_ble` panics on a too-small buffer. bt2usb's `sd_setup.rs` checks
 the buffer against the MTU at compile time. The panic paths left in the
 compiled modules are listed in bt2usb's `docs/code-quality.md` ("Vendored
-nrf-softdevice"), each with why it does not fire, except
-`Address::address_type`: it unwraps the identity address type a peer sends
-during pairing and panics on a reserved type unless the SoftDevice rejects it
-first. A bt2usb FIXME tracks it.
+nrf-softdevice"), each with why it does not fire. One of them,
+`Address::address_type`, unwraps the address type and panics on a reserved
+one; bt2usb never calls it on the identity address a peer sends during
+pairing, and decodes that type itself in `src/storage.rs`.
 
 Remove this patch only when the pinned upstream provides equivalent offset
 reads, timeout errors, bounded discovery, a way for the application to

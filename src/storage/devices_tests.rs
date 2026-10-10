@@ -57,6 +57,14 @@ fn bonded(id: u8, rotation: u8, name: &str) -> StoredDevice {
     paired
 }
 
+const ALL_KINDS: [AddressKind; 5] = [
+    AddressKind::Public,
+    AddressKind::RandomStatic,
+    AddressKind::RandomPrivateResolvable,
+    AddressKind::RandomPrivateNonResolvable,
+    AddressKind::Anonymous,
+];
+
 fn addresses(list: &DeviceList) -> std::vec::Vec<PeerAddress> {
     list.iter_recent().map(|stored| stored.address).collect()
 }
@@ -140,6 +148,64 @@ fn keys_merge_with_an_entry_stored_under_the_identity_or_a_private_address() {
         AddOutcome::Added
     );
     assert_eq!(list.len(), 2);
+}
+
+// ── Identity addresses ─────────────────────────────────────────────────
+
+#[test]
+fn softdevice_address_types_decode_and_reserved_ones_are_refused() {
+    let defined = [
+        (0x00, AddressKind::Public),
+        (0x01, AddressKind::RandomStatic),
+        (0x02, AddressKind::RandomPrivateResolvable),
+        (0x03, AddressKind::RandomPrivateNonResolvable),
+        (0x7F, AddressKind::Anonymous),
+    ];
+    for (gap_type, kind) in defined {
+        assert_eq!(AddressKind::from_gap_type(gap_type), Some(kind));
+    }
+    let reserved = (0..=u8::MAX)
+        .filter(|&gap_type| AddressKind::from_gap_type(gap_type).is_none())
+        .count();
+    assert_eq!(reserved, 256 - defined.len());
+}
+
+#[test]
+fn a_bond_is_stored_only_with_a_public_or_random_static_identity() {
+    for kind in ALL_KINDS {
+        let is_identity = matches!(kind, AddressKind::Public | AddressKind::RandomStatic);
+        assert_eq!(kind.is_identity(), is_identity, "{kind:?}");
+        let mut paired = bonded(1, 0, "Keyboard");
+        paired.bond.as_mut().unwrap().identity = address(kind, 1);
+        let mut list = DeviceList::new();
+        assert_eq!(list.add(paired, &resolve), AddOutcome::Added);
+        let stored = list.iter_recent().next().unwrap().clone();
+        if is_identity {
+            assert_eq!(stored.address, address(kind, 1));
+            assert!(stored.bond.is_some());
+        } else {
+            // Kept without keys, at the address it connected from.
+            assert_eq!(stored.address, private_address(1, 0));
+            assert_eq!(stored.bond, None, "{kind:?}");
+        }
+        // Either way the next boot loads what the save wrote.
+        let mut reloaded = DeviceList::new();
+        assert!(reloaded.load(&item(&list), &resolve), "{kind:?}");
+        assert!(reloaded.is_writable());
+        assert_eq!(reloaded.iter_recent().next(), Some(&stored));
+    }
+}
+
+#[test]
+fn a_refused_bond_leaves_the_stored_bond_of_the_same_peer() {
+    let mut list = DeviceList::new();
+    list.add(bonded(1, 0, "Keyboard"), &resolve);
+    let mut refused = bonded(1, 3, "Keyboard");
+    refused.bond.as_mut().unwrap().identity = private_address(1, 3);
+    refused.bond.as_mut().unwrap().ltk = [0x99; 16];
+    list.add(refused, &resolve);
+    assert_eq!(list.len(), 1);
+    assert_eq!(list.bonds().next(), Some(bond(1, 0x77)));
 }
 
 // ── Capacity, lookup, and removal ──────────────────────────────────────

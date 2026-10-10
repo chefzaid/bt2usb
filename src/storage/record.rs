@@ -21,14 +21,9 @@ pub fn base(data: &[u8]) -> Option<(&str, usize)> {
 pub fn bond(data: &[u8], base_end: usize) -> Option<Option<&[u8]>> {
     match data.get(base_end)? {
         0 if data.len() == base_end + 1 => Some(None),
-        1 if data.len() == base_end + 1 + BOND_RECORD_SIZE => {
-            let bytes = data.get(base_end + 1..)?;
-            // An identity address must be public or random static, never an
-            // anonymous/private advertising address or an unknown type. Its
-            // type is the last byte of the bond.
-            let identity_kind = *bytes.get(BOND_RECORD_SIZE - 1)?;
-            (identity_kind <= 1).then_some(Some(bytes))
-        }
+        // `codec::decode_bond` checks the bond's contents, including that its
+        // identity is a public or random static address.
+        1 if data.len() == base_end + 1 + BOND_RECORD_SIZE => data.get(base_end + 1..).map(Some),
         _ => None,
     }
 }
@@ -71,8 +66,6 @@ mod tests {
         for size in 10..data.len() {
             assert!(bond(&data[..size], end).is_none());
         }
-        data[59] = 2;
-        assert!(bond(&data, end).is_none());
     }
 
     #[test]

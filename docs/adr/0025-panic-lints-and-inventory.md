@@ -175,15 +175,20 @@ Follow-ups, tracked in [TODO.md](../../TODO.md#fixme) (the last one under
 
 - "Report Maps are cut short when a peripheral offers an MTU above 64": the
   vendored MTU exchange stores the peer's receive MTU, not the negotiated one.
+  Fixed on 2026-10-10 ([ADR 0007](0007-vendored-softdevice-patch.md)).
 - "A bond with a private or reserved identity address breaks the store": the
   vendored `Address::address_type` unwraps the identity address type a peer
   sends during pairing, and a private identity is saved but refused on reload.
+  Fixed on 2026-10-10: the store decodes the type itself and keeps no bond a
+  reload would refuse ([ADR 0006](0006-fail-closed-pairing-store.md)).
 - "A peripheral that refuses the MTU exchange cannot connect": the vendored
   connect fails when the peer answers the exchange with an error, though the
-  Core specification lets the link continue at the default MTU.
+  Core specification lets the link continue at the default MTU. Fixed on
+  2026-10-10 ([ADR 0007](0007-vendored-softdevice-patch.md)).
 - "A peripheral's own MTU exchange or CCCD access is never answered": with the
   GATT server feature off, the vendored crate drops the GATT server events
-  that need a reply.
+  that need a reply. Fixed on 2026-10-10
+  ([ADR 0007](0007-vendored-softdevice-patch.md)).
 - "Bonder callbacks re-enter the vendored connection state": `on_bonded` and
   `get_peripheral_key` call `Connection::peer_address` while the vendored
   crate holds a mutable reference to the same state, which is undefined

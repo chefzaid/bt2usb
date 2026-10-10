@@ -34,6 +34,33 @@ pub enum AddressKind {
     Anonymous,
 }
 
+impl AddressKind {
+    /// The kind of a SoftDevice address type (`ble_gap_addr_t::addr_type`,
+    /// numbered as the Core specification numbers it), or `None` for a type
+    /// the specification reserves. Unlike nrf-softdevice's
+    /// `Address::address_type`, which `unwrap!`s, it never panics, so the
+    /// store can take a type a peer chose.
+    pub const fn from_gap_type(gap_type: u8) -> Option<Self> {
+        match gap_type {
+            0x00 => Some(Self::Public),
+            0x01 => Some(Self::RandomStatic),
+            0x02 => Some(Self::RandomPrivateResolvable),
+            0x03 => Some(Self::RandomPrivateNonResolvable),
+            0x7F => Some(Self::Anonymous),
+            _ => None,
+        }
+    }
+
+    /// Whether a bond may name an address of this kind as the peer's identity.
+    /// The Core specification's Identity Address Information carries only a
+    /// public or a random static address, and the store keeps no other: a
+    /// save leaves such a bond out ([`DeviceList::add`]) and a reload refuses
+    /// it (`codec::decode_bond`).
+    pub const fn is_identity(self) -> bool {
+        matches!(self, Self::Public | Self::RandomStatic)
+    }
+}
+
 /// A BLE device address as the store keeps it.
 #[derive(Clone, Copy, Debug)]
 pub struct PeerAddress {
@@ -266,7 +293,14 @@ impl DeviceList {
     }
 
     /// Store a paired device, merging it with the entry for the same peer.
+    ///
+    /// A bond whose identity is not a public or random static address is left
+    /// out and the device stored without keys, like a peer that did not bond:
+    /// a reload refuses such a bond, and with it the whole store, so saving it
+    /// would lose every pairing on the next boot. The firmware's storage shell
+    /// refuses such a bond, and reports it, before it gets here.
     pub fn add(&mut self, mut device: StoredDevice, resolve: &impl Resolve) -> AddOutcome {
+        device.bond = device.bond.filter(|bond| bond.identity.kind.is_identity());
         // Keep the stable identity address when keys are available. Storing
         // the currently advertised private address would add a new entry on
         // every rotation and eventually evict the other paired peripherals.

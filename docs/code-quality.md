@@ -605,23 +605,20 @@ The remaining panic paths, and why each does not fire:
 | Connect waiter | `unexpected event {}` in `central::connect_inner` | The connect portal receives only CONNECTED or the connect timeout |
 | Notification loop | `unwrap!(Connection::from_handle(..))` in `gatt_client::run` | The notification portal receives events only while the link has an index, DISCONNECTED clears it, and the loop returns on DISCONNECTED |
 | Security callbacks | The `SecurityHandler` defaults `display_passkey`, `enter_passkey`, and `recv_out_of_band`, and the passkey arm's `debug_assert_eq!` | `Bonder` declares no input, no output, and no out-of-band data, so pairing is Just Works and the SoftDevice never asks for a passkey or out-of-band data. `Bonder` implements `on_bonded` |
-| Conversions and lengths | `Role::from_raw`, `IoCapabilities::to_raw`, `IdentityKey::is_match`, the whitelist-length `assert!` in `ScanConfig::to_raw`, the `u16` length asserts in `write` | The role comes from the CONNECTED event and every link is central; `Bonder`'s I/O capabilities are a constant; `is_match` converts fixed 16-byte and 6-byte slices; the whitelist holds one address; GATT writes are 1 or 2 bytes |
+| Conversions and lengths | `Role::from_raw`, `IoCapabilities::to_raw`, `IdentityKey::is_match`, `Address::address_type` and `Address`'s `defmt::Format`, which calls it, the whitelist-length `assert!` in `ScanConfig::to_raw`, the `u16` length asserts in `write` | The role comes from the CONNECTED event and every link is central; `Bonder`'s I/O capabilities are a constant; `is_match` converts fixed 16-byte and 6-byte slices and calls `address_type` only on the address it is given, which is always a link's or an advertiser's address, whose type the SoftDevice sets, or one bt2usb built from a defined type; bt2usb logs no address, and the vendored crate logs only a link's address, with `log-sensitive-data`; the whitelist holds one address; GATT writes are 1 or 2 bytes |
 | Role check | The central-role `assert!` in `request_pairing` | Every link comes from `central::connect_with_security`, and the build has no peripheral role |
 | Discovery buffers | The `collect` of at most `DISC_CHARS_MAX` declarations; `no size in descriptors` | The source is cut to the target's capacity, and a descriptor overflow returns `TooManyAttributes` first |
 | Flash | `DropBomb` in `Flash::write` and `Flash::erase` | See flash futures in the application table |
 | Never called | `ble::get_address` and `ble::set_address` (in `ble/mod.rs`), `gap::set_whitelist`, `gap::set_device_identities_list`, `Uuid::new_128`, and the `gatt_traits` conversions | bt2usb does not call them |
 
-One vendored panic stays open: `Address::address_type` unwraps the 7-bit
-address type, whose conversion accepts only the four defined types and 0x7F.
-During pairing the peer sends its own identity address, and `Bonder::on_bonded`
-keeps it unchecked. The bond is saved when `bond_for_address` matches it to the
-connection's address, which for a peer connecting from a resolvable private
-address means only that its IRK resolves that address; the save then calls
-`address_type` on the identity and panics on a reserved type, unless the
-SoftDevice rejects such a type first, which its documentation does not say.
-Only a crafted or faulty peer the user pairs with sends one. The FIXME
-"A bond with a private or reserved identity address breaks the store" in
-[TODO.md](../TODO.md#fixme) tracks it with a related storage defect.
+`Address::address_type` unwraps the 7-bit address type, whose conversion
+accepts only the four defined types and 0x7F, so bt2usb never calls it on a
+type a peer chooses. During pairing the peer sends its own identity address,
+which `Bonder::on_bonded` keeps as sent; the storage shell decodes its raw type
+with `AddressKind::from_gap_type`, which returns `None` for a reserved type,
+and stores the device without the bond ([data model](data-model.md#write-rules)).
+`IdentityKey::is_match` and `Address`'s `defmt::Format` also call
+`address_type`, on an address whose type the SoftDevice set (see the table).
 
 ### Arithmetic
 

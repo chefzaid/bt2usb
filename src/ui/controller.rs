@@ -223,6 +223,7 @@ pub fn error_message(tag: ErrorTag) -> &'static str {
         ErrorTag::HidNotFound => "No HID service",
         ErrorTag::NotifyFailed => "Notify failed",
         ErrorTag::StorageFailed => "Storage failed",
+        ErrorTag::BondRefused => "Pairing not saved",
         ErrorTag::ManagementFailed => "Action failed; retry",
         ErrorTag::ReportMapReadFailed => "HID map read failed",
         ErrorTag::ReportMapTooLarge => "HID map too large",

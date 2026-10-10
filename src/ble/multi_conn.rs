@@ -328,7 +328,15 @@ async fn execute_action(
             let mut store = DEVICE_STORE.lock().await;
             let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
             paired.bond = bonder().bond_for_address(device.address);
-            store.add(paired);
+            if store.add(paired).is_err() {
+                // Drop the refused keys from the security handler too, so the
+                // peer pairs again on its next connection, as it must after a
+                // reboot, and the user learns the pairing was not kept.
+                bonder().forget(device.address);
+                event_tx
+                    .send(BleEvent::Error(BleErrorTag::BondRefused))
+                    .await;
+            }
             if store.save_to_flash(flash).await.is_err() {
                 event_tx
                     .send(BleEvent::Error(BleErrorTag::StorageFailed))

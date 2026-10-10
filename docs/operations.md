@@ -337,6 +337,8 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `Added paired device - now storing {}` | New peer cached | A save follows |
 | info | `Updated existing paired device` | Address, name, or keys changed | A save follows |
 | warn | `Paired device store full - evicting oldest entry` | A fifth peer replaced the oldest-added one | Expected at capacity (4) |
+| warn | `Bond refused: identity address is not public or random static; stored without keys` | The peer named a private, anonymous, or reserved identity address during pairing; the device was stored without keys, its keys dropped, and the OLED shows `Pairing not saved` | Record the peripheral and report it; it pairs again on each connection |
+| error | `Paired device address has a reserved type; not stored` | Should be impossible: the SoftDevice gives every link a defined address type | Report as a defect |
 | info | `Saved {} devices to flash` | The store was written | None |
 | warn | `Flash write busy (attempt {}), retrying` | A write attempt failed; retried after 20 ms | [Flash incident](#flash-writes-report-busy-or-fail) |
 | error | `Flash write failed after {} attempts: {:?}` | All three attempts failed; the OLED shows `Storage failed` | [Flash incident](#flash-writes-report-busy-or-fail) |
@@ -367,6 +369,7 @@ message:
 | `No HID service`, `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `HID map read failed`, `HID map too large`, `Unsupported HID map` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `Storage failed` | [Storage](#storage-unreadable-and-writes-disabled) and [flash](#flash-writes-report-busy-or-fail) incidents |
+| `Pairing not saved` | Record the peripheral and the `Bond refused` log line and report it; the device keeps working until it disconnects, then pairs again |
 | `Action failed; retry` | Reopen the saved-device list and retry |
 | `Busy; try again` | Wait a few seconds and retry |
 | `Device changed; retry` | Reopen the saved-device list |

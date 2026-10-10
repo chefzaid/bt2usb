@@ -203,7 +203,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Record validation | `ADDRESS_RECORD_SIZE = 7`, `BOND_RECORD_SIZE = 50`, `base`, and `bond` in [record.rs](../../src/storage/record.rs) |
 | Byte codec | Device, address-type, and bond encoding in [codec.rs](../../src/storage/codec.rs) |
 | Load, save, merge | `DeviceList::load`, `load_empty`, `load_unreadable`, `pending_item`, `add`, and the `writable` and `dirty` flags in [devices.rs](../../src/storage/devices.rs); `DeviceStore::load_from_flash`, `save_to_flash`, and `add` in `storage.rs` do the flash I/O and logging |
-| Enrollment | `Bonder::on_bonded` in [bonder.rs](../../src/ble/bonder.rs) stores the keys in RAM during pairing; `execute_action` for `Action::PersistDevice` in [multi_conn.rs](../../src/ble/multi_conn.rs) calls `store.add`, then `save_to_flash`, and sends `BleErrorTag::StorageFailed` if the save fails |
+| Enrollment | `Bonder::on_bonded` in [bonder.rs](../../src/ble/bonder.rs) stores the keys in RAM during pairing; `execute_action` for `Action::PersistDevice` in [multi_conn.rs](../../src/ble/multi_conn.rs) calls `store.add`, then `save_to_flash`, and sends `BleErrorTag::StorageFailed` if the save fails. `store.add` stores no bond whose identity a reload would refuse (not public or random static, `AddressKind::is_identity`); it returns `BondRefused`, and `execute_action` then calls `Bonder::forget` and sends `BleErrorTag::BondRefused` |
 | Forget and reset | `DeviceList::without` and `reset` (whose `erase_first` is set only when the store is not writable) in `devices.rs`; `DeviceStore::forget` and `factory_reset` in `storage.rs` erase `STORAGE_FLASH_START..STORAGE_FLASH_END` when told to and persist through `commit` |
 | Commit and quiescence | `commit` and `Quiescence` in [management.rs](../../src/ble/management.rs); `manage_devices` in `multi_conn.rs` sends `SlotCommand::Quiesce(token)`, waits for `SlotEvent::Quiesced`, and calls `Bonder::forget` or `clear` only after the store write succeeds |
 | Boot | `ble_task` loads the store, loads bonds into the bonder, and sends `BleEvent::Error(BleErrorTag::StorageFailed)` when the store is not writable |
@@ -215,8 +215,9 @@ The log lines that mark each path are `Loaded {} devices from flash`,
 `Device store is unreadable; refusing to overwrite stored bonds`,
 `Device store exceeds serialization capacity; save aborted`,
 `Flash write busy (attempt {}), retrying`,
-`Flash write failed after {} attempts: {:?}`, and
-`Paired device store full - evicting oldest entry`.
+`Flash write failed after {} attempts: {:?}`,
+`Paired device store full - evicting oldest entry`, and
+`Bond refused: identity address is not public or random static; stored without keys`.
 
 ### Verification Status
 
@@ -228,11 +229,12 @@ The log lines that mark each path are `Loaded {} devices from flash`,
   `reconnect_events_are_suppressed_until_matching_cancellation_ack` in
   `management.rs`. They passed on GitHub-hosted runners in push runs
   36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09)
-  and scheduled run 37338711407 (2026-10-05). Since 2026-10-10 the 27 tests
+  and scheduled run 37338711407 (2026-10-05). Since 2026-10-10 the 30 tests
   in `storage/devices_tests.rs` and `devices_format_tests.rs` also cover loading valid, legacy, malformed,
   and unreadable stores (each invalid one refusing saves until reset),
   identity merge, bond replacement, eviction, Forget and reset candidates
-  published only after a successful save, and the record codec. The
+  published only after a successful save, the record codec, and, for every
+  address type, that a save keeps a bond only when a reload accepts it. The
   `storage.rs` shell, the enrollment save, and the bonder depend on SoftDevice
   types and are not in the host library
   ([ADR 0003](0003-pure-core-and-task-shell.md)), so no automated test covers

@@ -303,6 +303,7 @@ fn every_error_has_a_distinct_message_that_fits_the_screen() {
         ErrorTag::HidNotFound,
         ErrorTag::NotifyFailed,
         ErrorTag::StorageFailed,
+        ErrorTag::BondRefused,
         ErrorTag::ManagementFailed,
         ErrorTag::ReportMapReadFailed,
         ErrorTag::ReportMapTooLarge,

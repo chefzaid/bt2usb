@@ -337,6 +337,7 @@ otherwise Home. SELECT on an error starts a new scan instead.
 | `HID map too large` | The device is not supported |
 | `Unsupported HID map` | The device's report layout is not supported |
 | `Storage failed` | See [Pairing Storage](#pairing-storage); Factory reset recovers an unreadable store |
+| `Pairing not saved` | The device works until it disconnects but was saved without its keys, because it named an identity the bridge cannot store; it pairs again on its next connection. If it repeats, record the log and report the device |
 | `Action failed; retry` | Reopen saved devices; the device was already removed |
 | `Busy; try again` | Wait a moment and retry |
 | `Device changed; retry` | Reopen saved devices |

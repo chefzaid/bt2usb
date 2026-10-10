@@ -38,14 +38,7 @@ fn device_records_round_trip_with_and_without_a_bond() {
 
 #[test]
 fn every_address_kind_round_trips_and_unknown_kinds_are_rejected() {
-    let kinds = [
-        AddressKind::Public,
-        AddressKind::RandomStatic,
-        AddressKind::RandomPrivateResolvable,
-        AddressKind::RandomPrivateNonResolvable,
-        AddressKind::Anonymous,
-    ];
-    for (byte, kind) in kinds.into_iter().enumerate() {
+    for (byte, kind) in ALL_KINDS.into_iter().enumerate() {
         let buf = codec::encode_address(address(kind, 9));
         assert_eq!(buf[6] as usize, byte);
         assert_eq!(codec::decode_address(&buf), Some(address(kind, 9)));
@@ -85,11 +78,15 @@ fn a_device_record_needs_its_whole_buffer() {
 fn a_bond_identity_must_be_public_or_random_static() {
     let mut keyed = bonded(5, 0, "K");
     let mut buf = [0u8; codec::MAX_DEVICE_RECORD];
-    let len = codec::encode_device(&keyed, &mut buf);
-    assert!(codec::decode_device(&buf[..len]).is_some());
-    keyed.bond.as_mut().unwrap().identity = private_address(5, 1);
-    let len = codec::encode_device(&keyed, &mut buf);
-    assert!(codec::decode_device(&buf[..len]).is_none());
+    for kind in ALL_KINDS {
+        keyed.bond.as_mut().unwrap().identity = address(kind, 5);
+        let len = codec::encode_device(&keyed, &mut buf);
+        assert_eq!(
+            codec::decode_device(&buf[..len]).is_some(),
+            kind.is_identity(),
+            "{kind:?}"
+        );
+    }
 }
 
 #[test]

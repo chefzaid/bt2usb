@@ -881,6 +881,33 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-10, Bond Identity Refusal
+
+This record covers the commit that keeps the pairing store from saving a bond
+whose identity is not a public or random static address, decodes the
+identity's address type without the vendored `Address::address_type`, and
+shows `Pairing not saved` when it refuses one (FIXME "A bond with a private or
+reserved identity address broke the store" in [TODO.md](../TODO.md#fixme)).
+The checks ran locally on Linux in a container, on the working tree just
+before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 364 unit tests, 3 integration tests, and 3 glyph-table tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.88% of lines, 99.00% of functions; `storage/devices.rs` 99.66% of lines |
+| Mutation checks | Host tests | Without the identity filter in `DeviceList::add`, two of the new tests fail; without it in `codec::decode_bond`, the per-type format test fails |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation, each after `cargo clean -p bt2usb` | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five ([commands](code-quality.md#documentation-comments)) |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A` on the release ELF: with `DEFMT_LOG=debug` (the `.cargo/config.toml` default), `.text` 113,748 bytes (+192), `.rodata` 11,512 (+24), `.data` 1,640, `.bss` 23,252, `.uninit` 1,024; with `DEFMT_LOG=info`, the release setting, `.text` 112,700 bytes |
+| Release helper policy/integrity tests | Python 3.13, Linux | Passed: 17 tests |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
+| Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change |
+| Storage shell and `execute_action` | Review | Reviewed and built, not tested: they depend on SoftDevice types, and no peer that sends such an identity was available |
+| Hosted CI | GitHub Actions | Push runs 38093412238 (`54a6d28`), 38093509957 (`b2cb34d`), and 38093693079 (`50ada0a`), for the three MTU fixes before this commit, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the change needs the pairing checks in the first-flash checklist ([4. Pairing and daily use](first-flash.md#4-pairing-and-daily-use)) |
+
 ## Validation Record — 2026-10-10, Panic Lints And Inventory
 
 This record covers the commit that turns on Clippy's panic lints, rewrites the

@@ -419,7 +419,10 @@ which can be too late for a firmware setup key.
     marks the slot connected and returns two actions in order: persist the
     device with its bond (`store.add`, then `save_to_flash`), then emit the
     connection summary. The UI shows Connected after the flash write finishes;
-    a failed write shows "Storage failed" while the link stays up.
+    a failed write shows "Storage failed" while the link stays up. A bond whose
+    identity is not a public or random static address is not stored: the
+    device is saved without keys, `Bonder` drops them, and the UI shows
+    "Pairing not saved" ([write rules](data-model.md#write-rules)).
 11. The worker enters the notification loop (`"HID notification loop started"`),
     described in [one input report](#one-input-report-from-ble-to-usb).
 
@@ -1192,13 +1195,6 @@ except one open vendored panic
   second waiter on one SoftDevice event portal or a flash write future dropped
   before it completes; bt2usb's call patterns rule each out
   ([vendored list](code-quality.md#vendored-nrf-softdevice)).
-- The open one: a reserved identity address type sent by a peer during
-  pairing. `Bonder::on_bonded` keeps the address unchecked, and the vendored
-  `Address::address_type` `unwrap!`s its type when the bond is saved, unless
-  the SoftDevice rejects it first, which its documentation does not say. Only
-  a crafted or faulty peer the user pairs with sends one; the FIXME "A bond with a
-  private or reserved identity address breaks the store" in
-  [TODO.md](../TODO.md#fixme) tracks it.
 
 Configuration that Rust can check at compile time fails the build instead of
 the boot: the link count fits a `u8`, four device records with bonds fit one

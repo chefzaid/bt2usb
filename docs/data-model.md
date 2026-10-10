@@ -154,8 +154,10 @@ Owned by [storage/codec.rs](../src/storage/codec.rs):
 The flags byte is copied verbatim from the SoftDevice `EncryptionInfo`, which
 the vendored `nrf-softdevice` declares layout-compatible with the SoftDevice's
 `ble_gap_enc_info_t` ([vendor/nrf-softdevice/src/ble/types.rs](../vendor/nrf-softdevice/src/ble/types.rs)).
-The application does not interpret it. Validation rejects an identity address
-type above 1 (byte 49 of the bond).
+The application does not interpret it. `codec::decode_bond` rejects an identity
+that is not public or random static (byte 49 of the bond above 1), and a save
+never writes one ([write rules](#write-rules)); both use
+`AddressKind::is_identity` in [storage/devices.rs](../src/storage/devices.rs).
 
 ### Worked Example
 
@@ -297,6 +299,17 @@ which then erases pages 240–243 before writing an empty frame. Ordinary saves 
 - Every successful connection adds or updates the record and saves if
   anything changed (`Action::PersistDevice`); a failure raises
   `BleEvent::Error(StorageFailed)` while the link stays up.
+- A new pairing whose bond names an identity that is not a public or random
+  static address is stored without the bond, because a reload would refuse
+  it and with it the whole store. `DeviceStore::add` decodes the identity's
+  raw type with `AddressKind::from_gap_type`, so a type the Core
+  specification reserves is refused rather than passed to the vendored
+  `Address::address_type`, which panics on one; `DeviceList::add` drops a
+  private or anonymous identity the same way. The shell logs
+  `Bond refused: identity address is not public or random static; stored without keys`,
+  `execute_action` drops the keys from `Bonder` so the peer pairs again on
+  its next connection, as it must after a reboot, and raises
+  `BleEvent::Error(BondRefused)`.
 - Forget and Factory reset stop affected workers, build a candidate store,
   write it, and only then replace the in-memory cache and update the SoftDevice
   bonder (`management::commit`). A failed write leaves cached records and bonds
@@ -624,6 +637,7 @@ display line holds. How errors propagate is in
 | `HidNotFound` | GATT discovery of the HID service failed or found no Report characteristic (`discover_and_subscribe`) | `No HID service` |
 | `NotifyFailed` | No input report characteristic could be subscribed | `Notify failed` |
 | `StorageFailed` | The store was unreadable or invalid at boot; saving a device after a connection failed, including every save while the store is read-only; a Forget or Factory reset could not be persisted. Every `StoreError` maps here | `Storage failed` |
+| `BondRefused` | A pairing's bond names an identity that is not a public or random static address, so the device was stored without keys ([write rules](#write-rules)) | `Pairing not saved` |
 | `ManagementFailed` | Forget named an identity that `DeviceStore::find` no longer matches | `Action failed; retry` |
 | `ReportMapReadFailed` | The Report Map read returned an error, the ATT MTU is outside the 23–517 bytes the long-read assembler accepts, or a fragment or the end of the value was malformed | `HID map read failed` |
 | `ReportMapTooLarge` | The Report Map is longer than 512 bytes | `HID map too large` |

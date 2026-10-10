@@ -45,6 +45,10 @@ const KEY_PAIRED_DEVICES: u8 = 0x01;
 const FLASH_WRITE_ATTEMPTS: u8 = 3;
 const FLASH_RETRY_BACKOFF_MS: u64 = 20;
 
+/// [`DeviceStore::add`] kept the device without its bond, or did not keep it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BondRefused;
+
 /// BLE bonding keys stored alongside the paired-device record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BondInfo {
@@ -78,15 +82,6 @@ impl PairedDevice {
         }
     }
 
-    fn to_stored(&self) -> StoredDevice {
-        StoredDevice {
-            address: to_peer(self.address),
-            name: self.name.clone(),
-            last_rssi: self.last_rssi,
-            bond: self.bond.as_ref().map(to_stored_bond),
-        }
-    }
-
     fn from_stored(device: &StoredDevice) -> Self {
         Self {
             address: to_address(device.address),
@@ -97,19 +92,16 @@ impl PairedDevice {
     }
 }
 
-fn to_peer(address: Address) -> PeerAddress {
-    let kind = match address.address_type() {
-        AddressType::Public => AddressKind::Public,
-        AddressType::RandomStatic => AddressKind::RandomStatic,
-        AddressType::RandomPrivateResolvable => AddressKind::RandomPrivateResolvable,
-        AddressType::RandomPrivateNonResolvable => AddressKind::RandomPrivateNonResolvable,
-        AddressType::Anonymous => AddressKind::Anonymous,
-    };
-    PeerAddress {
-        kind,
+/// The address as the store keeps it, or `None` when its type is reserved.
+/// It decodes the raw type rather than call `Address::address_type`, which
+/// `unwrap!`s and halts the chip on a reserved type: a peer chooses the type
+/// of the identity address it sends during pairing.
+fn to_peer(address: Address) -> Option<PeerAddress> {
+    Some(PeerAddress {
+        kind: AddressKind::from_gap_type(address.as_raw().addr_type())?,
         bytes: address.bytes(),
         resolved: address.is_resolved_peer_id(),
-    }
+    })
 }
 
 fn to_address(address: PeerAddress) -> Address {
@@ -125,15 +117,19 @@ fn to_address(address: PeerAddress) -> Address {
     converted
 }
 
-fn to_stored_bond(bond: &BondInfo) -> StoredBond {
-    StoredBond {
+/// The bond as the store keeps it, or `None` when its identity is not a
+/// public or random static address, which a reload refuses
+/// ([`AddressKind::is_identity`]).
+fn to_stored_bond(bond: &BondInfo) -> Option<StoredBond> {
+    let identity = to_peer(bond.peer_id.addr).filter(|address| address.kind.is_identity())?;
+    Some(StoredBond {
         ediv: bond.master_id.ediv,
         rand: bond.master_id.rand,
         ltk: bond.key.ltk,
         flags: bond.key.flags,
         irk: bond.peer_id.as_raw().id_info.irk,
-        identity: to_peer(bond.peer_id.addr),
-    }
+        identity,
+    })
 }
 
 fn to_bond_info(bond: &StoredBond) -> BondInfo {
@@ -282,7 +278,7 @@ impl DeviceStore {
     /// The device stored at `address`, or whose bond resolves it.
     pub fn find(&self, address: Address) -> Option<PairedDevice> {
         self.list
-            .find(to_peer(address), &resolve)
+            .find(to_peer(address)?, &resolve)
             .map(PairedDevice::from_stored)
     }
 
@@ -297,8 +293,9 @@ impl DeviceStore {
         address: Address,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) -> Result<(), StoreError> {
+        let address = to_peer(address).ok_or(StoreError::NotFound)?;
         let candidate = Self {
-            list: self.list.without(to_peer(address))?,
+            list: self.list.without(address)?,
         };
         crate::ble::management::commit(self, candidate, async |next| {
             next.save_to_flash(flash).await
@@ -328,9 +325,27 @@ impl DeviceStore {
         .await
     }
 
-    /// Add a newly paired device.
-    pub fn add(&mut self, device: PairedDevice) {
-        match self.list.add(device.to_stored(), &resolve) {
+    /// Add a newly paired device. A bond whose identity is not a public or
+    /// random static address is left out and `Err(BondRefused)` returned: a
+    /// reload refuses such a bond, and with it the whole store, so saving it
+    /// would lose every pairing on the next boot. The device is then stored
+    /// without keys, like a peer that did not bond.
+    pub fn add(&mut self, device: PairedDevice) -> Result<(), BondRefused> {
+        let Some(address) = to_peer(device.address) else {
+            // The SoftDevice gives every link and advertiser a defined type,
+            // so this does not happen; storing nothing is still safer than a
+            // record the next boot would refuse.
+            error!("Paired device address has a reserved type; not stored");
+            return Err(BondRefused);
+        };
+        let bond = device.bond.as_ref().map(to_stored_bond);
+        let stored = StoredDevice {
+            address,
+            name: device.name,
+            last_rssi: device.last_rssi,
+            bond: bond.flatten(),
+        };
+        match self.list.add(stored, &resolve) {
             AddOutcome::Unchanged => {}
             AddOutcome::Updated => info!("Updated existing paired device"),
             AddOutcome::Added => {
@@ -341,6 +356,11 @@ impl DeviceStore {
                 info!("Added paired device - now storing {}", self.list.len());
             }
         }
+        if bond == Some(None) {
+            warn!("Bond refused: identity address is not public or random static; stored without keys");
+            return Err(BondRefused);
+        }
+        Ok(())
     }
 
     /// Iterate paired devices most-recently-added first, for auto-reconnect of

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 37 | 2 | 0 |
+| [FIXME](#fixme) | 38 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **124** | **73** | **21** |
+| **Total** | **125** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -397,7 +397,7 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
   embedded builds and Clippy; the vendored code has no tests, and the
   hardware check is part of "Report Map interoperability and legacy policy".
-- [ ] **P1** **A bond with a private or reserved identity address breaks the
+- [x] **P1** **A bond with a private or reserved identity address broke the
   store.** `Bonder::on_bonded` keeps the identity address the peer sends
   during pairing without checking its type; when the peer sends none, it
   keeps the connection's address with an all-zero IRK
@@ -405,22 +405,32 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   `bond_for_address` matches it to the connection's address: a public or
   static address must equal the identity, a non-resolvable one never matches,
   and a resolvable one must be resolved by the bond's IRK. A private or
-  reserved identity therefore reaches the store only from a peer that
+  reserved identity therefore reached the store only from a peer that
   connects from a resolvable private address and either distributes an IRK
   that resolves it together with an identity type the SoftDevice passes
   through (its documentation does not say whether it can), or distributes no
   identity and built its address from an all-zero IRK, which a crafted peer
-  can do. `DeviceStore::add` then converts the identity with the vendored
+  can do. `DeviceStore::add` then converted the identity with the vendored
   `Address::address_type`, which `unwrap!`s and panics for the reserved raw
-  types 4 to 126. A private type (resolvable or non-resolvable) is saved, but
-  `record::bond` refuses any identity type above 1 on reload, so the next boot
-  logs `Invalid or unsupported device store; writes disabled`, loads no
-  devices, and refuses saves until a Factory reset: every pairing is lost.
-  Found by the panic inventory's reviewer. Accept when
-  the write side refuses what the read side refuses (a bond whose identity is
-  not public or random static is not stored, with a log line and a UI error),
-  no code path calls `address_type` on a peer-supplied address, and host tests
-  cover each identity type.
+  types 4 to 126. A private type (resolvable or non-resolvable) was saved, but
+  the reload refuses any identity type above 1, so the next boot logged
+  `Invalid or unsupported device store; writes disabled`, loaded no devices,
+  and refused saves until a Factory reset: every pairing was lost. Found by
+  the panic inventory's reviewer. Fixed: `DeviceStore::add` decodes the raw
+  type with `AddressKind::from_gap_type`, which returns `None` for a reserved
+  one, and stores no bond whose identity is not public or random static
+  (`AddressKind::is_identity`, which `DeviceList::add` and the reload in
+  `codec::decode_bond` also apply). It keeps the device without keys and logs
+  `Bond refused: identity address is not public or random static; stored without keys`;
+  `execute_action` then drops the keys from `Bonder`, so the peer pairs again
+  on its next connection as after a reboot, and the OLED shows
+  `Pairing not saved` (`BleErrorTag::BondRefused`). Host tests decode every
+  SoftDevice address type and save and reload a bond with each identity type
+  (`src/storage/devices_tests.rs`, `devices_format_tests.rs`;
+  [data model](docs/data-model.md#write-rules),
+  [ADR 0006](docs/adr/0006-fail-closed-pairing-store.md)). The shell and the
+  `execute_action` path are checked by the embedded builds and Clippy; no peer
+  that sends such an identity was tried.
 - [x] **P1** **A peripheral that refused the MTU exchange could not
   connect.** `central::connect_with_security` runs `att_mtu_exchange` inside
   the vendored `connect_inner` and failed the whole connection when it
@@ -1278,8 +1288,8 @@ Host tests, simulation, and code-health work. Context:
   lint flags (`unwrap!` on spawns, `StaticCell`, `RefCell`, heapless
   capacity, dependency calls, the one runtime divisor, flash futures) and
   every panic path in the compiled vendored modules are listed with the
-  reason each cannot fire, except `Address::address_type`, which stays open
-  under a FIXME above; a second reviewer checked each entry. Four vendored
+  reason each cannot fire; a second reviewer checked each entry.
+  `Address::address_type`, open at first, was closed by a FIXME above. Four vendored
   panics a peer could reach were fixed (FIXME above), the flash range and
   the BLE event buffer are checked at compile time, and the inventory added
   five FIXMEs (`Cargo.toml`, `clippy.toml`, `src/`,

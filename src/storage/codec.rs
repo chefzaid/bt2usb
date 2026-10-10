@@ -76,7 +76,8 @@ pub fn decode_bond(data: &[u8]) -> Option<StoredBond> {
         ltk,
         flags: data[26],
         irk,
-        identity: decode_address(&data[43..50])?,
+        // A reload refuses what a save leaves out (`AddressKind::is_identity`).
+        identity: decode_address(&data[43..50]).filter(|address| address.kind.is_identity())?,
     })
 }
 

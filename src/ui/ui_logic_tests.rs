@@ -387,6 +387,38 @@ fn a_new_link_returns_home_screens_to_connected_and_clears_the_list() {
 }
 
 #[test]
+fn a_background_link_change_keeps_a_user_scan_and_its_list() {
+    for screen in [Screen::Scanning, Screen::DeviceList] {
+        let mut state = UiState::new();
+        state.screen = screen;
+        let _ = state.devices.push(name("Keyboard"));
+        let _ = state.devices.push(name("Mouse"));
+        state.selected = 1;
+        // A saved device reconnects, then drops, while the user picks.
+        state.connection_status(Some(name("Saved keyboard")));
+        assert_eq!(state.screen, screen);
+        assert_eq!(state.devices.len(), 2);
+        assert_eq!(state.selected, 1);
+        state.connection_status(None);
+        assert_eq!(state.screen, screen);
+        assert_eq!(state.devices.len(), 2);
+        assert_eq!(state.selected, 1);
+    }
+}
+
+#[test]
+fn a_dropped_link_returns_connecting_to_home_and_clears_the_list() {
+    let mut state = UiState::new();
+    state.screen = Screen::Connecting;
+    let _ = state.devices.push(name("Keyboard"));
+    state.selected = 1;
+    state.connection_status(None);
+    assert_eq!(state.screen, Screen::Home);
+    assert!(state.devices.is_empty());
+    assert_eq!(state.selected, 0);
+}
+
+#[test]
 fn long_messages_are_cut_to_the_message_capacity() {
     let mut state = UiState::new();
     state.notice("This notice is much longer than thirty-two bytes");

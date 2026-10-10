@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 5 | 14 | 0 |
+| [FIXME](#fixme) | 6 | 13 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **81** | **96** | **22** |
+| **Total** | **82** | **95** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -118,14 +118,17 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   `src/lib_tests.rs` is 503. Close with the split that
   [Keep source files within a size limit](#verification-and-code-quality)
   asks for.
-- [ ] **P2** **A link change on the scan screens has no test.** Since
+- [x] **P2** **A link change on the scan screens had no test.** Since
   `4faf99f`, `UiState::connection_status` leaves a running scan or its picker on
   screen with its list when a saved device connects or drops in the
   background, and clears the list only on the Home, Connecting, and Connected
   screens. `a_new_link_returns_home_screens_to_connected_and_clears_the_list`
-  covers the second half; nothing covers the first, so a regression that sends
-  the user's picker back to Home passes every test. Close when host tests pin
-  both screens and their lists across a connect and a drop.
+  covered the second half; nothing covered the first, so a regression that sent
+  the user's picker back to Home passed every test. Fixed:
+  `a_background_link_change_keeps_a_user_scan_and_its_list` pins both screens,
+  their lists, and the highlight across a connect and a drop, and
+  `a_dropped_link_returns_connecting_to_home_and_clears_the_list` covers the
+  drop on Connecting.
 - [ ] **P2** **The advertised-kind filter for unnumbered maps lost its test.**
   `unnumbered_descriptor_rejects_unadvertised_kind` feeds a 3-byte report to a
   keyboard-only map, which now takes the keyboard-only shortcut in

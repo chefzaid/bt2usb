@@ -202,7 +202,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Record validation | `ADDRESS_RECORD_SIZE = 7`, `BOND_RECORD_SIZE = 50`, `base`, and `bond` in [record.rs](../../src/storage/record.rs) |
 | Byte codec | Address-type and bond encoding in [codec.rs](../../src/storage/codec.rs) |
 | Load, save, merge | `DeviceStore::load_from_flash`, `save_to_flash`, `add`, `deserialize_all`, and the `writable` and `dirty` flags in `storage.rs` |
-| Enrollment | `Bonder::on_bonded` stores the keys in RAM during pairing; `execute_action` for `Action::PersistDevice` in [multi_conn.rs](../../src/ble/multi_conn.rs) calls `store.add`, then `save_to_flash`, and sends `BleErrorTag::StorageFailed` if the save fails |
+| Enrollment | `Bonder::on_bonded` in [bonder.rs](../../src/ble/bonder.rs) stores the keys in RAM during pairing; `execute_action` for `Action::PersistDevice` in [multi_conn.rs](../../src/ble/multi_conn.rs) calls `store.add`, then `save_to_flash`, and sends `BleErrorTag::StorageFailed` if the save fails |
 | Forget and reset | `DeviceStore::forget` and `factory_reset` (which erases `STORAGE_START..STORAGE_END` only when the store is not writable) in `storage.rs` |
 | Commit and quiescence | `commit` and `Quiescence` in [management.rs](../../src/ble/management.rs); `manage_devices` in `multi_conn.rs` sends `SlotCommand::Quiesce(token)`, waits for `SlotEvent::Quiesced`, and calls `Bonder::forget` or `clear` only after the store write succeeds |
 | Boot | `ble_task` loads the store, loads bonds into the bonder, and sends `BleEvent::Error(BleErrorTag::StorageFailed)` when the store is not writable |

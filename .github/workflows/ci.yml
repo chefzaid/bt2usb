@@ -44,6 +44,15 @@ jobs:
       - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
       - name: Check formatting
         run: cargo fmt --package bt2usb -- --check
+      - name: Keep Rust source files within 500 lines
+        if: runner.os == 'Linux'
+        run: |
+          over=$(find src tests build.rs -name '*.rs' -exec wc -l {} + | awk '$2 != "total" && $1 > 500')
+          if [ -n "$over" ]; then
+            echo "Split these files below 500 lines (docs/code-quality.md#file-length):"
+            echo "$over"
+            exit 1
+          fi
       - name: Test release consistency and artifact integrity helpers
         run: python -m unittest discover -s scripts -p "release_test.py" -v
       # install-action has no actionlint manifest; its cargo-binstall fallback

@@ -38,7 +38,7 @@ The decision recorded here was implemented on 2026-06-22:
   whose "imperative shell" is the task code.
 - `e3bc620` removed the duplicate ("Unify HID classification on the real hid
   module (drop lib.rs duplicate + dead hid/tests.rs)"). `src/lib.rs` became a
-  list of `#[path]` includes of the firmware's own files and is now 103 lines.
+  list of `#[path]` includes of the firmware's own files and is now 128 lines.
 
 The 2026-09-28 hardening (`2479c79`) followed the same pattern for everything
 it added: input aggregation, endpoint delivery, wake policy, long reads,
@@ -50,10 +50,10 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 
 | Core module (host-tested) | Decides | Shell (firmware only) |
 | --- | --- | --- |
-| [hid/](../../src/hid/): `report_protocol`, `keyboard`, `mouse`, `consumer`, `coalesce`, `aggregate`, `delivery`, `wake`, `host_leds` | Report Map parsing, report classification and serialization, per-source union, endpoint queue and replay policy, wake eligibility, host LED forwarding | [hid_client.rs](../../src/ble/hid_client.rs), [hid_device.rs](../../src/usb/hid_device.rs) |
+| [hid/](../../src/hid/): `report_protocol`, `keyboard`, `mouse`, `consumer`, `coalesce`, `aggregate`, `delivery`, `wake`, `host_leds` | Report Map parsing, report classification and serialization, per-source union, endpoint queue and replay policy, wake eligibility, host LED forwarding | [hid_client.rs](../../src/ble/hid_client.rs), [hid_device.rs](../../src/usb/hid_device.rs), [host_requests.rs](../../src/usb/host_requests.rs) |
 | [coordinator.rs](../../src/ble/coordinator.rs) | Slot reservation and the `Action`s for each command and slot event | `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
-| [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, whether two saved-device records are the same device, how long a sighting stays usable, when a slot is due a wake, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` and `update` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in `multi_conn.rs` |
-| [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in `multi_conn.rs` |
+| [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, whether two saved-device records are the same device, how long a sighting stays usable, when a slot is due a wake, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` and `update` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
+| [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
@@ -135,10 +135,11 @@ Positive:
 Negative:
 
 - The shells are not host-tested. That includes `multi_conn.rs`,
-  `hid_client.rs`, `scanner.rs`, `usb/hid_device.rs`, `ui/display.rs`,
-  `power.rs`, `storage/codec.rs`, and the `DeviceStore` logic in `storage.rs`
-  that loads the legacy format, merges records for the same identity, evicts the
-  oldest peer, and sets the writable flag.
+  `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`,
+  `usb/hid_device.rs`, `usb/host_requests.rs`, `ui/display.rs`, `power.rs`,
+  `storage/codec.rs`, and the `DeviceStore` logic in `storage.rs` that loads
+  the legacy format, merges records for the same identity, evicts the oldest
+  peer, and sets the writable flag.
 - Coverage percentages describe only the host library, not the firmware.
 - A test placed in a firmware-only module, such as `src/ble/scanner.rs`, is
   never compiled, because that module depends on the SoftDevice and is not part
@@ -173,9 +174,10 @@ Follow-up obligations:
   simulation compiles `ble::coordinator` and `ui::ui_logic` for the ARM target.
 - Test files: `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
   `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
-  `src/ble/coordinator_tests.rs`, `src/ui/ui_logic_tests.rs`,
-  `src/hid/delivery_tests.rs` (the production worker against fake endpoints,
-  for example `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
+  `src/hid_classify_tests.rs`, `src/ble/coordinator_tests.rs`,
+  `src/ui/ui_logic_tests.rs`, `src/hid/delivery_tests.rs` (the production
+  worker against fake endpoints, for example
+  `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
   in-module tests such as those in `aggregate.rs` and `management.rs`, and
   [tests/integration.rs](../../tests/integration.rs).
 - CI runs `cargo test --locked --lib --tests`, `cargo clippy --locked --lib

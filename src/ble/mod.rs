@@ -10,11 +10,12 @@
 //!    connection-slot state machine ([`coordinator`]), loads the paired-device
 //!    store, runs scans and boot-time reconnects, and reports status changes
 //!    to the UI task.
-//! 4. **Connection workers** - two `multi_conn::connection_slot_task`s, one
+//! 4. **Connection workers** - two `slot_worker::connection_slot_task`s, one
 //!    per link (typically a keyboard and a mouse), each connecting, pairing or
 //!    encrypting, running the HID client, and reconnecting after a drop.
 //!
-//! The scanner, HID client, and both tasks need the SoftDevice and exist only
+//! The security handler (`bonder`) is shared by every link. The scanner, HID
+//! client, security handler, and both tasks need the SoftDevice and exist only
 //! in the firmware build (`embedded` feature); the Renode `sim` build keeps
 //! only the pure modules. Communication with other tasks is done via Embassy
 //! channels defined in the crate root.
@@ -31,11 +32,15 @@ pub mod management;
 pub mod reconnect;
 
 #[cfg(feature = "embedded")]
+pub mod bonder;
+#[cfg(feature = "embedded")]
 pub mod hid_client;
 #[cfg(feature = "embedded")]
 pub mod multi_conn;
 #[cfg(feature = "embedded")]
 pub mod scanner;
+#[cfg(feature = "embedded")]
+pub mod slot_worker;
 
 #[cfg(feature = "embedded")]
 mod softdevice_types {

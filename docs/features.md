@@ -43,14 +43,14 @@ are not translated.
 | Capability | Status | Source | More detail |
 | --- | --- | --- | --- |
 | BLE scan with HID filtering and name merging | Software-verified (parsing, merging) | [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/adv_parser.rs`](../src/ble/adv_parser.rs), [`ble/coordinator.rs`](../src/ble/coordinator.rs) | [Scanning](#scanning) |
-| Just Works bonding with encrypted links required | Implemented | [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
-| Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
+| Just Works bonding with encrypted links required | Implemented | [`ble/bonder.rs`](../src/ble/bonder.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
+| Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/bonder.rs`](../src/ble/bonder.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
 | Report Map long reads up to 512 bytes | Software-verified (fragment assembly) | [`ble/long_read.rs`](../src/ble/long_read.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
-| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
-| Keyboard LED forwarding to the BLE keyboard, current state on every link | Software-verified (LED byte handling, forwarding loop) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/host_leds.rs`](../src/hid/host_leds.rs), [`hid/keyboard.rs`](../src/hid/keyboard.rs), [`ble/hid_client.rs`](../src/ble/hid_client.rs) | [Keyboard LEDs](#keyboard-leds) |
+| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
+| Keyboard LED forwarding to the BLE keyboard, current state on every link | Software-verified (LED byte handling, forwarding loop) | [`usb/host_requests.rs`](../src/usb/host_requests.rs), [`hid/host_leds.rs`](../src/hid/host_leds.rs), [`hid/keyboard.rs`](../src/hid/keyboard.rs), [`ble/hid_client.rs`](../src/ble/hid_client.rs) | [Keyboard LEDs](#keyboard-leds) |
 | Composite USB keyboard, mouse, consumer control | Software-verified (descriptors, report formats) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/`](../src/hid/) | [USB HID Device](#usb-hid-device) |
-| Boot protocol, per-unit serial, software VBUS | Implemented (boot mouse format software-verified) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`sd_setup.rs`](../src/sd_setup.rs) | [USB HID Device](#usb-hid-device) |
+| Boot protocol, per-unit serial, software VBUS | Implemented (boot mouse format software-verified) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`usb/host_requests.rs`](../src/usb/host_requests.rs), [`sd_setup.rs`](../src/sd_setup.rs) | [USB HID Device](#usb-hid-device) |
 | Two-source input aggregation | Software-verified | [`hid/aggregate.rs`](../src/hid/aggregate.rs) | [Two-Source Aggregation](#two-source-aggregation), [ADR 0005](adr/0005-two-slots-and-independent-endpoints.md) |
 | Coalescing and independent endpoint workers | Software-verified (including async workers with fake sinks) | [`hid/coalesce.rs`](../src/hid/coalesce.rs), [`hid/delivery.rs`](../src/hid/delivery.rs) | [Endpoint Workers](#endpoint-workers) |
 | Remote wakeup on new presses only | Software-verified (policy) | [`hid/wake.rs`](../src/hid/wake.rs), [`usb/hid_device.rs`](../src/usb/hid_device.rs) | [Remote Wakeup](#remote-wakeup) |
@@ -374,7 +374,9 @@ the Nordic SoftDevice S140 in the central role
 ([ADR 0002](adr/0002-nrf52840-softdevice-embassy.md)). The coordinator's
 decisions are pure reducers in [`ble/coordinator.rs`](../src/ble/coordinator.rs)
 covered by host tests; the tasks that perform them are in
-[`ble/multi_conn.rs`](../src/ble/multi_conn.rs)
+[`ble/multi_conn.rs`](../src/ble/multi_conn.rs) (the coordinator task) and
+[`ble/slot_worker.rs`](../src/ble/slot_worker.rs) (the slot workers), and the
+security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
 ([ADR 0003](adr/0003-pure-core-and-task-shell.md)).
 
 ### Scanning
@@ -537,7 +539,9 @@ policy ([TODO.md](../TODO.md)).
 ## USB HID Device
 
 The bridge enumerates as one composite USB device with three HID interfaces,
-built in [`usb/hid_device.rs`](../src/usb/hid_device.rs):
+built in [`usb/hid_device.rs`](../src/usb/hid_device.rs), with the host's
+SET_PROTOCOL and SET_REPORT requests handled in
+[`usb/host_requests.rs`](../src/usb/host_requests.rs):
 
 | Interface | Report | Boot subclass | Report descriptor |
 | --- | --- | --- | --- |

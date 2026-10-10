@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 19 | 1 | 0 |
+| [FIXME](#fixme) | 20 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 7 | 9 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 8 | 8 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **95** | **83** | **22** |
+| **Total** | **97** | **81** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -125,12 +125,17 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   that `release.py` staging refuses as a dirty tree. Fixed: the bytecode is
   removed from the repository and `.gitignore` covers `__pycache__/` and
   `*.py[cod]`.
-- [ ] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
-  `src/ble/multi_conn.rs` (845 now), `src/usb/hid_device.rs` (536), and pushed
-  `src/hid_descriptor_tests.rs` past the limit (551, split to 444 since);
-  `src/lib_tests.rs` is 503. Close with the split that
-  [Keep source files within a size limit](#verification-and-code-quality)
-  asks for.
+- [x] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
+  `src/ble/multi_conn.rs` (845), `src/usb/hid_device.rs` (536), and pushed
+  `src/hid_descriptor_tests.rs` past the limit (551); `src/lib_tests.rs` was
+  503. Fixed on 2026-10-10: `hid_descriptor_tests.rs` lost its keyboard-report
+  tests to `hid_keyboard_report_tests.rs`; `multi_conn.rs` (now 356 lines) gave
+  the security handler to `src/ble/bonder.rs` and the slot worker to
+  `src/ble/slot_worker.rs`; `hid_device.rs` (440) gave the host's
+  SET_PROTOCOL and SET_REPORT handling and the LED state to
+  `src/usb/host_requests.rs`; and `lib_tests.rs` gave its classification tests
+  to `src/hid_classify_tests.rs`. CI now fails when any Rust file passes 500
+  lines ([code quality](docs/code-quality.md#file-length)).
 - [x] **P2** **A link change on the scan screens had no test.** Since
   `4faf99f`, `UiState::connection_status` leaves a running scan or its picker on
   screen with its list when a saved device connects or drops in the
@@ -290,28 +295,28 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [x] Serialize SoftDevice scan and connection setup with one shared GAP
   procedure lock, and bound each connection attempt by
   `BLE_CONNECT_TIMEOUT_SECS` (6 s) so a user scan does not wait indefinitely
-  behind a reconnect (`src/ble/mod.rs` `GAP_PROCEDURE`, `src/ble/multi_conn.rs`,
+  behind a reconnect (`src/ble/mod.rs` `GAP_PROCEDURE`, `src/ble/slot_worker.rs`,
   `src/config.rs`). *(hardware evidence pending)*
 - [x] Stored pairing/bond records, boot reconnect, identity-key matching, and
   retries after link loss; a lost or not-yet-seen paired device is retried,
   with a `BLE_RECONNECT_BACKOFF_MS` pause between attempts, while its slot
   stays reserved (`src/storage.rs`, `src/ble/reconnect.rs`,
-  `src/ble/multi_conn.rs`).
+  `src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/bonder.rs`).
   *(hardware evidence pending)*
 - [x] Peer-identity-scoped bond replacement and key lookup, stable identity
   persistence, and private-address resolution on background reconnect
-  (`src/ble/multi_conn.rs`, `src/ble/scanner.rs`, `src/storage.rs`).
-  *(hardware evidence pending)*
+  (`src/ble/multi_conn.rs`, `src/ble/bonder.rs`, `src/ble/scanner.rs`,
+  `src/storage.rs`). *(hardware evidence pending)*
 - [x] Require encrypted links before HID discovery, restrict
   application-initiated fresh pairing to explicit user connection attempts, and
   handle cancellation during owned-link security/discovery
-  (`src/ble/multi_conn.rs`). *(hardware evidence pending)*
+  (`src/ble/slot_worker.rs`). *(hardware evidence pending)*
 - [x] Preserve UTF-8 advertising names, merge scan-response names, and release
   the radio procedure lock before delivering UI scan results (`src/ble/`).
   *(hardware evidence pending)*
 - [x] Discover a BLE keyboard's LED output report during HID discovery and write
   each host LED change to it from the slot that owns the link
-  (`src/ble/hid_client.rs` `write_leds`, `src/ble/multi_conn.rs`; the USB side
+  (`src/ble/hid_client.rs` `write_leds`, `src/ble/slot_worker.rs`; the USB side
   is under [USB HID Device](#usb-hid-device)). *(hardware evidence pending)*
 - [x] Read complete GATT Report Maps by offset up to 512 bytes, distinguish
   missing maps from invalid/unreadable/oversized maps, and restrict legacy
@@ -342,8 +347,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   or a lost link, then fall back to the default duty cycle; connection
   attempts always use the fast one. Boot no longer shows Scanning or a "No devices found" error
   (`ReconnectTable` in `src/ble/reconnect.rs`, `find_saved_peer` in
-  `src/ble/scanner.rs`, `src/ble/multi_conn.rs`, `src/config.rs`,
-  `src/ui/ui_logic.rs`; [ADR 0015](docs/adr/0015-shared-reconnect-scan.md)).
+  `src/ble/scanner.rs`, `src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`,
+  `src/config.rs`, `src/ui/ui_logic.rs`; [ADR 0015](docs/adr/0015-shared-reconnect-scan.md)).
   Host tests cover the table: handover, single use, expiry, clearing, the
   fast window across retries, the tie-break, the holdoff after a failed
   attempt, wakes, and saved-device identity. *(hardware evidence pending)*
@@ -352,7 +357,7 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   to a slot that already passed the last change to an earlier link, now shows
   the host's Caps Lock and Num Lock state at once, as a wired keyboard does
   when plugged in (`forward_host_leds` in `src/hid/host_leds.rs`, the
-  `HostLeds` implementation for `LedReceiver` in `src/usb/hid_device.rs`,
+  `HostLeds` implementation for `LedReceiver` in `src/usb/host_requests.rs`,
   `run_notification_loop` in `src/ble/hid_client.rs`). Host tests poll the real
   forwarding loop, including a reconnect after the state was already
   forwarded, which fails against the old changes-only loop.
@@ -364,7 +369,7 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   `(1 + latency) × interval × 2`; a request outside the bounds gets the
   nearest values and is logged with both
   (`bound_request` in `src/ble/conn_params.rs`,
-  `Bonder::conn_param_update_request` in `src/ble/multi_conn.rs`, and the
+  `Bonder::conn_param_update_request` in `src/ble/bonder.rs`, and the
   vendored `SecurityHandler::conn_param_update_request` hook in
   `vendor/nrf-softdevice/src/ble/security.rs` and `gap.rs`;
   [ADR 0016](docs/adr/0016-bounded-peer-connection-parameters.md)). Host tests
@@ -381,7 +386,7 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   authenticated pairing, how user presence is checked, and whether weaker
   devices are rejected; add a bounded pairing window and visible state.
   Require LE Secure Connections and a 16-byte minimum encryption key size.
-  Today `Bonder` in `src/ble/multi_conn.rs` does not override
+  Today `Bonder` in `src/ble/bonder.rs` does not override
   `security_params`, so pairing uses the vendored `default_security_params`
   (`vendor/nrf-softdevice/src/ble/gap.rs`), which sets `min_key_size = 7` and
   leaves the LE Secure Connections flag clear. Accept when downgrade, legacy
@@ -481,13 +486,15 @@ Context: [features](docs/features.md#usb-hid-device) and
 
 - [x] Composite USB keyboard, mouse, and consumer interfaces, keyboard LED
   forwarding, remote-wakeup requests, and software VBUS event handling
-  (`src/usb/hid_device.rs`). *(hardware evidence pending)*
+  (`src/usb/hid_device.rs`, `src/usb/host_requests.rs`).
+  *(hardware evidence pending)*
 - [x] USB boot/report protocol negotiation, three-byte boot mouse
   serialization, keyboard LED control-request validation, reset state cleanup,
   and stable factory-derived per-unit USB serials (`src/usb/hid_device.rs`,
-  `src/hid/mouse.rs`). *(hardware evidence pending)*
+  `src/usb/host_requests.rs`, `src/hid/mouse.rs`).
+  *(hardware evidence pending)*
 - [x] Publish the host's keyboard LED output report through a `Watch` that both
-  BLE slots observe, and clear it on USB reset (`src/usb/hid_device.rs`
+  BLE slots observe, and clear it on USB reset (`src/usb/host_requests.rs`
   `KEYBOARD_LEDS`, `src/hid/keyboard.rs` `KeyboardLeds`).
   *(hardware evidence pending)*
 - [x] Enable the SoftDevice's USB detected, power-ready, and removed events and
@@ -540,7 +547,7 @@ workers. Context: [architecture](docs/architecture.md#hid-path-and-limits),
 - [x] Release every key, mouse button, and consumer usage a BLE link was
   holding when that link ends for any reason: the slot worker sends
   `HidEvent::Disconnected` after its run phase, so a lost keyboard cannot leave
-  a key repeating on the host (`src/ble/multi_conn.rs`, `src/hid/aggregate.rs`).
+  a key repeating on the host (`src/ble/slot_worker.rs`, `src/hid/aggregate.rs`).
   *(hardware evidence pending)*
 - [ ] **P0** **Multi-device aggregation hardware acceptance.** *(hardware)*
   Validate the implemented per-source key/modifier/button unions and
@@ -681,14 +688,14 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   `Connect failed` (`ble_error_message` in `src/main.rs`). Three cases do not
   reach the user at all. A newly paired device whose identity address matches
   a stored peer replaces that peer's record and bond (`DeviceStore::add` in
-  `src/storage.rs`, `Bonder::on_bonded` in `src/ble/multi_conn.rs`), leaving
+  `src/storage.rs`, `Bonder::on_bonded` in `src/ble/bonder.rs`), leaving
   only the `Updated existing paired device` log line. A full store evicts its
   oldest peer with only the
   `Paired device store full - evicting oldest entry` log line. A background
   reconnect whose link cannot be secured, because the peer lost its keys or
   the store has none for it (a legacy record carries no bond), fails with
   `ConnectFailed`, which a silent reconnect treats as "try again"
-  (`connection_slot_task` in `src/ble/multi_conn.rs`); the slot retries after
+  (`connection_slot_task` in `src/ble/slot_worker.rs`); the slot retries after
   each `BLE_RECONNECT_BACKOFF_MS` pause, with no limit, and the UI shows
   nothing. Accept when UI tests cover every state; the user is told, before or
   when it happens, that a pairing replaced an existing peer's bond or evicted
@@ -877,8 +884,9 @@ Host tests, simulation, and code-health work. Context:
   sibling test and codec files, and drop the duplicate HID classifier from the
   host library (`src/lib.rs`, `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
   `src/ble/coordinator_tests.rs`, `src/hid_descriptor_tests.rs`,
-  `src/storage/codec.rs`; commit `e3bc620`). Four files are over 500 lines
-  again; see "Keep source files within a size limit" below.
+  `src/storage/codec.rs`; commit `e3bc620`). The files that grew past 500
+  lines again have since been split; see "Keep source files within a size
+  limit" below.
 - [x] SoftDevice-free Renode build and a headless GPIO/UI/coordinator scenario
   (`src/sim.rs`, `memory_sim.x`, `renode/bt2usb-sim.resc`,
   `renode/bt2usb-sim.robot`).
@@ -927,14 +935,15 @@ Host tests, simulation, and code-health work. Context:
   device disappearance during discovery. Accept when deterministic test cases
   assert completion, retry policy, and UI state without relying only on reducer
   tests ([testing](docs/testing.md#known-verification-gaps)).
-- [ ] **P1** **Host tests for the I/O shells.** The connection workers, GATT
-  HID client, USB device, and display driver (`src/ble/multi_conn.rs`,
-  `src/ble/hid_client.rs`, `src/usb/hid_device.rs`, `src/ui/display.rs`) have
-  no host tests; only the pure modules they call do. The storage shell is the
-  next item. Move remaining decisions into hardware-free modules or test the
-  shells against fakes. Accept when each has host tests for its error paths, or
-  the testing guide records why it cannot
-  ([testing](docs/testing.md#modules-without-host-tests)).
+- [ ] **P1** **Host tests for the I/O shells.** The connection workers,
+  security handler, GATT HID client, USB device, and display driver
+  (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/bonder.rs`,
+  `src/ble/hid_client.rs`, `src/usb/hid_device.rs`, `src/usb/host_requests.rs`,
+  `src/ui/display.rs`) have no host tests; only the pure modules they call do.
+  The storage shell is the next item. Move remaining decisions into
+  hardware-free modules or test the shells against fakes. Accept when each
+  has host tests for its error paths, or the testing guide records why it
+  cannot ([testing](docs/testing.md#modules-without-host-tests)).
 - [ ] **P1** **Host tests for the device store.** `DeviceStore` in
   `src/storage.rs` loads, merges by identity address, evicts the oldest record
   when full, forgets, and factory-resets the pairing store, and it holds the
@@ -982,15 +991,13 @@ Host tests, simulation, and code-health work. Context:
   for the Python files and ShellCheck for the scripts and the extracted
   `maskfile.md` recipes. Accept when a lint finding in any of them fails CI
   ([code quality](docs/code-quality.md#other-files)).
-- [ ] **P2** **Keep source files within a size limit.** Three files are over
-  500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10:
-  `src/ble/multi_conn.rs` 844, `src/usb/hid_device.rs` 536,
-  `src/lib_tests.rs` 503; `src/ui/ui_logic.rs` dropped to 446 when its tests
-  moved to `ui_logic_tests.rs`, and `src/hid_descriptor_tests.rs` from 551 to
-  444 when its keyboard-report tests moved out), and no tool limits file
-  length. Accept when each is split below the limit, or a recorded limit with
-  named exceptions is checked in CI
-  ([code quality](docs/code-quality.md#known-gaps)).
+- [x] **P2** **Keep source files within a size limit.** Every Rust file under
+  `src/`, `tests/`, and `build.rs` is at most 500 lines since the 2026-10-10
+  split (largest: `src/storage.rs` 488, `src/hid_descriptor_tests.rs` 486), and
+  the host-tests job fails on any file over the limit
+  ([code quality](docs/code-quality.md#file-length); `src/ble/bonder.rs`,
+  `src/ble/slot_worker.rs`, `src/usb/host_requests.rs`,
+  `src/hid_classify_tests.rs`, `.github/workflows/ci.yml`).
 
 ## Release, Provenance And Supply Chain
 
@@ -1419,7 +1426,7 @@ in by cable or paired directly.
   report unchanged, on the interface and packet size the USB extensions ADR
   chooses. The Resolution Multiplier needs Feature `GET_REPORT` and
   `SET_REPORT` on the mouse interface, which rejects `SET_REPORT` today
-  (`set_report` in `src/usb/hid_device.rs`), so this item follows "HID/USB
+  (`set_report` in `src/usb/host_requests.rs`), so this item follows "HID/USB
   conformance" and updates the
   [USB host interface](docs/security.md#usb-host-interface) table. This also
   carries the 12- and 16-bit motion that descriptor-driven translation will

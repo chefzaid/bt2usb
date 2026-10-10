@@ -70,7 +70,9 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management quiescence and transactional commit primitives |
-| [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator, two connection workers, and the bond and connection-parameter handler |
+| [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator task, slot command and event types, user scans, saved-device management |
+| [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | Connection worker run once per slot: connect, secure, HID client, background reconnect |
+| [ble/bonder.rs](../src/ble/bonder.rs) | Board shell | SoftDevice security handler: bond storage and the answer to connection-parameter requests |
 | [ble/hid_client.rs](../src/ble/hid_client.rs) | Board shell | GATT discovery, subscriptions, HID classification, notification loop |
 | [ble/scanner.rs](../src/ble/scanner.rs) | Board shell | User scan with HID advertisement filtering, and the shared reconnect scan |
 | [hid/mod.rs](../src/hid/mod.rs) | Pure core | Internal report type and notification classification |
@@ -81,7 +83,8 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [hid/delivery.rs](../src/hid/delivery.rs) | Pure core | Endpoint queue state and the endpoint worker loop |
 | [hid/wake.rs](../src/hid/wake.rs) | Pure core | Remote-wakeup eligibility |
 | [hid/host_leds.rs](../src/hid/host_leds.rs) | Pure core | Host LED forwarding: the current state when a link starts, then each change |
-| [usb/hid_device.rs](../src/usb/hid_device.rs) | Board shell | Composite device, LED output, VBUS, suspend, report writing |
+| [usb/hid_device.rs](../src/usb/hid_device.rs) | Board shell | Composite device, VBUS, suspend, report writing |
+| [usb/host_requests.rs](../src/usb/host_requests.rs) | Board shell | Host control requests: boot/report protocol and the keyboard LED output report |
 | [storage.rs](../src/storage.rs) | Board shell | Paired-device persistence with versioned framing and bond codec |
 | [storage/framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs) | Pure core | Versioned frame and record validation |
 | [storage/codec.rs](../src/storage/codec.rs) | Board shell | Address and bond byte codec over SoftDevice types |
@@ -101,7 +104,7 @@ module that imports a hardware crate stops `cargo test` from building.
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
 | Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{framing, record}` | Host crate and each firmware binary that declares them | Host tests |
-| Board shell | `ble::{mod, multi_conn, hid_client, scanner}`, `usb::hid_device`, `storage` and `storage::codec`, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
+| Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, `storage` and `storage::codec`, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
@@ -121,10 +124,12 @@ flowchart TD
     end
     subgraph shell [Board shell]
         MC["ble::multi_conn"]
+        SW["ble::slot_worker"]
+        BND["ble::bonder"]
         HC["ble::hid_client"]
         SC["ble::scanner"]
         ST["storage and storage::codec"]
-        USB["usb::hid_device"]
+        USB["usb::hid_device and host_requests"]
         PWR["power"]
         DSP["ui::display"]
         BTN["ui::buttons"]
@@ -137,10 +142,12 @@ flowchart TD
         PL["power_logic"]
         SF["storage::framing and record"]
     end
-    MAIN --> MC & USB & DSP & BTN & PWR & SDS & UIL & HID
+    MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & UIL & HID
     SELF --> USB & DSP & SDS & BC & HID
     SIM --> BC & UIL & BTN
-    MC --> HC & SC & ST & USB & BC & HID
+    MC --> BND & SC & ST & BC
+    SW --> MC & BND & HC & SC & USB & BC & HID
+    BND --> ST & BC
     HC --> HID & BC & USB
     SC --> BC
     ST --> SF & BC
@@ -174,7 +181,7 @@ follow:
   `MAX_ATTRIBUTE_LEN`) or come in as parameters. `config.rs` holds constants
   only, with no imports, because `build.rs` compiles it as well.
 - Two shell links cross subsystem boundaries on purpose: the connection
-  workers take a `usb::hid_device::LedReceiver` for host keyboard LEDs, and the
+  workers take a `usb::host_requests::LedReceiver` for host keyboard LEDs, and the
   USB dispatcher calls `power::note_hid_activity`.
 
 A new module goes into the pure core when its decisions can be expressed
@@ -282,7 +289,8 @@ runs, then plans boot reconnects:
    `load_from_flash`, which logs one of `"Loaded {} devices from flash"`,
    `"No paired devices in flash"`, `"Invalid or unsupported device store;
    writes disabled"`, or `"Flash read error: {:?}"`.
-2. Loads every stored bond into the shared `Bonder` security handler
+2. Loads every stored bond into the shared `Bonder` security handler in
+   [bonder.rs](../src/ble/bonder.rs)
    (`"Loaded {} BLE bonds into security handler"`).
 3. If the store is not writable, sends `BleEvent::Error(StorageFailed)`; the UI
    shows "Storage failed". The store stays read-only
@@ -356,7 +364,8 @@ which can be too late for a firmware setup key.
    `ConnectFailed`; an already connected address re-emits `Connected`; an
    address already connecting produces no action; otherwise the first empty
    slot is reserved and sent `SlotCommand::Connect`.
-6. The worker logs `"slot {} connecting to {}"`, takes the GAP lock, and calls
+6. The worker in [slot_worker.rs](../src/ble/slot_worker.rs) logs
+   `"slot {} connecting to {}"`, takes the GAP lock, and calls
    `central::connect_with_security` with a whitelist of that one address, a
    6-second scan timeout (`BLE_CONNECT_TIMEOUT_SECS`) at the fast duty cycle
    of a 50 ms window every 100 ms (`BLE_FAST_SCAN_INTERVAL`,
@@ -545,7 +554,7 @@ for the central to answer.
    interval, which delays every report, or to a supervision timeout of up to
    32 seconds, during which a key held when the link silently fails stays held
    on the host.
-2. `Bonder` in [multi_conn.rs](../src/ble/multi_conn.rs) answers with
+2. `Bonder` in [bonder.rs](../src/ble/bonder.rs) answers with
    `conn_params::bound_request` and `PEER_CONN_PARAM_LIMITS`. The interval
    range becomes its overlap with 7.5 to 15 ms (`BLE_CONN_INTERVAL_MIN`,
    `BLE_CONN_INTERVAL_MAX`). A peripheral that asks only for slower intervals
@@ -663,7 +672,8 @@ touching the other source. The policy is host-tested in
 ### Host Keyboard LEDs To A BLE Keyboard
 
 1. The host sends a one-byte output report to the keyboard interface.
-   `BootRequestHandler::set_report` rejects anything else, logs
+   `BootRequestHandler::set_report` in
+   [host_requests.rs](../src/usb/host_requests.rs) rejects anything else, logs
    `"Host LEDs: num={} caps={} scroll={}"`, and sends the value to the
    `KEYBOARD_LEDS` watch.
 2. Each connection worker holds one of the watch's two receivers for its
@@ -1100,9 +1110,9 @@ should do about each message is in
 | Path | Bound | On failure | Source |
 | --- | --- | --- | --- |
 | User scan | 8 s window, 10 s backstop | Results so far are used; a SoftDevice error shows "Scan failed" | [scanner.rs](../src/ble/scanner.rs) |
-| Connect attempt | 6 s whitelist scan | User connect: error. Silent: retry after 500 ms | [multi_conn.rs](../src/ble/multi_conn.rs) |
+| Connect attempt | 6 s whitelist scan | User connect: error. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs) |
 | Reconnect scan | 6 s; fast duty cycle for 30 s after power-up or a lost link | Retry after 500 ms, or at once when the other slot's scan sees the device | [scanner.rs](../src/ble/scanner.rs), [reconnect.rs](../src/ble/reconnect.rs) |
-| Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [multi_conn.rs](../src/ble/multi_conn.rs) |
+| Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [slot_worker.rs](../src/ble/slot_worker.rs) |
 | GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |
 | Flash write | 3 attempts, 20 ms apart | `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
 | USB endpoint write | 100 ms deadline | Replay current state; back off 20 ms doubling to 1 s | [delivery.rs](../src/hid/delivery.rs) |

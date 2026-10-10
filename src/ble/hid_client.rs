@@ -22,7 +22,7 @@ use crate::hid::delivery::HidEvent;
 use crate::hid::host_leds::forward_host_leds;
 use crate::hid::keyboard::KeyboardLeds;
 use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, ReportType};
-use crate::usb::hid_device::LedReceiver;
+use crate::usb::host_requests::LedReceiver;
 use core::cell::RefCell;
 use defmt::{info, warn};
 use embassy_futures::select::{select, select3};

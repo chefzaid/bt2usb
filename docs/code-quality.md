@@ -50,6 +50,7 @@ Clippy warning into an error.
 | Renode scenario | `renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot` | `mask sim-test` (needs `renode-test` on PATH; `mask sim-setup` installs it on Linux or WSL) | Renode simulation test | Fails the job; results upload even on failure |
 | Dependency audit | `cargo audit`, cargo-audit 0.22.2 | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory; unmaintained-crate warnings do not fail it |
 | Workflow lint | `actionlint`, 1.7.12, SHA-256 checked before use | None | Host tests, Linux only | Fails the Linux job |
+| File length | `find src tests build.rs -name '*.rs' -exec wc -l {} +`, failing above 500 lines ([File Length](#file-length)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file over the limit |
 | Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 12 tests (`grep -c 'def test' scripts/release_test.py`) |
 | Tag matches version | `python scripts/release.py validate-tag --tag "$RELEASE_TAG"` | None | Host tests and the packaging job, `v*` tags only | Fails the tag run |
 | Release staging | `python scripts/release.py stage …` | None | Embedded build & clippy | Refuses a modified tracked source tree, an existing output directory, an empty firmware file, or a commit that differs from `GITHUB_SHA` |
@@ -127,6 +128,21 @@ reviewable. An editor that formats on save will still rewrite them; the
 [development guide](development.md#rustfmt-changes-vendored-files) explains
 how to spot and discard that.
 
+### File Length
+
+**Enforced for Rust sources.** No `.rs` file under `src/`, `tests/`, or
+`build.rs` may exceed 500 lines, counted with `wc -l` (blank and comment lines
+included). The host-tests job runs the check on Linux and lists each file over
+the limit. Split a file that grows past it along a responsibility, not at an
+arbitrary line: tests go to a sibling `*_tests.rs` file included with
+`#[cfg(test)] #[path = "..."] mod tests;` (as `ui_logic_tests.rs`,
+`reconnect_tests.rs`, and `coordinator_tests.rs` are), and a shell module
+splits by task or handler (as `multi_conn.rs` gave up `slot_worker.rs` and
+`bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10).
+Markdown guides and the vendored crate are not checked. On 2026-10-10 the
+largest files were `storage.rs` (488 lines) and `hid_descriptor_tests.rs`
+(486).
+
 ### Clippy
 
 **Enforced.** Clippy runs with its default lint groups and `-D warnings`,
@@ -143,7 +159,7 @@ different code:
 | Configuration | Targets checked | Code only this configuration sees |
 | --- | --- | --- |
 | Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs` | `#[cfg(test)]` modules and test files |
-| Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, and GATT HID client modules |
+| Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, and GATT HID client modules |
 | Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs` and its UART output path |
 
 The display driver and button tasks in `src/ui/` are compiled by both the
@@ -205,9 +221,9 @@ coordinator, power policy, and `ble` module docs mention `ble::multi_conn` and
 contain them and the link would not resolve there.
 
 **Review rule.** Every module starts with a `//!` comment that says what it
-owns and what it must not depend on. Four files have none today, found with
+owns and what it must not depend on. Three files have none today, found with
 `grep -L '^//!'` over `src/`: `src/ui/input_logic.rs`, `src/ble/adv_parser.rs`,
-`src/ble/coordinator_tests.rs`, and `src/lib_tests.rs`. Public items in pure
+and `src/ble/coordinator_tests.rs`. Public items in pure
 modules carry `///` comments that state units, bounds, and error meanings.
 
 ### Other Files
@@ -236,15 +252,15 @@ There are no `unsafe fn`, `unsafe impl`, `static mut`, `transmute`,
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | [stack.rs](../src/stack.rs) `high_water` | `core::ptr::read_volatile` of a `u32` | Find the first overwritten word of the painted stack | Each address is word-aligned and lies between the linker symbols `_stack_end` and `_stack_start`, which is RAM owned by the program; the read is volatile so the compiler cannot assume the contents | Yes | Bridge, self-test |
 | 2 | [scanner.rs](../src/ble/scanner.rs) `scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | View advertisement bytes from a SoftDevice scan report | `p_data` and `len` describe the report inside the scan buffer, and the slice does not outlive the callback | Yes | Bridge |
-| 3 | [multi_conn.rs](../src/ble/multi_conn.rs) `bonder`, first branch | `&*ptr` | Return the shared `&'static Bonder` | The pointer came from `StaticCell::try_init`, so it is non-null, aligned, initialized, and lives forever; after initialization the `Bonder` is only reached through shared references | Yes | Bridge |
-| 4 | [multi_conn.rs](../src/ble/multi_conn.rs) `bonder`, spin fallback | `&*ptr` | Same as 3, after waiting for another caller's initialization | Same as 3 | Yes ("as above") | Bridge |
+| 3 | [bonder.rs](../src/ble/bonder.rs) `bonder`, first branch | `&*ptr` | Return the shared `&'static Bonder` | The pointer came from `StaticCell::try_init`, so it is non-null, aligned, initialized, and lives forever; after initialization the `Bonder` is only reached through shared references | Yes | Bridge |
+| 4 | [bonder.rs](../src/ble/bonder.rs) `bonder`, spin fallback | `&*ptr` | Same as 3, after waiting for another caller's initialization | Same as 3 | Yes ("as above") | Bridge |
 | 5 | [sd_setup.rs](../src/sd_setup.rs) `enable_usb_power_events` | `sd_power_usbdetected_enable`, `sd_power_usbremoved_enable`, `sd_power_usbpwrrdy_enable`, `sd_power_usbregstatus_get` | Turn on the SoftDevice's USB power events and read the USB regulator state | The SoftDevice is enabled before the call (the function's doc comment says it must run after `Softdevice::enable`); `status` is a valid local the SVC writes | Yes | Bridge, self-test |
 | 6 | [selftest.rs](../src/selftest.rs) `check_ble_scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | Same as 2, in the self-test's scan stage | Same as 2 | Yes | Self-test |
 
 The host library contains none of these blocks: `stack.rs`, `sd_setup.rs`,
-`scanner.rs`, and `multi_conn.rs` are not compiled into it, and neither is
+`scanner.rs`, and `bonder.rs` are not compiled into it, and neither is
 `selftest.rs`. The simulation binary contains none either, because
-`src/ble/mod.rs` compiles `scanner` and `multi_conn` only with the `embedded`
+`src/ble/mod.rs` compiles `scanner` and `bonder` only with the `embedded`
 feature and `sim.rs` does not declare `stack` or `sd_setup`.
 
 ### Notes On Each Block
@@ -390,8 +406,8 @@ Coverage measures only the code that host tests compile:
 
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
-workers, GATT HID client, scanner, storage shell and codec, USB device,
-display driver, buttons, power shell, stack monitor, SoftDevice setup, and the
+workers, security handler, GATT HID client, scanner, storage shell and codec,
+USB device, display driver, buttons, power shell, stack monitor, SoftDevice setup, and the
 three entry points. `config.rs` is compiled into the host library but holds
 only constants, so it adds no lines to the report. The
 [host library composition](testing.md#host-library-composition) table lists
@@ -615,7 +631,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | --- | --- |
 | CI measures no coverage, no threshold or baseline exists, and firmware rustdoc is not built with warnings denied | [Coverage and firmware documentation in CI](../TODO.md#verification-and-code-quality) (P1) |
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
-| The connection workers, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
+| The connection workers, security handler, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
@@ -624,7 +640,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 | No automated check of documentation links or documented constants | [Automated documentation checks](../TODO.md#documentation) (P1) |
 | No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
-| Three source files are over 500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10: `multi_conn.rs`, `hid_device.rs`, `lib_tests.rs`; `hid_descriptor_tests.rs` was split below the limit); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |
 
 ## Related Guides
 

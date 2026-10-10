@@ -9,7 +9,8 @@
 //! reconnect, long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
 //! `power_logic`, plus `storage::{framing, record}` under `cfg(test)` only, and
 //! `config`, whose capacities the pure modules size their buffers from.
-//! The SoftDevice-coupled modules (`ble::{multi_conn, hid_client, scanner}`,
+//! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, bonder,
+//! hid_client, scanner}`,
 //! `storage` and `storage::codec`, `usb`, `power`, `sd_setup`, `stack`,
 //! `ui::{display, buttons}`) are *not* included here.
 
@@ -122,3 +123,7 @@ mod hid_descriptor_tests;
 #[cfg(test)]
 #[path = "hid_keyboard_report_tests.rs"]
 mod hid_keyboard_report_tests;
+
+#[cfg(test)]
+#[path = "hid_classify_tests.rs"]
+mod hid_classify_tests;

@@ -167,7 +167,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | --- | --- |
 | Hook | `SecurityHandler::conn_param_update_request` in `vendor/nrf-softdevice/src/ble/security.rs`; called from the `BLE_GAP_EVTS_BLE_GAP_EVT_CONN_PARAM_UPDATE_REQUEST` arm in `vendor/nrf-softdevice/src/ble/gap.rs`; both recorded in [README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md) |
 | Policy | `ConnParams`, `ConnParamLimits`, `bound_request`, `interval_within_request`, and `min_supervision_timeout` in [conn_params.rs](../../src/ble/conn_params.rs) |
-| Limits and logging | `PEER_CONN_PARAM_LIMITS` and `Bonder::conn_param_update_request` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
+| Limits and logging | `PEER_CONN_PARAM_LIMITS` and `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
 | Constants | `BLE_CONN_INTERVAL_MIN`, `BLE_CONN_INTERVAL_MAX`, `BLE_PEER_MAX_CONN_INTERVAL`, `BLE_MAX_PERIPHERAL_LATENCY`, `BLE_MIN_SUP_TIMEOUT`, `BLE_SUP_TIMEOUT` in [config.rs](../../src/config.rs) |
 
 ### Verification Status

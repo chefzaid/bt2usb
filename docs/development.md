@@ -31,8 +31,8 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── usb/               composite USB HID device
 │   ├── storage.rs, storage/  pairing store and its framing/codec
 │   ├── ui/                display, buttons, UI state machine
-│   └── lib_tests.rs, lib_logic_tests.rs, hid_descriptor_tests.rs,
-│       hid_keyboard_report_tests.rs
+│   └── lib_tests.rs, lib_logic_tests.rs, hid_classify_tests.rs,
+│       hid_descriptor_tests.rs, hid_keyboard_report_tests.rs
 │                          host test modules included by lib.rs
 ├── tests/                 host integration tests
 ├── renode/                platform description, GPIO/GPIOTE models, Robot test
@@ -599,7 +599,7 @@ another module fails every build.
 
 | Value | Derived from it |
 | --- | --- |
-| `BLE_MAX_CONNECTIONS` (2) | `coordinator::MAX_CONNECTIONS`, `hid::aggregate::SOURCES`, `usb::hid_device::LED_CONSUMERS`, `multi_conn::SlotSenders`, `conn_count`/`central_role_count`/`central_sec_count` in `sd_setup.rs`, and in `main.rs` the `BLE_SLOT_CMD_CHANNELS` array and the `ble_slot_task` pool, spawned once per slot |
+| `BLE_MAX_CONNECTIONS` (2) | `coordinator::MAX_CONNECTIONS`, `hid::aggregate::SOURCES`, `usb::host_requests::LED_CONSUMERS`, `multi_conn::SlotSenders`, `conn_count`/`central_role_count`/`central_sec_count` in `sd_setup.rs`, and in `main.rs` the `BLE_SLOT_CMD_CHANNELS` array and the `ble_slot_task` pool, spawned once per slot |
 | `BLE_MAX_DISCOVERED` (8) | `UiState::devices` capacity in `ui/ui_logic.rs`, the scan result list in `scanner.rs` |
 | `MAX_PAIRED_DEVICES` (4) | `UiState::paired_names` capacity, the `paired` snapshot in `main.rs`, the saved-device list in `BleEvent`, and the store |
 | `STORAGE_FLASH_PAGE_START`/`COUNT` | `STORAGE_FLASH_START`/`END`, used by the store, the self-test, and `build.rs`; the linker fails if `FLASH` in `memory_sd.x` disagrees |
@@ -683,6 +683,9 @@ Files:
   `ble_task`, and add `SlotCommand`/`SlotEvent` variants if a connection worker
   must act. Scan and connection setup must hold `GAP_PROCEDURE`, because the
   SoftDevice runs one such procedure at a time.
+- [ble/slot_worker.rs](../src/ble/slot_worker.rs): handle a new `SlotCommand`
+  in `connection_slot_task`, the per-slot worker, and send a new `SlotEvent`
+  from it.
 - [ble/management.rs](../src/ble/management.rs): quiescence and commit
   primitives for anything that changes stored peers.
 - [main.rs](../src/main.rs): send with `BLE_CMD_CHANNEL.try_send`, never an
@@ -718,16 +721,22 @@ Files:
   [delivery.rs](../src/hid/delivery.rs), and [wake.rs](../src/hid/wake.rs):
   per-source union, coalescing, endpoint delivery, and remote-wake rules.
 - [usb/hid_device.rs](../src/usb/hid_device.rs): one `HidWriter` per interface
-  with `max_packet_size: 8` and `HidWriter<'static, UsbDriver, 8>`, boot
-  protocol handling, the endpoint mailboxes, and 256-byte descriptor buffers.
+  with `max_packet_size: 8` and `HidWriter<'static, UsbDriver, 8>`, the
+  endpoint mailboxes, and 256-byte descriptor buffers.
   A report longer than 8 bytes needs these sizes, the 8-byte buffer in
   `UsbReportSink::write`, and `hid_writer_task` in `main.rs` changed together.
+- [usb/host_requests.rs](../src/usb/host_requests.rs): boot protocol handling
+  for the keyboard and mouse interfaces (`BootRequestHandler`); the mouse's
+  protocol decides whether `UsbReportSink::write` sends the three-byte boot
+  layout.
 - [ble/hid_client.rs](../src/ble/hid_client.rs): `MAX_REPORTS` (8) and
   `MAX_REPORT_LEN` (32) bound what discovery and notifications accept.
 - [selftest.rs](../src/selftest.rs) sends an all-zero mouse report; recheck it
   when the mouse format changes.
 
 Tests: parsing and serialization in [lib_tests.rs](../src/lib_tests.rs),
+classification by report ID or length in
+[hid_classify_tests.rs](../src/hid_classify_tests.rs),
 descriptor and routing cases (including every truncated descriptor prefix) in
 [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) and
 [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs), held-input release

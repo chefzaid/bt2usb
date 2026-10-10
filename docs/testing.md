@@ -109,7 +109,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -155,7 +155,8 @@ with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [lib_tests.rs](../src/lib_tests.rs) | 53 | Keyboard, mouse, and consumer report parsing from BLE bytes and serialization to USB: empty, short, exact, and longer inputs; too-small output buffers; all modifiers and buttons; six-key arrays; negative motion and wheel; 5-byte mouse reports with horizontal pan and back/forward buttons; consumer volume, media, browser, and launcher usages. `classify_report` and `classify_notification` routing by report ID or length, rejecting a keyboard report with a nonzero reserved byte when its kind is only inferred, invalid 2-byte consumer payloads, unknown lengths, and empty or single-byte input. |
+| [lib_tests.rs](../src/lib_tests.rs) | 36 | Keyboard, mouse, and consumer report parsing from BLE bytes and serialization to USB: empty, short, exact, and longer inputs; too-small output buffers; all modifiers and buttons; six-key arrays; negative motion and wheel; 5-byte mouse reports with horizontal pan and back/forward buttons; consumer volume, media, browser, and launcher usages. |
+| [hid_classify_tests.rs](../src/hid_classify_tests.rs) | 17 | `classify_report` and `classify_notification` routing by report ID or length, rejecting a keyboard report with a nonzero reserved byte when its kind is only inferred, invalid 2-byte consumer payloads, unknown lengths, and empty or single-byte input. |
 | [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) | 34 | Report-descriptor parsing in `hid/report_protocol.rs`: usage pages, keyboard/mouse/consumer detection, Push/Pop, long items, bounded nesting, overflow-safe report dimensions, constant padding, unsupported applications, extended usages, and every truncated prefix of the firmware's own USB descriptors failing closed. Descriptor-guided routing (`classify_notification_with_hint`, `classify_known`) that rejects unknown or mixed-kind report IDs instead of falling back to another kind, and drops a report of a kind a mixed map without report IDs does not declare. GATT Report Reference parsing, consumer usage range, three-button boot mouse serialization, and GATT values whose first byte resembles a report ID. |
 | [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs) | 10 | Which report is the keyboard's (`HidDescriptor::is_unnumbered_keyboard_only` and `is_keyboard_report`, the rule `subscribe_all` uses for the LED output report): an unnumbered keyboard-only map owns every report, a numbered map only the keyboard ID, and an unnumbered map with another input, or an ID shared by two kinds, owns none. The reserved keyboard byte: a keyboard report carrying OEM data there is accepted, with the reserved byte cleared, when `classify_known` is given the keyboard kind, when a Report Reference resolves through a numbered Report Map to the keyboard report as `subscribe_all` resolves it, and when an unnumbered map describes only a keyboard; the check stays when an unnumbered map also has other kinds and on the length- and ID-inferred paths; a declared keyboard report must still be 8 bytes. |
 | [lib_logic_tests.rs](../src/lib_logic_tests.rs) | 14 | `HidReport` serialization, equality, and kind helpers; HID UUID detection, name extraction, malformed lengths, and name truncation through the public `ble::adv_parser` API; scan-dot cycling; `power_logic::screen_should_be_on` auto-off policy. |
@@ -225,9 +226,9 @@ exercises.
 
 | Module | What checks it today |
 | --- | --- |
-| `ble/multi_conn.rs`, `ble/hid_client.rs`, `ble/scanner.rs` | Embedded build and Clippy; pure decisions they call are host-tested; hardware acceptance. The self-test scan stage checks the radio with its own scan loop and `ble/adv_parser.rs`; it does not run these modules |
+| `ble/multi_conn.rs`, `ble/slot_worker.rs`, `ble/bonder.rs`, `ble/hid_client.rs`, `ble/scanner.rs` | Embedded build and Clippy; pure decisions they call are host-tested; hardware acceptance. The self-test scan stage checks the radio with its own scan loop and `ble/adv_parser.rs`; it does not run these modules |
 | `storage.rs`, `storage/codec.rs` | Embedded build and Clippy; framing and record validation are host-tested; the self-test flash stage exercises the same region and `sequential-storage` map, not this code; hardware acceptance |
-| `usb/hid_device.rs` | Embedded build and Clippy; delivery, aggregation, and wake policy are host-tested; self-test USB stages; hardware acceptance |
+| `usb/hid_device.rs`, `usb/host_requests.rs` | Embedded build and Clippy; delivery, aggregation, wake policy, and host LED decoding and forwarding are host-tested; self-test USB stages; hardware acceptance |
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
 | `ui/display.rs` | Embedded build and Clippy; recovery policy is host-tested; self-test OLED stages |
 | `stack.rs`, `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice and stack stages |
@@ -434,7 +435,7 @@ cancels an in-progress one, except for tag refs. The default token permission is
 
 | Job | Runner and limit | Checks, in order |
 | --- | --- | --- |
-| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; release-helper tests; on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; `cargo doc --locked --no-deps --lib` with `RUSTDOCFLAGS=-D warnings` |
+| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; `cargo doc --locked --no-deps --lib` with `RUSTDOCFLAGS=-D warnings` |
 | Dependency security audit | Ubuntu, 10 min | `cargo audit` with cargo-audit 0.22.2 |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
 | Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
@@ -603,8 +604,8 @@ Specific to the current workflow and test tree:
   firmware build.
 - `cargo audit` runs without a deny option, so unmaintained-crate warnings do
   not fail the job; see the [validation record](#validation-record--2026-09-28).
-- Connection workers, the GATT HID client, the storage shell and codec, the USB
-  device, and the display driver have no host tests
+- Connection workers, the security handler, the GATT HID client, the storage
+  shell and codec, the USB device, and the display driver have no host tests
   ([details](#modules-without-host-tests)).
 - `DeviceStore` in `storage.rs` and the address and bond-record encoding in
   `storage/codec.rs` have no host tests, so the legacy-format parser, the

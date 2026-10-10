@@ -3,19 +3,18 @@
 //! Initialises the Embassy USB stack on the nRF52840 hardware USB
 //! peripheral and exposes keyboard, mouse, and consumer-control HID endpoints.
 
+use super::host_requests;
 use crate::config;
 use crate::hid::aggregate::InputAggregator;
 use crate::hid::consumer::{ConsumerReport, CONSUMER_REPORT_DESCRIPTOR};
 use crate::hid::delivery::{
     run_endpoint, DeliveryQueue, EndpointDelivery, HidEvent, PendingReport, ReportSink, RetryClock,
 };
-use crate::hid::host_leds::HostLeds;
-use crate::hid::keyboard::{KeyboardLeds, KeyboardReport, KEYBOARD_REPORT_DESCRIPTOR};
+use crate::hid::keyboard::{KeyboardReport, KEYBOARD_REPORT_DESCRIPTOR};
 use crate::hid::mouse::{MouseReport, MOUSE_REPORT_DESCRIPTOR};
 use crate::hid::HidReport;
 use core::cell::RefCell;
 use core::fmt::Write;
-use core::future::Future;
 use core::sync::atomic::{AtomicBool, Ordering};
 use defmt::{info, warn};
 use embassy_futures::join::join4;
@@ -27,104 +26,12 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::blocking_mutex::Mutex;
 use embassy_sync::channel::Receiver;
 use embassy_sync::signal::Signal;
-use embassy_sync::watch::{Receiver as WatchReceiver, Watch};
 use embassy_time::{Duration, Timer};
 use embassy_usb::class::hid::{
-    Config as HidConfig, HidBootProtocol, HidProtocolMode, HidSubclass, HidWriter, ReportId,
-    RequestHandler, State,
+    Config as HidConfig, HidBootProtocol, HidSubclass, HidWriter, State,
 };
-use embassy_usb::control::OutResponse;
 use embassy_usb::{Builder, Config, UsbDevice};
 use static_cell::StaticCell;
-
-/// Number of BLE connection slots that consume host LED updates, one per link
-/// ([`crate::config::BLE_MAX_CONNECTIONS`]). A keyboard occupies one slot;
-/// mouse and consumer-control slots ignore the updates.
-pub const LED_CONSUMERS: usize = crate::config::BLE_MAX_CONNECTIONS;
-
-/// Latest host keyboard-LED (Caps/Num/Scroll) state, published by the USB
-/// control handler and consumed by the BLE slot tasks to drive the BLE
-/// keyboard's LEDs. `Watch` keeps only the newest value and wakes every slot.
-static KEYBOARD_LEDS: Watch<CriticalSectionRawMutex, KeyboardLeds, LED_CONSUMERS> = Watch::new();
-
-/// Receiver handle a BLE slot task uses to observe host LED changes. A slot
-/// keeps its receiver across links, so the receiver remembers which state the
-/// slot last saw; [`HostLeds::current`] hands a new link the state anyway.
-pub type LedReceiver = WatchReceiver<'static, CriticalSectionRawMutex, KeyboardLeds, LED_CONSUMERS>;
-
-impl HostLeds for LedReceiver {
-    fn current(&mut self) -> Option<KeyboardLeds> {
-        self.try_get()
-    }
-
-    fn changed(&mut self) -> impl Future<Output = KeyboardLeds> {
-        // Call the receiver's own method, not this trait's.
-        (**self).changed()
-    }
-}
-
-/// Take one of the [`LED_CONSUMERS`] LED receivers (one per BLE slot).
-pub fn keyboard_led_receiver() -> Option<LedReceiver> {
-    KEYBOARD_LEDS.receiver()
-}
-
-/// Boot-protocol negotiation for keyboard/mouse, plus keyboard LED output.
-struct BootRequestHandler {
-    keyboard: bool,
-}
-
-impl BootRequestHandler {
-    fn boot_state(&self) -> &'static AtomicBool {
-        if self.keyboard {
-            &KEYBOARD_BOOT_PROTOCOL
-        } else {
-            &MOUSE_BOOT_PROTOCOL
-        }
-    }
-}
-
-impl RequestHandler for BootRequestHandler {
-    fn get_protocol(&self) -> HidProtocolMode {
-        if self.boot_state().load(Ordering::Relaxed) {
-            HidProtocolMode::Boot
-        } else {
-            HidProtocolMode::Report
-        }
-    }
-
-    fn set_protocol(&mut self, protocol: HidProtocolMode) -> OutResponse {
-        self.boot_state()
-            .store(protocol == HidProtocolMode::Boot, Ordering::Relaxed);
-        if self.keyboard {
-            KEYBOARD_DELIVERY.replay();
-        } else {
-            MOUSE_DELIVERY.replay();
-        }
-        OutResponse::Accepted
-    }
-
-    fn set_report(&mut self, id: ReportId, data: &[u8]) -> OutResponse {
-        // Our keyboard descriptor declares no report IDs, so the output report
-        // payload is the single LED bitfield byte.
-        if !self.keyboard || id != ReportId::Out(0) || data.len() != 1 {
-            return OutResponse::Rejected;
-        }
-        let leds = KeyboardLeds::from_byte(data[0]);
-        info!(
-            "Host LEDs: num={} caps={} scroll={}",
-            leds.num_lock(),
-            leds.caps_lock(),
-            leds.scroll_lock()
-        );
-        KEYBOARD_LEDS.sender().send(leds);
-        OutResponse::Accepted
-    }
-}
-
-static KEYBOARD_HANDLER: StaticCell<BootRequestHandler> = StaticCell::new();
-static MOUSE_HANDLER: StaticCell<BootRequestHandler> = StaticCell::new();
-static KEYBOARD_BOOT_PROTOCOL: AtomicBool = AtomicBool::new(false);
-static MOUSE_BOOT_PROTOCOL: AtomicBool = AtomicBool::new(false);
 
 bind_interrupts!(struct Irqs {
     USBD => embassy_nrf::usb::InterruptHandler<peripherals::USBD>;
@@ -162,7 +69,7 @@ static USB_SERIAL: StaticCell<heapless::String<16>> = StaticCell::new();
 
 /// Each endpoint has its own bounded queue, current held state, and worker.
 /// No USB write or timer is awaited while this short critical section is held.
-struct EndpointMailbox {
+pub(super) struct EndpointMailbox {
     state: Mutex<CriticalSectionRawMutex, RefCell<EndpointDelivery>>,
     pending: Signal<CriticalSectionRawMutex, ()>,
     lifecycle: Signal<CriticalSectionRawMutex, ()>,
@@ -183,7 +90,7 @@ impl EndpointMailbox {
         self.pending.signal(());
     }
 
-    fn replay(&self) {
+    pub(super) fn replay(&self) {
         self.state.lock(|state| state.borrow_mut().replay());
         self.lifecycle.signal(());
         self.pending.signal(());
@@ -232,9 +139,7 @@ impl ReportSink for UsbReportSink {
     async fn write(&mut self, report: &HidReport) -> Result<(), ()> {
         let mut buf = [0u8; 8];
         let len = match report {
-            HidReport::Mouse(mouse)
-                if self.mouse && MOUSE_BOOT_PROTOCOL.load(Ordering::Relaxed) =>
-            {
+            HidReport::Mouse(mouse) if self.mouse && host_requests::mouse_boot_protocol() => {
                 mouse.serialize_boot(&mut buf)
             }
             _ => report.serialize(&mut buf),
@@ -255,19 +160,20 @@ impl RetryClock for UsbRetryClock {
     }
 }
 
-static KEYBOARD_DELIVERY: EndpointMailbox =
+pub(super) static KEYBOARD_DELIVERY: EndpointMailbox =
     EndpointMailbox::new(HidReport::Keyboard(KeyboardReport {
         modifier: 0,
         reserved: 0,
         keycodes: [0; 6],
     }));
-static MOUSE_DELIVERY: EndpointMailbox = EndpointMailbox::new(HidReport::Mouse(MouseReport {
-    buttons: 0,
-    x: 0,
-    y: 0,
-    wheel: 0,
-    pan: 0,
-}));
+pub(super) static MOUSE_DELIVERY: EndpointMailbox =
+    EndpointMailbox::new(HidReport::Mouse(MouseReport {
+        buttons: 0,
+        x: 0,
+        y: 0,
+        wheel: 0,
+        pan: 0,
+    }));
 static CONSUMER_DELIVERY: EndpointMailbox =
     EndpointMailbox::new(HidReport::Consumer(ConsumerReport { usage: 0 }));
 
@@ -297,10 +203,8 @@ impl embassy_usb::Handler for UsbPowerHandler {
     fn reset(&mut self) {
         USB_CONFIGURED.store(false, Ordering::Relaxed);
         USB_SUSPENDED.store(false, Ordering::Relaxed);
-        KEYBOARD_BOOT_PROTOCOL.store(false, Ordering::Relaxed);
-        MOUSE_BOOT_PROTOCOL.store(false, Ordering::Relaxed);
+        host_requests::reset();
         REMOTE_WAKE.reset();
-        KEYBOARD_LEDS.sender().send(KeyboardLeds::default());
         USB_SUSPEND_SIGNAL.signal(false);
         replay_endpoints();
     }
@@ -412,7 +316,7 @@ pub fn init(
         report_descriptor: KEYBOARD_REPORT_DESCRIPTOR,
         // Capture the host's LED (Caps/Num/Scroll) output report so we can mirror
         // it onto the BLE keyboard.
-        request_handler: Some(KEYBOARD_HANDLER.init(BootRequestHandler { keyboard: true })),
+        request_handler: Some(host_requests::keyboard_handler()),
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
         // Advertise the Boot Interface subclass so the keyboard works in BIOS /
@@ -426,7 +330,7 @@ pub fn init(
     let mouse_state = MOUSE_STATE.init(State::new());
     let mouse_config = HidConfig {
         report_descriptor: MOUSE_REPORT_DESCRIPTOR,
-        request_handler: Some(MOUSE_HANDLER.init(BootRequestHandler { keyboard: false })),
+        request_handler: Some(host_requests::mouse_handler()),
         poll_ms: config::USB_HID_POLL_MS,
         max_packet_size: 8,
         // SET_PROTOCOL selects three-byte reports for a boot/BIOS host.

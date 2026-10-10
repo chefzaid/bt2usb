@@ -69,8 +69,8 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Address and bond byte codec | [storage/codec.rs](../src/storage/codec.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Load, save, legacy parse, merge, eviction | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Persist-then-publish commit and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 5 host tests | None recorded |
-| USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
-| USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
+| USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
+| USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs), [usb/host_requests.rs](../src/usb/host_requests.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
 | Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs) | 26 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs); Renode scenario | None recorded |
 | UI state model | [ui/ui_logic.rs](../src/ui/ui_logic.rs) | 19 host tests; Renode scenario | None recorded |
 
@@ -339,7 +339,7 @@ counted from the byte arrays in [hid/](../src/hid/).
 
 ### USB Lifecycle Effects
 
-| Host event | Effect in [usb/hid_device.rs](../src/usb/hid_device.rs) |
+| Host event | Effect in [usb/hid_device.rs](../src/usb/hid_device.rs) and [usb/host_requests.rs](../src/usb/host_requests.rs) |
 | --- | --- |
 | Bus reset or USB disabled | Configured and suspended flags cleared, both interfaces back to report protocol, pending wake cleared, LED state reset to all off, resume signalled to the UI loop, all endpoints replay held state |
 | Configured or deconfigured | Configured flag updated, endpoints replay, `"USB configured by host: {}"` |
@@ -347,6 +347,11 @@ counted from the byte arrays in [hid/](../src/hid/).
 | `SET_PROTOCOL` on keyboard or mouse | That interface's boot flag updated and only its endpoint replays |
 | `SET_REPORT` (keyboard, Output, ID 0, 1 byte) | Byte masked to 5 LED bits, published to the LED `Watch`, `"Host LEDs: num={} caps={} scroll={}"`; any other `SET_REPORT` to the keyboard or mouse interface is rejected |
 | New press while suspended | Remote wakeup requested; `"USB remote wakeup sent"` or `"USB remote wakeup not possible: {}"` |
+
+`host_requests.rs` handles `SET_PROTOCOL` and `SET_REPORT`, and its `reset`,
+called from the bus reset handler in `hid_device.rs`, returns both interfaces
+to report protocol and publishes all-off LEDs. The other effects are in
+`hid_device.rs`.
 
 An endpoint is available only while the device is configured and not
 suspended. Replay invalidates in-flight transfers and requeues only held

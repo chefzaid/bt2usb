@@ -66,6 +66,7 @@ use nrf_softdevice::SocEvent;
 
 use crate::ble::coordinator::MAX_CONNECTIONS;
 use crate::ble::multi_conn::{self, SlotCommand, SlotEvent};
+use crate::ble::slot_worker;
 use crate::ble::{BleCommand, BleEvent};
 use crate::hid::delivery::HidEvent;
 use crate::power::PowerManager;
@@ -129,7 +130,7 @@ async fn ble_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
 /// One connection worker per link; `main` spawns one for each slot.
 #[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
 async fn ble_slot_task(slot: usize, sd: &'static nrf_softdevice::Softdevice) -> ! {
-    multi_conn::connection_slot_task(
+    slot_worker::connection_slot_task(
         slot,
         sd,
         &BLE_SLOT_CMD_CHANNELS[slot].receiver(),

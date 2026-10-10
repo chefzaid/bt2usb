@@ -196,7 +196,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Concern | Where |
 | --- | --- |
 | Slot count and reducers | `BLE_MAX_CONNECTIONS` in [config.rs](../../src/config.rs), which sizes every per-link array, pool, and SoftDevice count; `MAX_CONNECTIONS` and `ConnManager` in [coordinator.rs](../../src/ble/coordinator.rs) |
-| Slot workers, boot reconnect, link end | `connection_slot_task`, `ble_task`, and `connect_and_run_secure` in [multi_conn.rs](../../src/ble/multi_conn.rs); the log line `slot {} link lost; reconnecting` |
+| Slot workers, boot reconnect, link end | `connection_slot_task` and `connect_and_run_secure` in [slot_worker.rs](../../src/ble/slot_worker.rs), and `ble_task` in [multi_conn.rs](../../src/ble/multi_conn.rs); the log line `slot {} link lost; reconnecting` |
 | Shared reconnect scan and address resolution ([ADR 0015](0015-shared-reconnect-scan.md)) | `ReconnectTable` and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs); `find_saved_peer` in [scanner.rs](../../src/ble/scanner.rs) |
 | GAP serialization | `GAP_PROCEDURE` in [ble/mod.rs](../../src/ble/mod.rs) |
 | Timing constants | `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS`, `BLE_CONN_EVENT_LENGTH`, `BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`, `BLE_FAST_RECONNECT_SECS` in [config.rs](../../src/config.rs) |
@@ -204,9 +204,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Source tags | `HidEvent` in [delivery.rs](../../src/hid/delivery.rs); `HID_REPORT_CHANNEL` (capacity 16) in [main.rs](../../src/main.rs) |
 | Aggregation | `InputAggregator::apply` and `SOURCES` (the link count) in [aggregate.rs](../../src/hid/aggregate.rs); `MAX_CONSUMER_USAGE` (`0x0FFF`) in [consumer.rs](../../src/hid/consumer.rs) |
 | Endpoint policy | `EndpointDelivery` (`publish`, `replay`, `failed`, `succeeded`, epochs) and `run_endpoint` in `delivery.rs` |
-| USB side | `dispatch_reports`, `hid_writer_task` (one dispatcher and three workers joined), and `EndpointMailbox` in [hid_device.rs](../../src/usb/hid_device.rs); `UsbPowerHandler` calls `replay_endpoints` from its `reset`, `configured`, and `suspended` callbacks, and `BootRequestHandler::set_protocol` replays the keyboard or mouse endpoint |
+| USB side | `dispatch_reports`, `hid_writer_task` (one dispatcher and three workers joined), and `EndpointMailbox` in [hid_device.rs](../../src/usb/hid_device.rs); `UsbPowerHandler` calls `replay_endpoints` from its `reset`, `configured`, and `suspended` callbacks, and `BootRequestHandler::set_protocol` in [host_requests.rs](../../src/usb/host_requests.rs) replays the keyboard or mouse endpoint |
 | Wake policy | `new_press` in [wake.rs](../../src/hid/wake.rs); `REMOTE_WAKE` and `run_usb_device` in `hid_device.rs` |
-| Keyboard LEDs | A `Watch` with `LED_CONSUMERS` receivers (one per link) in `hid_device.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state; `forward_host_leds` in [host_leds.rs](../../src/hid/host_leds.rs) writes the current state when each link starts, then every change |
+| Keyboard LEDs | A `Watch` with `LED_CONSUMERS` receivers (one per link) in `host_requests.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state; `forward_host_leds` in [host_leds.rs](../../src/hid/host_leds.rs) writes the current state when each link starts, then every change |
 
 ### Verification Status
 
@@ -227,7 +227,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   GitHub-hosted runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and
   37932436721 (`7fc99d6`, 2026-10-09) and scheduled run 37338711407
   (2026-10-05). The slot workers, GAP serialization, and the USB side in
-  `hid_device.rs` are not host-tested.
+  `hid_device.rs` and `host_requests.rs` are not host-tested.
 - **Hardware-verified:** not yet. No layer 5 result covers two peripherals on
   one host, endpoint stalls, or suspend and resume.
 

@@ -16,3 +16,4 @@
 //! independent endpoint workers deliver it without cross-interface blocking.
 
 pub mod hid_device;
+pub mod host_requests;

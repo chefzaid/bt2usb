@@ -49,7 +49,7 @@ Use Just Works bonding for now, and constrain when it can happen and what it
 protects.
 
 - **Security handler.** The single `Bonder` in
-  [multi_conn.rs](../../src/ble/multi_conn.rs) declares
+  [bonder.rs](../../src/ble/bonder.rs) declares
   `IoCapabilities::None`, accepts bonding (`can_bond` returns `true`), and does
   not request MITM protection. With the binding's parameters this is LE legacy
   pairing with the Just Works association model.
@@ -192,11 +192,11 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 | Concern | Where |
 | --- | --- |
-| Security handler and bond cache | `Bonder` and its `SecurityHandler` implementation in [multi_conn.rs](../../src/ble/multi_conn.rs) |
-| Encryption gate | `wait_for_secure_link` and the `prepare` step of `connect_and_run_secure` in `multi_conn.rs` |
+| Security handler and bond cache | `Bonder` and its `SecurityHandler` implementation in [bonder.rs](../../src/ble/bonder.rs) |
+| Encryption gate | `wait_for_secure_link` and the `prepare` step of `connect_and_run_secure` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | Pairing permission | `ConnectionRequest { allow_pairing: !silent }` in `connection_slot_task`; `silent` is true for `SlotCommand::Reconnect` |
 | Identity resolution on reconnect | `SavedPeer` and the shared reconnect table in [reconnect.rs](../../src/ble/reconnect.rs) ([ADR 0015](0015-shared-reconnect-scan.md)); `find_saved_peer` and the `IdentityKey::is_match` resolver in [scanner.rs](../../src/ble/scanner.rs) |
-| Persistence and eviction | `Action::PersistDevice` in `execute_action` (`multi_conn.rs`); `DeviceStore::add` in [storage.rs](../../src/storage.rs) |
+| Persistence and eviction | `Action::PersistDevice` in `execute_action` ([multi_conn.rs](../../src/ble/multi_conn.rs)); `DeviceStore::add` in [storage.rs](../../src/storage.rs) |
 | Binding behavior relied on | `security_params` in [security.rs](../../vendor/nrf-softdevice/src/ble/security.rs); `default_security_params` and the Security Request handler in [gap.rs](../../vendor/nrf-softdevice/src/ble/gap.rs) |
 | SoftDevice security contexts | `central_sec_count`, one per link (`BLE_MAX_CONNECTIONS`), in `softdevice_config()` ([sd_setup.rs](../../src/sd_setup.rs)) |
 

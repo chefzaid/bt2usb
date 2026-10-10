@@ -65,7 +65,7 @@ Known limitations:
 
 | Asset | Where it lives | Why it matters | Current protection |
 | --- | --- | --- | --- |
-| Long-term key (LTK) and master ID per bonded peer | RAM in `Bonder` ([multi_conn.rs](../src/ble/multi_conn.rs)) and `DEVICE_STORE`; flash pages 240–243 (`0xF0000–0xF4000`) as a 50-byte bond record ([codec.rs](../src/storage/codec.rs)) | Decrypts that link's recorded traffic and lets an attacker impersonate either side of the bond | Never logged by application code; internal flash only. Not encrypted at rest, not readout-protected |
+| Long-term key (LTK) and master ID per bonded peer | RAM in `Bonder` ([bonder.rs](../src/ble/bonder.rs)) and `DEVICE_STORE`; flash pages 240–243 (`0xF0000–0xF4000`) as a 50-byte bond record ([codec.rs](../src/storage/codec.rs)) | Decrypts that link's recorded traffic and lets an attacker impersonate either side of the bond | Never logged by application code; internal flash only. Not encrypted at rest, not readout-protected |
 | Identity resolving key (IRK) and identity address | Same record and RAM copies as the LTK | Resolves the peripheral's private addresses, so the holder can track or impersonate its identity | Same as LTK |
 | Keystroke and pointer stream | Transient: notification buffer (at most 32 bytes), per-link coalescer, 16-entry HID channel, aggregator, endpoint mailboxes | Passwords and private text pass through the bridge | Encrypted BLE link required; never persisted; not logged by application code (a trace-level dependency log is the exception, see [Logging And Privacy](#logging-and-privacy)) |
 | Host access | The three USB HID interfaces ([hid_device.rs](../src/usb/hid_device.rs)) | Anything that can feed input can type commands as the logged-in user | Input comes only from bonded, encrypted peers; pairing needs a button press on the bridge |
@@ -135,8 +135,8 @@ implemented in the source cited; none is hardware-verified.
 
 | Actor | Threat | Current mitigation | Gap |
 | --- | --- | --- | --- |
-| Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [multi_conn.rs](../src/ble/multi_conn.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
-| Nearby attacker | Advertise a look-alike HID device so the user selects and pairs it, then inject input | Pairing only after an explicit Connect from the device list (`allow_pairing`, [multi_conn.rs](../src/ble/multi_conn.rs)); only advertisements carrying the HID UUID are listed ([coordinator.rs](../src/ble/coordinator.rs)) | Names are attacker-chosen and the list shows names only; no confirmation code, allowlist, or pairing window. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
+| Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [slot_worker.rs](../src/ble/slot_worker.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
+| Nearby attacker | Advertise a look-alike HID device so the user selects and pairs it, then inject input | Pairing only after an explicit Connect from the device list (`allow_pairing`, [slot_worker.rs](../src/ble/slot_worker.rs)); only advertisements carrying the HID UUID are listed ([coordinator.rs](../src/ble/coordinator.rs)) | Names are attacker-chosen and the list shows names only; no confirmation code, allowlist, or pairing window. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Act as a man in the middle during pairing | None: `IoCapabilities::None` offers no user-confirmed authentication | TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing); [ADR 0011](adr/0011-interim-just-works-pairing.md) records the interim decision |
 | Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. A stored peer without a bond is retried at its stored address, and a Security Request from that peer makes the vendored crate request pairing; untested. TODO: [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Fill the scan list with fake HID advertisers, or jam the radio | Scan list bounded to `BLE_MAX_DISCOVERED` (8); scan window 8 s plus a 2 s backstop; connect attempts bounded to 6 s ([config.rs](../src/config.rs), [scanner.rs](../src/ble/scanner.rs)) | The first eight HID advertisers win, so a crowded list can hide the intended device; jamming cannot be prevented. TODO: [Scan list under crowding](../TODO.md#ble-central-and-pairing) |
@@ -147,7 +147,7 @@ implemented in the source cited; none is hardware-verified.
 | Paired peripheral | Hold keys down, or vanish while holding them | A slot's held state is cleared on disconnect (`HidEvent::Disconnected`); supervision timeout of 4 s, and a peripheral's request for a longer one is bounded to 4 s (`conn_params::bound_request`, [conn_params.rs](../src/ble/conn_params.rs)) | Hardware release timing unmeasured. TODO: [Multi-device aggregation hardware acceptance](../TODO.md#input-aggregation-and-delivery) |
 | Newly paired device | Claim an existing peer's identity address to replace its bond | Requires the user to pair it explicitly | Identity is asserted by the peer; `on_bonded` and `DeviceStore::add` replace the matching record without telling the user. TODO: [Visible storage/security errors](../TODO.md#ui-display-and-power) |
 | Malicious USB host | Observe or log everything typed | None possible: the host is the input's destination | Inherent; pair only with hosts you trust |
-| Malicious USB host | Send malformed control requests | `set_report` accepts only a one-byte keyboard output report and masks it to defined LED bits; protocol changes only switch report layout ([hid_device.rs](../src/usb/hid_device.rs)) | `GET_REPORT`/`SET_IDLE` behavior comes from `embassy-usb` defaults and is unreviewed. TODO: [HID/USB conformance](../TODO.md#usb-hid-device) |
+| Malicious USB host | Send malformed control requests | `set_report` accepts only a one-byte keyboard output report and masks it to defined LED bits; protocol changes only switch report layout ([host_requests.rs](../src/usb/host_requests.rs)) | `GET_REPORT`/`SET_IDLE` behavior comes from `embassy-usb` defaults and is unreviewed. TODO: [HID/USB conformance](../TODO.md#usb-hid-device) |
 | Malicious USB host | Read bonds, change pairings, or reflash over USB | Only keyboard, mouse, and consumer HID interfaces exist; no vendor, CDC, mass-storage, or DFU interface (`hid_device::init`) | A future DFU or host management interface (for a companion app or browser configuration page) would change this; the planned host management ADR requires every change from a host to be confirmed on the bridge, because every host behind a KVM shares it. TODO: [Signed USB/BLE DFU](../TODO.md#updates-and-host-tools), TODO: [ADR: host management interface](../TODO.md#updates-and-host-tools) |
 | Malicious USB host | Fingerprint or track the unit | None | Development VID/PID `0x1209`/`0x0001` and a stable FICR-derived serial. TODO: [USB production identity](../TODO.md#usb-hid-device) |
 | Physical attacker with SWD | Read LTK/IRK from flash, impersonate peers, or decrypt recorded traffic | None | No readout protection: every boot leaves the debug port open ([Physical Access And Debug Port](#physical-access-and-debug-port)); keys unencrypted. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning) |
@@ -189,7 +189,7 @@ bond, Forget it first. Bond lookups and updates are tied to peer identity, not
 just the encryption master ID. These controls do not add MITM authentication to
 Just Works pairing.
 
-Bond bookkeeping in `Bonder` ([multi_conn.rs](../src/ble/multi_conn.rs)):
+Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
 
 - `on_bonded` replaces the entry whose identity address equals the new one, or
   whose IRK resolves the connection's address; otherwise it appends, evicting
@@ -218,7 +218,9 @@ The USB device built in [hid_device.rs](../src/usb/hid_device.rs) exposes three
 HID interfaces and nothing else: a boot-subclass keyboard, a boot-subclass
 mouse, and a consumer-control interface. There is no vendor, CDC, mass-storage,
 or DFU interface, so a host cannot read flash, list or change pairings, or
-update firmware over USB.
+update firmware over USB. `BootRequestHandler` in
+[host_requests.rs](../src/usb/host_requests.rs) answers `SET_REPORT` and the
+protocol requests on the keyboard and mouse interfaces.
 
 | Host action | Firmware handling |
 | --- | --- |
@@ -248,7 +250,7 @@ applied and the result of a violation:
 | --- | --- | --- | --- |
 | Advertising and scan-response data | [adv_parser.rs](../src/ble/adv_parser.rs), `merge_advertisement` in [coordinator.rs](../src/ble/coordinator.rs) | AD walk stops at a zero length or a structure that runs past the end; UUID lists read in 2-byte chunks; names must be UTF-8 and are cut at a character boundary to 32 bytes; only HID UUID `0x1812` creates an entry; list capped at 8; name-only responses update existing entries only | Structure ignored; name shown as `Unknown`; device not listed |
 | Reconnect scan | `find_saved_peer` in [scanner.rs](../src/ble/scanner.rs); `ReconnectTable` in [reconnect.rs](../src/ble/reconnect.rs) | Accepts only a connectable report whose address a registered slot's stored identity key resolves or that equals its stored address; non-connectable and scannable-only reports are ignored; a sighting is handed only to the slot whose target matched, used once, and dropped after 2 s; bounded by `BLE_CONNECT_TIMEOUT_SECS` (6 s) | Silent retry after the 500 ms backoff |
-| Connection parameter requests | `Bonder::conn_param_update_request` in [multi_conn.rs](../src/ble/multi_conn.rs); `bound_request` in [conn_params.rs](../src/ble/conn_params.rs) | Any 16-bit values accepted as input; interval kept within 7.5–15 ms, or the request's fastest up to 30 ms when it asks only for slower ones, latency at most 20, supervision timeout 1–4 s and always above `(1 + latency) × interval × 2`; reversed interval bounds read as a range | Nearest bounded values granted instead |
+| Connection parameter requests | `Bonder::conn_param_update_request` in [bonder.rs](../src/ble/bonder.rs); `bound_request` in [conn_params.rs](../src/ble/conn_params.rs) | Any 16-bit values accepted as input; interval kept within 7.5–15 ms, or the request's fastest up to 30 ms when it asks only for slower ones, latency at most 20, supervision timeout 1–4 s and always above `(1 + latency) × interval × 2`; reversed interval bounds read as a range | Nearest bounded values granted instead |
 | GATT discovery | Vendored `gatt_client::discover`; `HidServiceClient` in [hid_client.rs](../src/ble/hid_client.rs) | Six characteristic declarations kept per response, resuming after the last kept handle; six descriptors per characteristic; declarations must lie in range and advance; empty responses rejected; saturating handle arithmetic; ATT timeouts return errors; at most `MAX_REPORTS` (8) Report characteristics tracked, at least one required | Discovery fails; UI shows `No HID service`; the cause is logged as `HID discovery failed: {:?}` |
 | Report Map long read | [long_read.rs](../src/ble/long_read.rs), `read_report_map` | ATT MTU must be 23–517; each fragment at most MTU − 1 bytes; total at most 512 bytes; an exact-MTU end needs Invalid Offset, or Attribute Not Long after the first fragment only; response handle and offset must match the request; a partial value is never exposed | `HID map too large` or `HID map read failed`; only an absent Report Map permits legacy classification |
 | HID Report Map parser | `HidDescriptor::parse` in [report_protocol.rs](../src/hid/report_protocol.rs) | Item sizes checked against the buffer; long items skipped with checked arithmetic; collection and Push/Pop stacks bounded to 16 and required to balance; Report ID one non-zero byte; Delimiter rejected; Report Size/Count never multiplied; at least one keyboard, mouse, or consumer input | `Unsupported HID map` |
@@ -257,7 +259,7 @@ applied and the result of a violation:
 | Consumer usages | `ConsumerReport::from_ble_bytes` in [consumer.rs](../src/hid/consumer.rs); [aggregate.rs](../src/hid/aggregate.rs) | Usage at most `MAX_CONSUMER_USAGE` (`0x0FFF`), matching the USB descriptor's logical maximum; rechecked in the aggregator | Report dropped |
 | Aggregated report fields | [aggregate.rs](../src/hid/aggregate.rs) | Mouse buttons masked to five bits; keyboard reserved byte cleared; key codes 1–3 produce the rollover array; unknown source index ignored | Field normalized or event ignored |
 | Pairing store frames | [storage.rs](../src/storage.rs), [framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs), [codec.rs](../src/storage/codec.rs) | 512-byte read buffer; magic `0xB2` selects the versioned path; version `0x01`; the whole frame must be complete with no trailing bytes; at most 4 records; address type at most 4; name at most 32 bytes of UTF-8; bond flag 0 or 1 with an exact 50-byte bond; identity address public or random static. A blob without the magic byte is read as the legacy unversioned format with the same count, address, and name bounds and no bonds | Store loaded empty, writes disabled, `Invalid or unsupported device store; writes disabled`; UI shows `Storage failed` |
-| USB control requests | `BootRequestHandler` in [hid_device.rs](../src/usb/hid_device.rs) | See [USB Host Interface](#usb-host-interface) | `OutResponse::Rejected` |
+| USB control requests | `BootRequestHandler` in [host_requests.rs](../src/usb/host_requests.rs) | See [USB Host Interface](#usb-host-interface) | `OutResponse::Rejected` |
 
 The [data model](data-model.md#pairing-store) documents the stored layout; the
 [architecture overview](architecture.md#hid-path-and-limits) explains the
@@ -473,7 +475,7 @@ Application `unsafe` is limited to six blocks, each reviewed in
 advertisement slice from SoftDevice-provided pointer and length
 ([scanner.rs](../src/ble/scanner.rs), [selftest.rs](../src/selftest.rs)),
 dereferencing the `StaticCell`-backed `Bonder` pointer
-([multi_conn.rs](../src/ble/multi_conn.rs)), SoftDevice power SVCs
+([bonder.rs](../src/ble/bonder.rs)), SoftDevice power SVCs
 ([sd_setup.rs](../src/sd_setup.rs)), and the volatile stack-paint read
 ([stack.rs](../src/stack.rs)). The vendored SoftDevice crate wraps the
 SoftDevice C API with `unsafe` FFI. No separate audit record exists; rules for
@@ -490,7 +492,7 @@ Linux and Windows in CI. Malformed and hostile input is covered here:
 | Advertisements | [adv_parser.rs](../src/ble/adv_parser.rs), [lib_logic_tests.rs](../src/lib_logic_tests.rs), [coordinator_tests.rs](../src/ble/coordinator_tests.rs) | Invalid UTF-8 and empty names, truncation at a character boundary, `ble_adv_parser_handles_malformed_lengths`, `name_without_hid_uuid_cannot_enroll_an_unknown_device`, `name_only_scan_response_updates_known_hid_even_when_list_is_full` |
 | Report Map reads | [long_read.rs](../src/ble/long_read.rs) | Oversized maps, exact-MTU endings, `malformed_termination_never_exposes_partial_value` |
 | Descriptor parser and routing | [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) | `malformed_descriptors_never_return_partial_metadata`, `parser_nesting_is_bounded`, `untrusted_report_dimensions_cannot_overflow_routing_parser`, `long_item_payload_is_not_parsed_as_short_items`, `mixed_kind_report_id_is_not_routable`, `malformed_known_id_never_falls_back_to_another_kind` |
-| Report references and payloads | [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs), [lib_tests.rs](../src/lib_tests.rs) | `report_reference_rejects_short_descriptor`, `report_reference_rejects_trailing_bytes`, `known_kind_rejects_unsupported_extended_payloads`, `all_consumer_routes_enforce_usb_descriptor_usage_range`, `the_legacy_paths_keep_the_reserved_byte_check`, `a_report_id_shared_by_two_kinds_is_not_the_keyboard`, `an_unnumbered_map_with_other_kinds_keeps_the_reserved_byte_check`, short/empty/single-byte reports |
+| Report references and payloads | [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs), [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) | `report_reference_rejects_short_descriptor`, `report_reference_rejects_trailing_bytes`, `known_kind_rejects_unsupported_extended_payloads`, `all_consumer_routes_enforce_usb_descriptor_usage_range`, `the_legacy_paths_keep_the_reserved_byte_check`, `a_report_id_shared_by_two_kinds_is_not_the_keyboard`, `an_unnumbered_map_with_other_kinds_keeps_the_reserved_byte_check`, short/empty/single-byte reports |
 | Connection parameter requests | [conn_params.rs](../src/ble/conn_params.rs) | `every_request_gets_a_valid_answer` (a sweep over the Core's legal ranges), `a_32_second_supervision_timeout_is_capped`, `reversed_interval_bounds_are_read_as_a_range`, `latency_is_lowered_when_the_timeout_cap_cannot_cover_it` |
 | Aggregation and wake | [aggregate.rs](../src/hid/aggregate.rs), [wake.rs](../src/hid/wake.rs) | `invalid_sources_cannot_modify_state_or_wake`, release and motion never waking the host |
 | LED output | [keyboard.rs](../src/hid/keyboard.rs) | `masks_undefined_upper_bits_and_round_trips` |
@@ -504,8 +506,8 @@ Not covered by automated tests:
 - the vendored GATT discovery hardening (`vendor/` has no tests)
 - `src/storage.rs` loading, legacy-format parsing, and record merging, and
   `src/storage/codec.rs`, which the host crate does not compile
-- USB `set_report` validation and the `multi_conn.rs` security flow
-  (encryption wait, `allow_pairing`, bond replacement)
+- USB `set_report` validation and the `slot_worker.rs` and `bonder.rs`
+  security flow (encryption wait, `allow_pairing`, bond replacement)
 - fuzzing, power-loss injection, and any on-air security test
 
 Hardware security acceptance (sniffed pairing, spoofed reconnect, forgotten

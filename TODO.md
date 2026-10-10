@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 7 | 12 | 0 |
+| [FIXME](#fixme) | 8 | 11 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **83** | **94** | **22** |
+| **Total** | **84** | **93** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -106,12 +106,16 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   [feature guide](docs/features.md#keyboard-leds) now say `None` lasts only until
   the first bus reset, and that a keyboard connecting before the host sends its
   state gets all off first. The behavior was right and is unchanged.
-- [ ] **P2** **New log strings are missing from the operations guide.** The
-  [log reference](docs/operations.md#ble-scan-and-connection) lacks
+- [x] **P2** **New log strings were missing from the operations guide.** The
+  [log reference](docs/operations.md#ble-scan-and-connection) lacked
   `slot {} scan found slot {}'s device` and the three connection-parameter
   lines added in `4faf99f`, and its `slot {} connecting to {}` row no longer
-  matches when that line appears. Close when every new string is listed with
-  its meaning and the row is corrected.
+  matched when that line appears. Fixed: all four are listed with their
+  meaning and action, the row says a background reconnect logs it only after a
+  reconnect scan hears the device, and the two reconnect incidents now describe
+  the shared scan, its duty cycle, and the connectable-only rule. Every
+  `info!`, `warn!`, and `error!` string outside the self-test is now in the
+  guide.
 - [ ] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
   `src/ble/multi_conn.rs` (845 now), `src/usb/hid_device.rs` (536), and pushed
   `src/hid_descriptor_tests.rs` past the limit (551, split to 444 since);

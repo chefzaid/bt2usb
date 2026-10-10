@@ -287,8 +287,12 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `BLE scan hit hard timeout backstop` | No advertisement arrived after the 8-second window closed, so the 10-second backstop ended the scan | Normal in a quiet radio environment |
 | warn | `BLE scan ended with error` | The SoftDevice scan failed; the OLED shows `Scan failed` | Retry; check for `sd_ble_gap_scan_start err` |
 | info | `Loaded {} BLE bonds into security handler` | Bonds available for reconnect | 0 with saved peers means records have no keys or the store is unreadable |
-| info | `slot {} connecting to {}` | A connection attempt started (6 s limit) | For a saved peer without keys it repeats every attempt; for a bonded peer it appears only once its address was resolved |
+| info | `slot {} connecting to {}` | A connection attempt started (6 s limit) | For a device chosen from a scan it appears at once. For a background reconnect it appears only after a reconnect scan, this slot's or the other slot's, has heard the device, so no line means the device is not being heard ([reconnect incident](#saved-peripheral-does-not-reconnect)) |
+| info | `slot {} scan found slot {}'s device` | This slot's reconnect scan heard the other slot's saved device, recorded the sighting, and woke that slot, which connects to it next; this slot scans again after its 500 ms pause | None; normal while both slots are reconnecting |
 | info | `BLE security mode updated: {}` | Link encryption changed | None |
+| info | `peer connection parameters granted: {}` | The peripheral asked for connection parameters inside the bridge's limits and got them as asked. Values are in Core units: intervals in 1.25 ms, latency in connection events, timeout in 10 ms | None |
+| info | `peer asked for connection parameters {}; granting {}` | The request was bounded to the [ADR 0016](adr/0016-bounded-peer-connection-parameters.md) limits; the granted interval is still inside the range the peripheral asked for | None |
+| warn | `peer asked for connection parameters {}; granting {}, outside its interval range` | The granted interval is outside the requested range: the peripheral's fastest requested interval is slower than 30 ms, or its whole range is below the Core's 7.5 ms minimum | If the peripheral then disconnects, record its name and this line for the compatibility baseline |
 | warn | `slot {} failed to secure BLE link` | Encryption or pairing failed, the link dropped, or security did not complete within 5 s | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
 | info | `slot {} link lost; reconnecting` | An established link dropped; held input was released | None; retries follow |
 | warn | `sd_ble_gap_connect err {:?}`, `sd_ble_gap_scan_start err {:?}`, `sd_ble_gap_authenticate err {:?}` (vendor) | A SoftDevice GAP call was rejected | Note the error; report if it repeats |
@@ -521,9 +525,14 @@ reboot or after it slept.
 **Likely causes:**
 
 - The peripheral is asleep, switched off, out of range, or connected to another
-  host. Retries continue: bonded peers are looked for in a 6-second resolution
-  scan, unbonded records with a 6-second connection attempt, with 500 ms pauses
-  between attempts.
+  host. Retries continue: each attempt first runs a reconnect scan of up to
+  6 seconds, shared by both slots, that matches a bonded peer by its identity
+  key and a record without a bond by its stored address, and only a device it
+  hears gets a 6-second connection attempt. Attempts are 500 ms apart; a slot
+  whose device the other slot's scan heard connects without waiting. The scan
+  listens at the fast duty cycle for the first 30 seconds after a slot starts
+  reconnecting, then at the slower default
+  ([ADR 0015](adr/0015-shared-reconnect-scan.md)).
 - The peripheral no longer has the bond, for example after being reset or paired
   with another host. Encryption fails and the log repeats
   `slot N failed to secure BLE link`. The application never starts pairing on
@@ -547,7 +556,9 @@ reboot or after it slept.
 
 **Confirm:** at boot, look for `Loaded N devices from flash`,
 `Loaded N BLE bonds into security handler`, and a `slot N connecting to <name>`
-line for the peer. Open the saved-device list (UP) to check that it is stored.
+line for the peer once it advertises; with no such line the device is not being
+heard (see the next incident). Open the saved-device list (UP) to check that it
+is stored.
 
 **Fix:** wake the peripheral (press a key). Reset the board to restart boot
 reconnects. If the bond is gone on the peripheral, Forget it on the bridge, put
@@ -560,17 +571,20 @@ the peripheral in pairing mode, scan, and select it.
 
 **Likely causes:** most BLE peripherals advertise with a resolvable private
 address that changes over time. For a bonded peer, each background attempt runs
-a 6-second scan that resolves advertisers against the peer's stored identity
-resolving key (IRK) in [scanner.rs](../src/ble/scanner.rs), accepting any
-advertisement type even without the HID service UUID. Nothing is logged while
-it is not found; the slot waits 500 ms and scans again. It is never found when:
+a passive scan of up to 6 seconds that resolves advertisers against the peer's
+stored identity resolving key (IRK) in [scanner.rs](../src/ble/scanner.rs),
+counting only connectable advertisements and accepting them without the HID
+service UUID. Nothing is logged while it is not found; the slot waits 500 ms
+and scans again. It is never found when:
 
 - the peripheral is not advertising (asleep, or connected elsewhere);
 - the peripheral replaced its IRK, for example after a reset or a new pairing
   elsewhere, so the stored key no longer matches;
-- the stored record has no bond (for example a legacy record), so the slot
-  instead retries a connection to the stored address, which a private address
-  will not match; this case logs `slot N connecting to <name>` every attempt.
+- the stored record has no bond (for example a legacy record), so the scan
+  matches only the stored address, which a private address never equals;
+  nothing is logged in this case either;
+- the peripheral advertises only non-connectable or scannable sets while it
+  waits, which a connection could not use.
 
 **Confirm:** put the peripheral in pairing mode and start a scan. If it appears
 in `Select device`, the radio hears it and the stored identity is stale.

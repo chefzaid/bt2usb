@@ -65,7 +65,8 @@ it, and every command runs from the repository root.
    missing, install it as shown under [Toolchain](#toolchain). Then run
    `mask test`, or without mask (for example in PowerShell)
    `cargo test --locked --lib --tests`. `mask ci` adds formatting, the three
-   Clippy configurations, and the firmware and simulation builds. The
+   Clippy configurations, the rustdoc checks, and the firmware and simulation
+   builds. The
    release-helper tests also need Python 3.11 or newer.
 2. **Simulation on Linux or WSL2.** Needs path 1, mask, Bash, `curl`, and
    `python3`. Run `mask sim-setup` once: it installs portable Renode and the
@@ -245,8 +246,9 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask probe-list` | Discover available probes |
 | `mask size` / `mask bloat` | Inspect release size |
 | `mask doc` | Generate embedded API documentation |
+| `mask doc-check` | Check every rustdoc build with warnings denied, as CI does |
 
-The [mask command reference](#mask-command-reference) below lists all 31
+The [mask command reference](#mask-command-reference) below lists all 32
 recipes with their exact commands and options.
 
 Flashing the bridge requires S140 to have been installed. Complete
@@ -299,10 +301,10 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | `mask clippy` | `cargo clippy --locked --features embedded --target <arm> -- -D warnings` | Embedded configuration only; host and simulation Clippy run in `mask ci` |
 | `mask fmt` | `cargo fmt` | Formats the bt2usb package only |
 | `mask fmt-check` | `cargo fmt -- --check` | Same files as CI's `--package bt2usb` with the current manifest |
-| `mask ci` | Format check; Clippy for host, embedded, and simulation; host tests; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
+| `mask ci` | Format check; Clippy for host, embedded, and simulation; host tests; the four rustdoc builds of `mask doc-check`; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
 
-`mask ci` does not run the release-helper tests, actionlint, rustdoc, the
-audit, or Renode. The [testing guide](testing.md#local-and-ci-coverage-compared)
+`mask ci` does not run the release-helper tests, actionlint, the coverage
+floor, the audit, or Renode. The [testing guide](testing.md#local-and-ci-coverage-compared)
 compares it with CI.
 
 ### Coverage
@@ -319,7 +321,9 @@ compares it with CI.
 The report files each tool writes are listed under
 [coverage in the testing guide](testing.md#coverage). What coverage measures,
 why a tarpaulin figure is not comparable with an llvm-cov one, and how to
-report a figure are in [code quality](code-quality.md#coverage).
+report a figure are in [code quality](code-quality.md#coverage). None of these
+tasks applies a floor; CI's Host coverage job fails below 97% of lines
+([coverage in CI](code-quality.md#coverage-in-ci)).
 
 ### Simulation
 
@@ -340,7 +344,8 @@ keeps the SoftDevice. The scenario and assertions are described in
 | --- | --- | --- |
 | `mask size` | `cargo size --locked --features embedded --target <arm> --release --bin bt2usb -- -A` | Per-section sizes of the release bridge; needs cargo-binutils and the LLVM tools component |
 | `mask bloat` | `cargo bloat --locked --features embedded --target <arm> --release --bin bt2usb -n 30` | The 30 largest functions |
-| `mask doc` | `cargo doc --locked --features embedded --target <arm> --open` | Firmware API documentation, dependencies included. Warnings are not denied here; CI denies them only for the host library |
+| `mask doc` | `cargo doc --locked --features embedded --target <arm> --open` | Firmware API documentation, dependencies included, for reading. Warnings are not denied here |
+| `mask doc-check` | With `RUSTDOCFLAGS="-D warnings"`, `cargo doc --locked --no-deps --document-private-items` for `--lib`, for `--features embedded --target <arm> --lib`, for `--features embedded --target <arm> --bin bt2usb --bin bt2usb-selftest`, and for `--features sim --target <arm> --bin bt2usb-sim` | The same four builds CI checks ([code quality](code-quality.md#documentation-comments)); fails on the first warning |
 
 ### Environment Setup
 
@@ -549,7 +554,7 @@ in a public issue. See the [security policy](../SECURITY.md).
 
 | You changed | Run before review | Also needed |
 | --- | --- | --- |
-| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator` or `ui_logic` |
+| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator` or `ui_logic`; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
 | `sim.rs`, `ui/buttons.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
 | `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
@@ -557,7 +562,7 @@ in a public issue. See the [security policy](../SECURITY.md).
 | `.github/workflows/ci.yml` | `actionlint` | A hosted run |
 | `scripts/release.py` | Release-helper tests | The first hosted tag run ([deployment](deployment.md#validation-limits)) |
 | `maskfile.md` or `scripts/*.sh` | Run the changed recipe or script in Bash | |
-| Documentation only | Check links and quoted constants by hand | |
+| Documentation only | Check links and quoted constants by hand | `mask doc-check` when `///` or `//!` comments changed |
 
 The [code-quality review checklist](code-quality.md#review-checklist) lists
 what a reviewer checks.

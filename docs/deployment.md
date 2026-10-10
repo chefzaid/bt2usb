@@ -19,7 +19,8 @@ The five check jobs (host tests on Linux and Windows, audit, embedded build,
 and Renode) have passed on GitHub: push run `36441995385` (commit `8a04b25`,
 2026-09-28), scheduled run `37338711407` (2026-10-05), and push run
 `37932436721` (commit `7fc99d6`, 2026-10-09); run `36441384244` (commit
-`2479c79`) failed. No `v*` tag or release exists yet, so the tag-only
+`2479c79`) failed. The Host coverage job joined them on 2026-10-10
+([coverage in CI](code-quality.md#coverage-in-ci)). No `v*` tag or release exists yet, so the tag-only
 `release-package` and `release` jobs described below have never run. Their
 configuration is checked by `actionlint` and by the release helper's tests;
 the first hosted tag run is the open item "Hosted provenance and release
@@ -165,7 +166,7 @@ add code to the flashed image.
    Intel HEX with the toolchain's `llvm-objcopy` and stages the application,
    self-test, build inputs, and metadata. Staging rejects changes to tracked
    source and a checkout that differs from the workflow's source commit.
-2. After host checks, audit, embedded checks, and Renode succeed, `release-package`
+2. After host checks, host coverage, audit, embedded checks, and Renode succeed, `release-package`
    downloads the **immutable artifact ID** emitted by that build job. Artifact
    download digest mismatches fail the job. No firmware is rebuilt in this job.
 3. The packaging helper checks every staged checksum, exact tag/version, source

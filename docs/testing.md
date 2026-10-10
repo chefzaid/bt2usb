@@ -51,6 +51,7 @@ PowerShell, use the direct command.
 | Integration tests only | — | `cargo test --locked --test integration` |
 | Coverage summary | `mask coverage` | `cargo llvm-cov --locked --lib --tests` |
 | Coverage HTML / JSON | `mask coverage --html` / `--json` | `cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html` |
+| Coverage against the CI floor | — | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` (the floor is `COVERAGE_MIN_LINES` in [ci.yml](../.github/workflows/ci.yml)) |
 | Host lint | — | `cargo clippy --locked --lib --tests -- -D warnings` |
 | Embedded lint | `mask clippy` | `cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings` |
 | Simulation lint | — | `cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings` |
@@ -60,7 +61,7 @@ PowerShell, use the direct command.
 | Interactive Renode | `mask sim` | `renode renode/bt2usb-sim.resc` |
 | Release helper tests | — | `python -m unittest discover -s scripts -p "release_test.py" -v` |
 | Format check | `mask fmt-check` | `cargo fmt --package bt2usb -- --check` |
-| Host API documentation | — | `cargo doc --locked --no-deps --lib` with `RUSTDOCFLAGS=-D warnings` |
+| API documentation, every build, warnings denied | `mask doc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
 | Workflow lint | — | `actionlint` |
 | Dependency audit | — | `cargo audit` |
 | Board self-test | `mask selftest` | `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest` |
@@ -131,8 +132,14 @@ see [Modules Without Host Tests](#modules-without-host-tests).
 Both tools run with `--lib --tests`, so both include `tests/integration.rs`;
 their percentages still differ because they instrument differently (see
 [code quality](code-quality.md#coverage)). These output paths are ignored by
-Git. CI does not run coverage. The latest local llvm-cov figure is 97.48% host
-line coverage on 2026-10-10.
+Git.
+
+CI runs llvm-cov in the Host coverage job, uploads the summary, an lcov file,
+and the HTML report as the `coverage-report-<attempt>` artifact, and then fails
+the job when line coverage is below the floor, 97% since 2026-10-10. The
+baseline it was set from is 97.59% of lines, recorded in the
+[validation record](#validation-record--2026-10-10). The
+[coverage policy](code-quality.md#coverage-in-ci) says how the floor changes.
 
 ## Test Map
 
@@ -435,17 +442,19 @@ cancels an in-progress one, except for tag refs. The default token permission is
 
 | Job | Runner and limit | Checks, in order |
 | --- | --- | --- |
-| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; `cargo doc --locked --no-deps --lib` with `RUSTDOCFLAGS=-D warnings` |
+| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
+| Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
 | Dependency security audit | Ubuntu, 10 min | `cargo audit` with cargo-audit 0.22.2 |
-| Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
-| Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
-| Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after all four jobs | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload |
+| Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
+| Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; rustdoc with private items and warnings denied for `bt2usb-sim`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
+| Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after every check job | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload |
 | Prepare draft firmware release | Ubuntu, 10 min, after packaging | Download the attested package; refuse if the tag's release is already published; create or update a draft release |
 
 Artifacts:
 
 | Artifact | Producer | Contents |
 | --- | --- | --- |
+| `coverage-report-<attempt>` | Coverage job | `summary.txt` (the per-file table), `lcov.info`, and the HTML report under `html/`; uploaded before the floor check, so it exists when the floor fails |
 | `bt2usb-checked-firmware-<attempt>` | Embedded job | Staged ELF/HEX, self-test ELF, build inputs, `BUILD-INFO.json`, `SHA256SUMS` |
 | `renode-results-<attempt>` | Simulation job | Robot/Renode results directory (ignored if empty) |
 | `bt2usb-attested-release-<attempt>` | Packaging job | Versioned release files and the provenance bundle |
@@ -456,8 +465,9 @@ the same toolchain reproduces its results. `mask ci` runs the local subset.
 ### Hosted CI Runs
 
 Runs of [ci.yml](../.github/workflows/ci.yml) on `main`, read with
-`gh run list` and `gh run view` on 2026-10-09. The five check jobs are the two
-host-test jobs, the dependency audit, the embedded build, and the Renode test.
+`gh run list` and `gh run view` on 2026-10-09. The five check jobs in these runs
+are the two host-test jobs, the dependency audit, the embedded build, and the
+Renode test; the Host coverage job, added on 2026-10-10, makes six from then on.
 Dependabot pull-request runs are not listed.
 
 | Run ID | Trigger | Commit | Date (UTC) | Result | Jobs |
@@ -486,7 +496,8 @@ tracks it.
 | Release firmware and simulation builds | Yes | Yes |
 | Release-helper tests | No | Yes, Linux and Windows |
 | actionlint | No | Yes, Linux |
-| rustdoc with warnings denied | No | Yes |
+| rustdoc with private items and warnings denied, every build | Yes (also `mask doc-check`) | Yes |
+| Coverage with the line floor | No (`mask coverage` reports without a floor) | Yes, Linux |
 | Dependency audit | No | Yes |
 | Headless Renode test | No (`mask sim-test`) | Yes |
 | Staging, packaging, attestation | No | Tag pushes only |
@@ -596,12 +607,14 @@ Not yet first-class:
 Specific to the current workflow and test tree:
 
 - No CI job flashes a board; the self-test and first-flash layers are manual.
-- CI does not measure coverage, and no coverage threshold exists.
+- The coverage floor is one line-coverage total over the 22 host-library source
+  modules; a single module can lose coverage while the total stays above 97%,
+  and region and function coverage have no floor.
 - The Renode job runs one scripted scenario on Linux; it does not exercise the
   OLED task, management screens, or the link-loss reservation path.
 - actionlint runs only in the Linux host job.
-- rustdoc is checked only for the host library (`--no-deps --lib`), not for the
-  firmware build.
+- rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
+  documentation is not built or checked.
 - `cargo audit` runs without a deny option, so unmaintained-crate warnings do
   not fail the job; see the [validation record](#validation-record--2026-09-28).
 - Connection workers, the security handler, the GATT HID client, the storage

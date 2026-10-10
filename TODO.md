@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 8 | 8 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 9 | 7 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **97** | **81** | **22** |
+| **Total** | **98** | **80** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -965,12 +965,20 @@ Host tests, simulation, and code-health work. Context:
   `mask sim-test` and the CI simulation job assert the reserved slot after a
   link loss, the OLED task, and the management screens through UART output
   ([testing](docs/testing.md#renode-scenario-map)).
-- [ ] **P1** **Coverage and firmware documentation in CI.** CI measures no
-  coverage and builds rustdoc only for the host library. Publish the
-  `cargo llvm-cov` report as a CI artifact, set a threshold once a baseline is
-  recorded, and build firmware rustdoc with warnings denied. Accept when a
-  coverage drop below the threshold or a firmware rustdoc warning fails CI
-  ([code quality](docs/code-quality.md)).
+- [x] **P1** **Coverage and firmware documentation in CI.** Since 2026-10-10
+  the Host coverage job runs `cargo llvm-cov` 0.9.1, uploads the summary,
+  lcov, and HTML reports as `coverage-report-<attempt>`, and then fails below
+  97% of lines, set from the 97.59% baseline as a ratchet that guards the pure
+  core rather than serving as evidence
+  ([ADR 0023](docs/adr/0023-host-coverage-floor.md),
+  [coverage in CI](docs/code-quality.md#coverage-in-ci)). The embedded and
+  simulation jobs document the embedded library, `bt2usb`, `bt2usb-selftest`,
+  and `bt2usb-sim` with private items and warnings denied, the host job adds
+  private items, and `mask doc-check` and `mask ci` run the same four builds
+  ([documentation comments](docs/code-quality.md#documentation-comments)).
+  Checked locally: `--fail-under-lines 99` exits 1, and a broken intra-doc
+  link in `src/ble/bonder.rs` fails the firmware rustdoc run
+  (`.github/workflows/ci.yml`, `maskfile.md`).
 - [ ] **P2** **Inventory panic sites in firmware paths.** The
   [panic table](docs/code-quality.md#panics-allocation-and-arithmetic) lists
   the application's `unwrap!`, `expect`, and `unreachable!` sites, but not slice
@@ -1132,8 +1140,8 @@ Tasks, tooling, and environments for working on the firmware. Context:
 - [x] WSL-aware task tooling and a VS Code devcontainer
   (`scripts/run-tool.sh`, `.devcontainer/`).
 - [x] Wrap build, flash, self-test, host tests, coverage, size, simulation,
-  SoftDevice, and probe tasks as 31 Bash `mask` recipes; `mask ci` runs the
-  local formatting, lint, test, and build subset (`maskfile.md`).
+  SoftDevice, and probe tasks as 32 Bash `mask` recipes; `mask ci` runs the
+  local formatting, lint, test, rustdoc, and build subset (`maskfile.md`).
 - [x] Build host tests for the native platform by leaving `build.target` unset,
   and scope the probe-rs runner and ARM linker flags to
   `cfg(all(target_arch = "arm", target_os = "none"))` (`.cargo/config.toml`).

@@ -43,8 +43,8 @@ layer before it cannot see.
 
 | Layer | What runs | Failure class it owns | Where |
 | --- | --- | --- | --- |
-| 1. Host tests | Unit and integration tests of the shared hardware-free modules ([ADR 0003](0003-pure-core-and-task-shell.md)) | Wrong decisions: parsing, reducers, aggregation, delivery and replay, storage validation, UI and power rules | CI on Linux and Windows; `mask test` |
-| 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with warnings denied; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; `cargo audit` | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow or release-helper mistakes, known vulnerable dependencies | CI; `mask ci` runs the formatting, Clippy, test, and build subset |
+| 1. Host tests | Unit and integration tests of the shared hardware-free modules ([ADR 0003](0003-pure-core-and-task-shell.md)) | Wrong decisions: parsing, reducers, aggregation, delivery and replay, storage validation, UI and power rules | CI on Linux and Windows, plus a line-coverage floor on Linux ([ADR 0023](0023-host-coverage-floor.md)); `mask test` |
+| 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with private items and warnings denied for every build; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; `cargo audit` | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow or release-helper mistakes, known vulnerable dependencies | CI; `mask ci` runs the formatting, Clippy, test, rustdoc, and build subset |
 | 3. Renode simulation | `bt2usb-sim` on an emulated nRF52840, with injected GPIO edges and a scripted BLE scenario | Boot, the executor and time driver, the GPIO and GPIOTE path, and the real UI and coordinator reducers running on the ARM target | CI `simulation` job; `mask sim-test` |
 | 4. Board self-test | `bt2usb-selftest` brings up each peripheral in stages and prints PASS, FAIL, or SKIP | SoftDevice RAM and enable, pairing-region flash, USB enumeration and an endpoint write, OLED, buttons, radio reception, stack margin | A board and probe; `mask selftest` |
 | 5. Hardware acceptance | The [first-flash checklist](../first-flash.md) on real peripherals, hosts, and hubs | Pairing, reconnect, held-input release, two active slots, LEDs, monitor hubs, sleep and wake, pre-OS use | A board and a person; a dated result record |
@@ -53,7 +53,7 @@ Rules:
 
 - CI runs layers 1 to 3 on pushes to `main` or `master`, on pull requests, on
   `v*` tags, on manual dispatch, and every Monday at 07:23 UTC
-  (`cron: "23 7 * * 1"`). Release packaging needs all four CI jobs to pass
+  (`cron: "23 7 * * 1"`). Release packaging needs all five CI check jobs to pass
   ([ADR 0008](0008-attested-draft-releases.md)).
 - Layers 4 and 5 need a board and a person, and their results are recorded with
   the commit, ELF hash, Rust and SoftDevice versions, board, peripherals, host,
@@ -87,8 +87,12 @@ Rules:
   [ADR 0014](0014-renode-gpio-models.md).
 - **Gate on a coverage percentage.** Coverage instruments only the host library,
   so a threshold would reward testing what is already easy and say nothing about
-  the shells. CI does not run coverage; `mask coverage` reports it locally,
-  and a published result names the commit, toolchain, and excluded modules.
+  the shells. Coverage is therefore not a layer and not evidence for a claim.
+  Amended on 2026-10-10 by
+  [ADR 0023](0023-host-coverage-floor.md): CI now holds host line coverage at
+  a floor below the recorded baseline, as a guard against losing tests of the
+  pure core, while this reasoning still rules out treating the figure as a
+  target or as verification.
 - **Acceptance testing only.** Testing only finished firmware on hardware finds
   defects late, cannot cover malformed input or rare races on demand, and cannot
   run on every pull request.
@@ -145,12 +149,18 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   - "Host tests (ubuntu-latest, windows-latest)": `cargo fmt --package bt2usb
     -- --check`, `python -m unittest discover -s scripts -p "release_test.py"`,
     actionlint 1.7.12 (Linux, checksum-verified download), tag validation on
-    tags, `cargo test --locked --lib --tests`, host Clippy, and rustdoc.
+    tags, `cargo test --locked --lib --tests`, host Clippy, and host rustdoc
+    with private items and warnings denied.
+  - "Host coverage": `cargo llvm-cov --locked --lib --tests` with
+    cargo-llvm-cov 0.9.1, the report uploaded as an artifact, then the
+    line-coverage floor ([ADR 0023](0023-host-coverage-floor.md)).
   - "Dependency security audit": `cargo audit` with `cargo-audit@0.22.2`.
   - "Embedded build & clippy": `cargo clippy --locked --features embedded
-    --target thumbv7em-none-eabihf -- -D warnings`, the release build, and
-    staging of the checked firmware.
-  - "Renode simulation test": simulation Clippy and build,
+    --target thumbv7em-none-eabihf -- -D warnings`, rustdoc for the embedded
+    library and both firmware binaries with warnings denied, the release
+    build, and staging of the checked firmware.
+  - "Renode simulation test": simulation Clippy, rustdoc for `bt2usb-sim`
+    with warnings denied, the simulation build,
     `scripts/install-renode.sh` (Renode 1.16.1 by default), and `renode-test
     --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot`, with
     results uploaded even on failure.
@@ -204,3 +214,4 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - [ADR 0008: Attested draft releases](0008-attested-draft-releases.md)
 - [ADR 0013: Pinned toolchain and mask tasks](0013-pinned-toolchain-and-mask-tasks.md)
 - [ADR 0014: Renode GPIO models](0014-renode-gpio-models.md)
+- [ADR 0023: Host coverage floor](0023-host-coverage-floor.md)

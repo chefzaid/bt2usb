@@ -867,7 +867,9 @@ are open work.
   integration tests in [`tests/integration.rs`](../tests/integration.rs), all
   of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
-  `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)).
+  `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)), and CI
+  fails when host line coverage drops below 97%
+  ([coverage in CI](code-quality.md#coverage-in-ci)).
 - The `bt2usb-sim` binary boots without the SoftDevice or USB on Renode's
   nRF52840 model. It runs the real button driver and the real UI and
   coordinator logic against a synthetic BLE scenario, writing to UART0. Custom
@@ -885,8 +887,8 @@ are open work.
   `47d6121c6e823120e8b883a7ac75f44ce7daa3aa`, and every build task passes
   `--locked`. The Cargo license metadata is `GPL-3.0-only`, matching
   [LICENSE](../LICENSE) ([ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)).
-- [`maskfile.md`](../maskfile.md) defines 31 tasks for building, flashing,
-  testing, coverage, linting, simulation, the SoftDevice, and the
+- [`maskfile.md`](../maskfile.md) defines 32 tasks for building, flashing,
+  testing, coverage, linting, documentation checks, simulation, the SoftDevice, and the
   devcontainer. `mask softdevice` stops on a failed download or extraction
   before flashing anything.
 - [`build.rs`](../build.rs) refuses to build the `embedded` and `sim` features
@@ -906,10 +908,11 @@ at 07:23 UTC:
 
 | Job | What it checks |
 | --- | --- |
-| Host tests (ubuntu-latest, windows-latest) | Formatting, the release helper's tests, actionlint 1.7.12 (downloaded and SHA-256 verified, Linux only), tag/version match on tags, host tests, host Clippy, rustdoc with warnings denied |
+| Host tests (ubuntu-latest, windows-latest) | Formatting, the release helper's tests, actionlint 1.7.12 (downloaded and SHA-256 verified, Linux only), tag/version match on tags, host tests, host Clippy, the 500-line file limit (Linux only), host rustdoc with warnings denied |
+| Host coverage | `cargo llvm-cov` over the host tests, report uploaded, fails below 97% of lines ([ADR 0023](adr/0023-host-coverage-floor.md)) |
 | Dependency security audit | `cargo audit` with cargo-audit 0.22.2 |
-| Embedded build & clippy | Embedded Clippy, release build, staged firmware and build manifest |
-| Renode simulation test | Simulation Clippy and build, headless Robot test, results uploaded |
+| Embedded build & clippy | Embedded Clippy, firmware rustdoc with warnings denied, release build, staged firmware and build manifest |
+| Renode simulation test | Simulation Clippy, simulation rustdoc with warnings denied, build, headless Robot test, results uploaded |
 | Verify and attest release package; Prepare draft firmware release | Tags only; see below |
 
 The default token permission is read-only; only the two release jobs get more.

@@ -43,7 +43,10 @@ Clippy warning into an error.
 | Host Clippy | `cargo clippy --locked --lib --tests -- -D warnings` | `mask ci` | Host tests, Linux and Windows | Fails on any warning |
 | Embedded Clippy | `cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings` | `mask ci`, `mask clippy` | Embedded build & clippy | Fails on any warning |
 | Simulation Clippy | `cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings` | `mask ci` | Renode simulation test | Fails on any warning |
-| Host rustdoc | `cargo doc --locked --no-deps --lib` with `RUSTDOCFLAGS=-D warnings` | None (`mask doc` builds firmware docs without denying warnings) | Host tests, Linux and Windows | Fails on any rustdoc warning |
+| Host rustdoc | `cargo doc --locked --no-deps --document-private-items --lib` with `RUSTDOCFLAGS=-D warnings` | `mask ci`, `mask doc-check` | Host tests, Linux and Windows | Fails on any rustdoc warning |
+| Firmware rustdoc | The same flags with `--features embedded --target thumbv7em-none-eabihf`, once for `--lib` and once for `--bin bt2usb --bin bt2usb-selftest` | `mask ci`, `mask doc-check` | Embedded build & clippy | Fails on any rustdoc warning |
+| Simulation rustdoc | The same flags with `--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim` | `mask ci`, `mask doc-check` | Renode simulation test | Fails on any rustdoc warning |
+| Coverage floor | `cargo llvm-cov --locked --lib --tests --no-report`, then `cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"` (97), cargo-llvm-cov 0.9.1 | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` | Host coverage | Fails when host line coverage drops below the floor; the report uploads first ([Coverage In CI](#coverage-in-ci)) |
 | Host tests | `cargo test --locked --lib --tests` | `mask ci`, `mask test` | Host tests, Linux and Windows | Fails on any failed test |
 | Release firmware build | `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` | `mask ci`, `mask build-release` | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest` |
 | Simulation build | `cargo build --locked --features sim --target thumbv7em-none-eabihf` | `mask ci`, `mask sim-build` | Renode simulation test | Fails the job |
@@ -57,17 +60,19 @@ Clippy warning into an error.
 
 ### How The Jobs Depend On Each Other
 
-The four check jobs run in parallel. The packaging and draft-release jobs run
-only for pushed `v*` tags, and only after all four check jobs pass:
+The five check jobs run in parallel. The packaging and draft-release jobs run
+only for pushed `v*` tags, and only after all five check jobs pass:
 
 ```mermaid
 flowchart LR
     T["push, v* tag, pull request,<br/>dispatch, weekly schedule"]
     T --> H["Host tests<br/>(Linux and Windows)"]
+    T --> C["Host coverage"]
     T --> A["Dependency security audit"]
     T --> E["Embedded build & clippy"]
     T --> S["Renode simulation test"]
     H --> P["Verify and attest release package<br/>(v* tag pushes only)"]
+    C --> P
     A --> P
     E --> P
     S --> P
@@ -77,7 +82,7 @@ flowchart LR
 A failed check job therefore blocks a release package. Whether it also blocks
 merging a pull request depends on the branch protection settings on GitHub,
 which are not stored in the repository; this guide cannot confirm them. The
-weekly schedule runs the four check jobs against the default branch, so a new
+weekly schedule runs the five check jobs against the default branch, so a new
 advisory or a change in the hosted runner shows up without a code change.
 
 A newer run for the same ref cancels an in-progress one, except for tag refs.
@@ -86,15 +91,17 @@ jobs reuse the embedded job's bytes instead of rebuilding.
 
 ### Local Checks Before A Pull Request
 
-`mask ci` covers formatting, the three Clippy configurations, host tests, and
-both firmware builds. It does not run host rustdoc, actionlint, the
-release-helper tests, the audit, or Renode, and it has no equivalent of the
-Windows host job, the tag check, or release staging. Run the ones your change
+`mask ci` covers formatting, the three Clippy configurations, host tests,
+rustdoc for every build with warnings denied, and both firmware builds. It does
+not run the coverage floor, actionlint, the release-helper tests, the audit, or
+Renode, and it has no equivalent of the Windows host job, the tag check, or
+release staging. Run the ones your change
 can affect:
 
 | Change touches | Also run |
 | --- | --- |
-| `///` or `//!` comments in host-library modules | `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --lib` |
+| `///` or `//!` comments only | `mask doc-check`, which runs the four rustdoc builds without the rest of `mask ci` |
+| Pure logic in `src/lib.rs` modules, or their tests | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` |
 | `.github/workflows/ci.yml` | `actionlint` |
 | `scripts/release.py` or the release jobs | `python -m unittest discover -s scripts -p "release_test.py" -v` |
 | `Cargo.toml` or `Cargo.lock` | `cargo audit` |
@@ -203,16 +210,26 @@ Rules for a new allowance:
 
 ### Documentation Comments
 
-**Enforced for the host library only.** CI builds rustdoc for the host
-library with warnings denied, so a rustdoc warning in those modules, such as
-a broken intra-doc link, fails the job. Modules compiled only into the
-firmware are never checked this way; `mask doc` builds firmware documentation
-but does not deny warnings. On 2026-10-10 every target documented cleanly with
-private items included and warnings denied, which a reviewer can repeat with
+**Enforced for every build since 2026-10-10.** CI documents each build with
+private items included and warnings denied, so a rustdoc warning anywhere,
+such as a broken intra-doc link in a firmware-only module, fails a job. Every
+run uses
 `RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items`
-plus one of `--lib`; `--features embedded --target thumbv7em-none-eabihf --bin bt2usb`
-(or `--bin bt2usb-selftest`); or
-`--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim`.
+plus one of these:
+
+| Build | Extra arguments | CI job |
+| --- | --- | --- |
+| Host library | `--lib` | Host tests, Linux and Windows |
+| Embedded library | `--features embedded --target thumbv7em-none-eabihf --lib` | Embedded build & clippy |
+| Bridge and self-test binaries | `--features embedded --target thumbv7em-none-eabihf --bin bt2usb --bin bt2usb-selftest` | Embedded build & clippy |
+| Simulation binary | `--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim` | Renode simulation test |
+
+The library and the bridge binary are both named `bt2usb`, so they are
+documented in separate runs; one run would write both to the same output
+directory. `mask doc-check` runs all four, and `mask ci` includes them.
+`mask doc` still builds the embedded documentation with dependencies and
+without denying warnings, for reading. `--no-deps` keeps the vendored
+`nrf-softdevice` crates out of the check: their documentation is upstream's.
 
 **Links across builds.** A module that more than one build compiles names a
 firmware-only item in code formatting, not as an intra-doc link: the
@@ -401,8 +418,17 @@ Coverage measures only the code that host tests compile:
   logic
 - `src/storage/framing.rs` and `src/storage/record.rs`, which `lib.rs`
   includes only under `cfg(test)`
-- the test code itself: the `*_tests.rs` files, `#[cfg(test)]` modules, and
-  `tests/integration.rs` (llvm-cov only)
+- the inline `#[cfg(test)] mod tests` blocks inside those files, which count
+  toward the file they sit in
+
+The test code in separate files is compiled with instrumentation but left out
+of the llvm-cov report: `tests/integration.rs`, the `src/*_tests.rs` files
+that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
+`reconnect_tests.rs`, `delivery_tests.rs`, and `ui_logic_tests.rs`. On
+2026-10-10, cargo-llvm-cov 0.9.1's summary listed 22 files, all of them
+source modules; passing
+`--ignore-filename-regex '(_tests\.rs$|tests/)'` gave the same total, so no
+test file reaches the figure.
 
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
@@ -417,11 +443,58 @@ coverage data.
 A coverage figure is therefore a figure for the pure logic, not for the
 firmware.
 
+### Coverage In CI
+
+The Host coverage job in [ci.yml](../.github/workflows/ci.yml) runs on Ubuntu
+on every trigger:
+
+1. It adds the `llvm-tools` component to the pinned toolchain and installs
+   cargo-llvm-cov 0.9.1 with `taiki-e/install-action`, the version
+   `mask coverage-install` pins.
+2. `cargo llvm-cov --locked --lib --tests --no-report` runs the host unit and
+   integration tests once, instrumented.
+3. `cargo llvm-cov report` writes three reports from that run into the
+   runner's temporary directory: the per-file summary table (`summary.txt`,
+   also printed in the log), `lcov.info` for tools that read lcov, and the
+   HTML report under `html/`.
+4. The reports upload as the `coverage-report-<attempt>` artifact.
+5. `cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"`
+   fails the job when the total line coverage is below the floor.
+
+The report uploads before the floor is checked, so a failed run still carries
+the report that shows which files lost coverage.
+
+**The floor.** `COVERAGE_MIN_LINES` is 97, set on 2026-10-10 from the baseline
+of 97.59% of lines (98.17% of regions, 98.67% of functions) in the
+[validation record](testing.md#validation-record--2026-10-10). At that baseline
+59 of 2,452 lines were not covered; about 15 more uncovered lines at the same
+size would cross the floor. It is a ratchet:
+
+- Raise it when coverage rises enough to leave the same margin, in the commit
+  that raises coverage.
+- Lower it only with the reason in the commit message, for example code that
+  moves out of the host library, and record the new baseline in a validation
+  record.
+- Do not lower it to make a change pass. Add the missing tests instead, or
+  move hardware-coupled code out of the pure modules.
+
+**What the figure includes.** The total is the one `--summary-only` prints:
+the 22 source modules listed under [What Is Instrumented](#what-is-instrumented),
+with their inline test modules and without the separate test files. Inline test
+code is covered almost entirely by running, so files with large inline test
+modules read slightly higher than their production code alone would. Region
+and function coverage are reported but have no floor.
+
+**Local reproduction.** Run
+`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`
+with the pinned toolchain and cargo-llvm-cov 0.9.1. With the same source,
+toolchain, and tool version the figure should match the CI log; a different
+toolchain or tool version can count regions differently and shift it.
+
 ### Reporting Coverage
 
-CI does not run coverage, no threshold exists, and the repository records no
-baseline. When you report a figure, in a pull request or a validation record,
-include:
+CI checks the floor on every run, but a pull request that adds tests, or a
+validation record, should still report the figure it measured. Include:
 
 | Field | Example of what to write |
 | --- | --- |
@@ -446,7 +519,7 @@ its commit and scope cannot be checked and goes stale silently.
 | `nrf-softdevice`, `nrf-softdevice-s140` | Git `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"`; `nrf-softdevice` is replaced by `vendor/nrf-softdevice` through `[patch]` | Enforced by Cargo |
 | GitHub Actions | Each `uses:` names a full commit SHA with a tag comment | Enforced by the SHA; the comment is informational |
 | cargo-audit, actionlint | `cargo-audit@0.22.2` through `taiki-e/install-action`; actionlint 1.7.12 with a SHA-256 check | Enforced in CI |
-| Developer tools | `cargo install --locked` with an exact `--version` in `mask deps`, `mask coverage-install`, and the devcontainer setup; the tarpaulin hint `mask coverage` prints uses the same form | Pinned by hand: the versions repeat in `maskfile.md`, `post-create.sh`, and the [development guide](development.md#toolchain), and nothing checks that they agree |
+| Developer tools | `cargo install --locked` with an exact `--version` in `mask deps`, `mask coverage-install`, and the devcontainer setup; the tarpaulin hint `mask coverage` prints uses the same form | Pinned by hand: the versions repeat in `maskfile.md`, `post-create.sh`, and the [development guide](development.md#toolchain), cargo-llvm-cov 0.9.1 also in the CI coverage job, and nothing checks that they agree |
 | SoftDevice, Renode, Robot Framework | Download URLs and versions without digests | Gap; see [security](security.md#supply-chain) |
 
 The action pins and their comments are:
@@ -629,7 +702,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 
 | Gap | Where it is tracked |
 | --- | --- |
-| CI measures no coverage, no threshold or baseline exists, and firmware rustdoc is not built with warnings denied | [Coverage and firmware documentation in CI](../TODO.md#verification-and-code-quality) (P1) |
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
 | The connection workers, security handler, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |

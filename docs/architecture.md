@@ -1287,6 +1287,7 @@ change.
 - [ADR 0014: Model nRF52840 GPIO SENSE/LATCH And GPIOTE PORT Events In Renode](adr/0014-renode-gpio-models.md)
 - [ADR 0015: Reconnect Saved Devices At Power-Up With One Shared Scan](adr/0015-shared-reconnect-scan.md)
 - [ADR 0016: Bound A Peripheral's Connection Parameter Requests In The Application](adr/0016-bounded-peer-connection-parameters.md)
+- [ADR 0023: Hold Host Line Coverage At A Floor As A Regression Guard](adr/0023-host-coverage-floor.md)
 
 ## Decisions Needed For Roadmap Work
 

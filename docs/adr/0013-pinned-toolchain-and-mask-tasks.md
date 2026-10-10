@@ -162,10 +162,11 @@ Negative:
   lockfile fails every `--locked` command.
 - Mask recipes are Bash. Native Windows contributors use WSL or Git Bash, or
   run Cargo directly in PowerShell.
-- `mask ci` is a subset of CI. CI also runs the release-helper unit tests,
-  actionlint (Linux), the tag and version check on tags, rustdoc with warnings
-  denied, `cargo audit`, the Renode simulation test, a Windows host job, and
-  release staging. Run `mask sim-test` locally when touching the simulation or
+- `mask ci` is a subset of CI. It includes rustdoc with warnings denied for
+  every build since 2026-10-10. CI also runs the release-helper unit tests,
+  actionlint (Linux), the tag and version check on tags, the host coverage
+  floor ([ADR 0023](0023-host-coverage-floor.md)), `cargo audit`, the Renode
+  simulation test, a Windows host job, and release staging. Run `mask sim-test` locally when touching the simulation or
   shared reducers.
 - Local and released firmware differ in log level. `.cargo/config.toml` sets
   `DEFMT_LOG = "debug"`, while CI sets `DEFMT_LOG: info` in its environment,
@@ -174,7 +175,8 @@ Negative:
 - Optional Cargo tools are pinned by hand since 2026-10-10. `mask deps`,
   `mask coverage-install`, and the devcontainer run `cargo install --locked`
   with an exact `--version`; the versions repeat in `maskfile.md`,
-  `post-create.sh`, and the development guide, with no check that they agree.
+  `post-create.sh`, and the development guide, and cargo-llvm-cov's also in
+  the CI coverage job, with no check that they agree.
   The devcontainer base image tag `1-bookworm` still moves, and
   `scripts/install-renode.sh` downloads Renode 1.16.1 without a checksum.
 - The privileged devcontainer has broad access to the host. Review it before

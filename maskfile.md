@@ -375,16 +375,36 @@ devcontainer build --workspace-folder .
 > Generate and open the firmware API documentation
 
 Builds rustdoc for the `embedded` configuration, dependencies included, without
-denying warnings. CI instead builds only the host library's documentation, with
-`cargo doc --locked --no-deps --lib` and `RUSTDOCFLAGS=-D warnings`.
+denying warnings. `mask doc-check` runs the checks CI runs instead.
 
 ```bash
 ./scripts/run-tool.sh cargo doc --locked --features embedded --target thumbv7em-none-eabihf --open
 ```
 
+## doc-check
+
+> Check every rustdoc build with private items and warnings denied, as CI does
+
+Documents the host library, the embedded library, the `bt2usb` and
+`bt2usb-selftest` binaries, and the `bt2usb-sim` binary. A broken intra-doc
+link or any other rustdoc warning fails the task. The library and the firmware
+binary share the name `bt2usb`, so they are documented in separate runs.
+
+```bash
+set -e
+export RUSTDOCFLAGS="-D warnings"
+doc="./scripts/run-tool.sh cargo doc --locked --no-deps --document-private-items"
+arm="--target thumbv7em-none-eabihf"
+$doc --lib
+$doc --features embedded $arm --lib
+$doc --features embedded $arm --bin bt2usb --bin bt2usb-selftest
+$doc --features sim $arm --bin bt2usb-sim
+echo "All documentation builds are free of warnings."
+```
+
 ## ci
 
-> Run local formatting, lint, host tests, and firmware builds
+> Run local formatting, lint, host tests, documentation checks, and firmware builds
 
 ```bash
 set -e
@@ -396,6 +416,15 @@ echo "=== Running clippy ==="
 ./scripts/run-tool.sh cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
 echo "=== Running tests ==="
 ./scripts/run-tool.sh cargo test --locked --lib --tests
+echo "=== Checking documentation ==="
+export RUSTDOCFLAGS="-D warnings"
+doc="./scripts/run-tool.sh cargo doc --locked --no-deps --document-private-items"
+arm="--target thumbv7em-none-eabihf"
+$doc --lib
+$doc --features embedded $arm --lib
+$doc --features embedded $arm --bin bt2usb --bin bt2usb-selftest
+$doc --features sim $arm --bin bt2usb-sim
+unset RUSTDOCFLAGS
 echo "=== Building release ==="
 ./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 ./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf

@@ -5,7 +5,9 @@
 
 This policy is interim. It is expected to be superseded by the authenticated
 pairing and enrollment decision that [TODO.md](../../TODO.md) lists as a P0
-deployment gate. This record was written retroactively on 2026-10-09 from the
+deployment gate; Proposed
+[ADR 0017](0017-authenticated-pairing-and-enrollment.md) drafts that decision
+and would supersede this record once Accepted. This record was written retroactively on 2026-10-09 from the
 source and the commit history.
 
 ## Context

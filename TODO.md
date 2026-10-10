@@ -321,6 +321,12 @@ it becomes workable again.
 | [Security maintenance ownership](#release-provenance-and-supply-chain) (P0) | A private reporting channel, which versions get fixes, who triages, and how fast reporters hear back. SECURITY.md cannot name a channel until one exists | 1. Enable GitHub private vulnerability reporting as the only channel; fix only the latest release tag and `main`; you triage; acknowledge within 7 days and give a fix or plan within 30 days. 2. Publish a security email address instead, with the same policy |
 | [Replace unmaintained transitive dependencies](#release-provenance-and-supply-chain) (P1) | How to drop `proc-macro-error` (via `ssd1306`), and whether documented audit ignores may close the item while no released `cortex-m` drops `bare-metal`. The audit already fails on any other unmaintained crate | 1. Keep both ignores until upstream releases remove the crates, and accept "dropped, or ignored by ID with its chain and removal trigger" as the closing criterion; both are low risk (compile-time only, or stable core types). 2. Replace `ssd1306` with a small in-tree async driver for the 128x64 panel, under a new ADR, with host tests for the command bytes and a Renode and board display check; drops `proc-macro-error`, `maybe-async-cfg`, and their `syn` 1 tree. 3. Port `ssd1306` to `maybe-async-cfg` 0.2.5 and offer it upstream from your GitHub account, keeping the ignore until a release carries it |
 | [Hardware-evidence label and private reporting](#release-provenance-and-supply-chain) (P2) | Two repository settings no tool here can change: create the `hardware-evidence` label (Issues, Labels, New label) that the hardware-result template applies, and turn on private vulnerability reporting (Settings, Code security) | 1. Do both; the loop then updates SECURITY.md and checks a new hardware-result issue. 2. Create only the label and choose an email channel in the row above |
+| [ADR 0017: authenticated pairing](docs/adr/0017-authenticated-pairing-and-enrollment.md) (P0) | Four answers before the ADR can be Accepted and implemented: how Just Works-only devices (most mice) are treated, whether LE legacy pairing is allowed, what happens to bonds made under ADR 0011, and the pairing-window length | 1. Allow Just Works-only devices with mouse reports only, after a SELECT; reject legacy pairing; mark ADR 0011 bonds "pair again"; 60 s window (the ADR's recommendation). 2. Reject Just Works-only devices outright. 3. Allow legacy pairing in the Just Works tier. 4. Keep ADR 0011 bonds with full input until forgotten. 5. A 30 s or 120 s window |
+| [ADR 0018: USB identity](docs/adr/0018-production-usb-identity.md) (P0) | Where the production VID/PID comes from, what serial release builds report, whether the product string changes, and when to request the PID | 1. Request a pid.codes PID now; keep the FICR factory serial; rename the product to "BLE HID Bridge" (the recommendation). 2. Buy a USB-IF vendor ID instead. 3. Report no serial, or a resettable one. 4. Keep "BT-to-USB HID Bridge". 5. Request the PID after hardware acceptance |
+| [ADR 0019: power-loss-safe persistence](docs/adr/0019-power-loss-safe-persistence.md) (P0) | The commit protocol, the `sequential-storage` version, what a future layout-changing container release may do, and when old frames are rewritten | 1. Generation anchor under a second key; pin `sequential-storage` 8.0.2; hold any layout-changing release; rewrite old frames lazily on the next save (the recommendation). 2. Frame CRC and generation without the anchor. 3. Raw A/B pages without the crate. 4. Stay on 7.2.0. 5. Adopt a layout change with a confirmed Factory reset, or migrate in place. 6. Rewrite at the first boot of the new firmware |
+| [ADR 0020: watchdog](docs/adr/0020-watchdog-and-progress-based-recovery.md) (P0) | The WDT timeout, whether a stuck display counts toward resets, what repeated early watchdog resets do, and whether a restart is shown on the OLED | 1. 8 s; exclude the display; latch the watchdog off after three early resets until a power cycle; show a restart notice (the recommendation). 2. 4 s. 3. Include the display. 4. Keep resetting. 5. Log the restart only |
+| [ADR 0021: provisioning and readout protection](docs/adr/0021-provisioning-debug-access-and-readout-protection.md) (P0) | The production debug-port policy, whether each release ships an open service twin, the chip revision production units need, and whether bonds are encrypted at rest | 1. Lock the debug port; ship the open twin; require revision 3 (build code F or later); keep bonds unencrypted under the lock (the recommendation). 2. Leave production units open. 3. No twin image. 4. Accept any revision. 5. Encrypt bonds with a FICR-derived key |
+| [ADR 0022: report translation](docs/adr/0022-descriptor-driven-report-translation.md) (P1) | How motion beyond ±127 is delivered, what a notification of the wrong length does, whether the fixed decoders stay, and what happens to a map with no translatable input | 1. Split large motion into consecutive USB reports; reject a wrong length; keep the fixed decoders for maps that match them; fail the connection with `HID map has no translatable report` (the recommendation). 2. Clamp motion. 3. Pad or truncate. 4. Remove the fixed decoders. 5. Connect and translate nothing |
 
 ## Contribution Rules For This Plan
 
@@ -443,6 +449,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   the ADR is Accepted, supersedes
   [ADR 0011](docs/adr/0011-interim-just-works-pairing.md), and is listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+  Drafted on 2026-10-10 as Proposed [ADR 0017](docs/adr/0017-authenticated-pairing-and-enrollment.md); waiting
+  on its questions in [Needs Your Input](#needs-your-input).
 - [ ] **P0** **Authenticated pairing and enrollment policy.** *(hardware)*
   Implement the ADR above: define whether each supported device uses
   authenticated pairing, how user presence is checked, and whether weaker
@@ -542,6 +550,8 @@ types. Context: [architecture](docs/architecture.md#hid-path-and-limits) and
   the bounded translation tables look like, and how unsupported layouts fail.
   Accept when the ADR is Accepted and listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+  Drafted on 2026-10-10 as Proposed [ADR 0022](docs/adr/0022-descriptor-driven-report-translation.md); waiting
+  on its questions in [Needs Your Input](#needs-your-input).
 - [ ] **P1** **Descriptor-driven report translation.** Decode fields by usage,
   bit offset, width, signedness, and report ID for NKRO, packed mouse buttons,
   and 16-bit movement. Accept when a fixture corpus covers supported layouts and
@@ -576,6 +586,8 @@ Context: [features](docs/features.md#usb-hid-device) and
   the factory-derived serial is used for unit identity. Accept when the ADR is
   Accepted and listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+  Drafted on 2026-10-10 as Proposed [ADR 0018](docs/adr/0018-production-usb-identity.md); waiting
+  on its questions in [Needs Your Input](#needs-your-input).
 - [ ] **P0** **USB production identity.** *(hardware)* Obtain an assigned
   VID/PID and define product, manufacturer, revision, and unit-identity policy;
   `src/config.rs` still uses the development `0x1209`/`0x0001`. Accept when
@@ -664,6 +676,8 @@ Context: [data model](docs/data-model.md#pairing-store),
   upgrade may change the on-flash layout. Accept when the ADR is Accepted and
   listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+  Drafted on 2026-10-10 as Proposed [ADR 0019](docs/adr/0019-power-loss-safe-persistence.md); waiting
+  on its questions in [Needs Your Input](#needs-your-input).
 - [ ] **P0** **Forget/reset hardware and interruption acceptance.**
   *(hardware)* Validate the implemented confirmation, worker shutdown,
   persistence, and cache-update paths on a board. Accept when forgotten peers
@@ -818,6 +832,8 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   survives a reset, and how reset causes are recorded. Accept when the ADR is
   Accepted and listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+  Drafted on 2026-10-10 as Proposed [ADR 0020](docs/adr/0020-watchdog-and-progress-based-recovery.md); waiting
+  on its questions in [Needs Your Input](#needs-your-input).
 - [ ] **P0** **Watchdog and recoverable failures.** *(hardware)* Define
   progress-based watchdog feeding and recovery for stuck I2C, stalled USB, flash
   errors, and BLE task failure; today no watchdog exists and a stuck I2C bus
@@ -867,6 +883,8 @@ Physical access, key protection, and production provisioning. Context:
   disposal, service recovery, and whether bond records need protection beyond
   readout protection. Accept when the ADR is Accepted and listed in the
   [architecture index](docs/architecture.md#decisions-needed-for-roadmap-work).
+  Drafted on 2026-10-10 as Proposed [ADR 0021](docs/adr/0021-provisioning-debug-access-and-readout-protection.md); waiting
+  on its questions in [Needs Your Input](#needs-your-input).
 - [ ] **P0** **Provisioning and physical key protection.** *(hardware)* Define
   production debug access, readout protection, key lifetime, disposal, and
   service recovery. Today `src/main.rs` and `src/selftest.rs` pass

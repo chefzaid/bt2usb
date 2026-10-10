@@ -1163,7 +1163,9 @@ The memory-layout checks in `memory_sd.x` (RAM placement and the end of
   reset or power cycle; when it is the BLE task, the UI shows **No reply** 30
   seconds after a management request and stays usable, but nothing restarts
   the BLE task. This is the P0 "Watchdog and
-  recoverable failures" item in [TODO.md](../TODO.md) and needs an ADR first.
+  recoverable failures" item in [TODO.md](../TODO.md); Proposed
+  [ADR 0020](adr/0020-watchdog-and-progress-based-recovery.md) drafts the
+  design.
 - A background reconnect to a peer that has lost its keys retries without
   telling the user.
 - Power loss during a flash write, during garbage collection, or during the
@@ -1295,18 +1297,42 @@ change.
 - [ADR 0016: Bound A Peripheral's Connection Parameter Requests In The Application](adr/0016-bounded-peer-connection-parameters.md)
 - [ADR 0023: Hold Host Line Coverage At A Floor As A Regression Guard](adr/0023-host-coverage-floor.md)
 
+## Proposed ADRs
+
+Drafted on 2026-10-10 for the P0 and P1 roadmap decisions below, each with a
+recommendation, the alternatives weighed, and the facts checked against the
+code. None is the project's direction until the owner answers its questions
+in [Needs Your Input](../TODO.md#needs-your-input) and it is marked Accepted;
+until then the Accepted ADRs above describe the firmware.
+
+| ADR | Recommends | Would change |
+| --- | --- | --- |
+| [0017: Require LE Secure Connections And Authenticate Keyboards In A Bounded Pairing Window](adr/0017-authenticated-pairing-and-enrollment.md) | LE Secure Connections only; keyboards type an OLED passkey, Just Works devices get mouse reports only after a SELECT, bonds only inside a 60 s enrollment window; a background reconnect can never pair | Supersedes ADR 0011; amends ADR 0007 |
+| [0018: Identify Releases With A pid.codes Product ID And Units By Their Factory Serial](adr/0018-production-usb-identity.md) | A pid.codes PID for tag builds only, `bcdDevice` from the version, the FICR serial kept and never logged, and a release check of the identity | USB descriptors and release packaging |
+| [0019: Commit Pairing-Store Writes With A Generation Anchor And Migrate Formats Only By Rewriting](adr/0019-power-loss-safe-persistence.md) | Keep the atomic item append; add a CRC and generation (frame version 2) confirmed by an anchor item, so a rollback fails closed; pin `sequential-storage` exactly | Amends ADR 0006 |
+| [0020: Supervise Progress With Deadline Leases And Reset Through The Watchdog](adr/0020-watchdog-and-progress-based-recovery.md) | An 8 s WDT fed only while no deadline lease is overdue; reset reasons recorded; arming stops after three early watchdog resets | New boot and task supervision |
+| [0021: Lock The Debug Port In Production Images And Erase The Pairing Pages On Factory Reset](adr/0021-provisioning-debug-access-and-readout-protection.md) | Production images lock APPROTECT, an open service twin ships beside them, and every Factory reset erases the pairing pages | Amends ADRs 0006 and 0008 |
+| [0022: Translate BLE HID Reports Through A Bounded Field Table Built From The Report Map](adr/0022-descriptor-driven-report-translation.md) | A per-link field table built from the Report Map translates reports field by field into the unchanged USB reports | Amends ADR 0005 |
+
 ## Decisions Needed For Roadmap Work
 
-Write an ADR before implementing any of these [TODO.md](../TODO.md) items:
+Write an ADR before implementing any of these [TODO.md](../TODO.md) items. The
+first six have Proposed ADRs (above) waiting on the owner:
 
 - authenticated pairing and enrollment policy (passkey or numeric comparison,
-  pairing window, rejection of weaker devices)
-- watchdog and progress-based recovery strategy
-- power-loss-safe persistence and storage-version migration policy
-- descriptor-driven HID report translation
-- production USB identity and unit-identity policy
+  pairing window, rejection of weaker devices): Proposed
+  [ADR 0017](adr/0017-authenticated-pairing-and-enrollment.md)
+- watchdog and progress-based recovery strategy: Proposed
+  [ADR 0020](adr/0020-watchdog-and-progress-based-recovery.md)
+- power-loss-safe persistence and storage-version migration policy: Proposed
+  [ADR 0019](adr/0019-power-loss-safe-persistence.md)
+- descriptor-driven HID report translation: Proposed
+  [ADR 0022](adr/0022-descriptor-driven-report-translation.md)
+- production USB identity and unit-identity policy: Proposed
+  [ADR 0018](adr/0018-production-usb-identity.md)
+- provisioning, debug access, and readout protection: Proposed
+  [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md)
 - bootloader, flash partitioning, and signed USB/BLE DFU
-- provisioning, debug access, and readout protection
 - multiple BLE profile sets
 - persistent device settings (storage location, versioning, and defaults,
   without letting a settings record lock the pairing store)

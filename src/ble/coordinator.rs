@@ -4,7 +4,8 @@
 //! connection-slot state machine and the decisions the coordinator makes in
 //! response to UI commands and slot-worker events. Those decisions are returned
 //! as data ([`Action`]s) which the async **imperative shell** in
-//! [`crate::ble::multi_conn`] then executes (channel sends, flash writes).
+//! `ble::multi_conn` (firmware only) then executes (channel sends, flash
+//! writes).
 //!
 //! Because this module is free of SoftDevice / Embassy / USB types, it compiles
 //! and runs on the host and is exercised directly by unit tests (it is in the

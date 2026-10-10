@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 11 | 8 | 0 |
+| [FIXME](#fixme) | 12 | 7 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **87** | **90** | **22** |
+| **Total** | **88** | **89** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -153,11 +153,17 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   Both are hardware-free but compile only into the firmware, so no test covers
   them. Close when both live in `src/ble/reconnect.rs` with host tests and the
   shell only maps their outcomes onto the signal.
-- [ ] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
-  The `RECONNECTS` doc links to [`reconnect`], which does not resolve
-  (`cargo doc --features embedded` warns), and a "Unit Tests" banner was left
-  at the end of the file when its tests moved to `adv_parser.rs`. Close when
-  firmware rustdoc is warning-free and the banner is gone.
+- [x] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
+  The `RECONNECTS` doc linked to [`reconnect`], which does not resolve
+  (firmware rustdoc with private items warns), and a "Unit Tests" banner was
+  left at the end of the file when its tests moved to `adv_parser.rs`. Fixed:
+  the banner went with the connectable-only fix, the link now names
+  `crate::ble::reconnect`, and three more links that broke only in some builds
+  (`coordinator.rs` and `power_logic.rs` in the embedded library, `ble/mod.rs`
+  in the `sim` build) are written as code. Rustdoc with private items and
+  warnings denied is clean for the host library, the embedded library, and all
+  three binaries; the commands and the rule are in
+  [code quality](docs/code-quality.md#documentation-comments).
 - [x] **P3** **Duplicated and dead logic in `conn_params.rs`.** Reversed
   interval bounds were normalized twice in two styles (`bound_request` and
   `interval_within_request`); the step-back loop in `max_latency_for` could

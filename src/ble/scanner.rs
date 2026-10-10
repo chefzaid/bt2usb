@@ -55,7 +55,7 @@ impl PartialEq for SavedPeer {
 }
 
 /// Background reconnect targets and sightings shared by both slots; see
-/// [`reconnect`].
+/// [`crate::ble::reconnect`].
 static RECONNECTS: BlockingMutex<
     CriticalSectionRawMutex,
     RefCell<ReconnectTable<SavedPeer, Address>>,

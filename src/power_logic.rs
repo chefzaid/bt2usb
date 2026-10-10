@@ -1,6 +1,7 @@
 //! Pure power-management policy (hardware-free, host-tested).
 //!
-//! The timing source and the activity-tracking glue live in [`crate::power`];
+//! The timing source and the activity-tracking glue live in `power.rs`
+//! (firmware only);
 //! the *decisions* — what power state a given amount of inactivity implies, and
 //! whether the screen should be on — live here so they can be unit-tested on the
 //! host.

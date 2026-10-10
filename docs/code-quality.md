@@ -191,7 +191,18 @@ Rules for a new allowance:
 library with warnings denied, so a rustdoc warning in those modules, such as
 a broken intra-doc link, fails the job. Modules compiled only into the
 firmware are never checked this way; `mask doc` builds firmware documentation
-but does not deny warnings.
+but does not deny warnings. On 2026-10-10 every target documented cleanly with
+private items included and warnings denied, which a reviewer can repeat with
+`RUSTDOCFLAGS="-D warnings" cargo doc --locked --no-deps --document-private-items`
+plus one of `--lib`; `--features embedded --target thumbv7em-none-eabihf --bin bt2usb`
+(or `--bin bt2usb-selftest`); or
+`--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim`.
+
+**Links across builds.** A module that more than one build compiles names a
+firmware-only item in code formatting, not as an intra-doc link: the
+coordinator, power policy, and `ble` module docs mention `ble::multi_conn` and
+`power.rs` that way, because the host library and the `sim` build do not
+contain them and the link would not resolve there.
 
 **Review rule.** Every module starts with a `//!` comment that says what it
 owns and what it must not depend on. Four files have none today, found with

@@ -52,8 +52,11 @@ Clippy warning into an error.
 | Simulation build | `cargo build --locked --features sim --target thumbv7em-none-eabihf` | `mask ci`, `mask sim-build` | Renode simulation test | Fails the job |
 | Renode scenario | `renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot` | `mask sim-test` (needs `renode-test` on PATH; `mask sim-setup` installs it on Linux or WSL) | Renode simulation test | Fails the job; results upload even on failure |
 | Dependency audit | `cargo audit`, cargo-audit 0.22.2 | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory; unmaintained-crate warnings do not fail it |
-| Workflow lint | `actionlint`, 1.7.12, SHA-256 checked before use | None | Host tests, Linux only | Fails the Linux job |
-| File length | `find src tests build.rs -name '*.rs' -exec wc -l {} +`, failing above 500 lines ([File Length](#file-length)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file over the limit |
+| Workflow lint | `actionlint`, 1.7.12, with ShellCheck 0.11.0 on `PATH` for the `run:` scripts; both SHA-256 checked before use | `actionlint` | Host tests, Linux only | Fails the Linux job |
+| Python lint and formatting | `ruff check` and `ruff format --check` over every tracked `*.py` file, Ruff 0.16.9, settings in `ruff.toml`, run by `python scripts/lint_scripts.py` ([Python And Shell Checks](#python-and-shell-checks)) | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job and lists each finding |
+| Shell lint | `shellcheck` 0.11.0 over every tracked `*.sh` file and every Bash recipe in `maskfile.md`, run by the same script | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job; a recipe finding names its `maskfile.md` line and recipe |
+| Script linter tests | `python -m unittest discover -s scripts -p "lint_scripts_test.py" -v` | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job; 7 tests (`grep -c 'def test' scripts/lint_scripts_test.py`) |
+| File length | `find src tests build.rs scripts \( -name '*.rs' -o -name '*.py' \) -exec wc -l {} +`, failing above 500 lines ([File Length](#file-length)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file over the limit |
 | Documentation checks | `python scripts/check_docs.py` ([Markdown Checks](#markdown-checks)) | `mask ci`, `mask docs-check` | Host tests, Linux only | Fails the Linux job and lists each finding as file, line, and the value or name the repository has instead |
 | Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
 | Module comments | `find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`, failing when it lists a file ([Documentation Comments](#documentation-comments)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file without a `//!` line |
@@ -96,17 +99,18 @@ jobs reuse the embedded job's bytes instead of rebuilding.
 
 `mask ci` covers formatting, the three Clippy configurations, host tests,
 rustdoc for every build with warnings denied, the Markdown checks, and both
-firmware builds. It does not run the coverage floor, actionlint, the
-release-helper or documentation-checker tests, the audit, or Renode, and it has no equivalent of the Windows host job, the tag check, or
-release staging. Run the ones your change
-can affect:
+firmware builds. It does not run the coverage floor, actionlint, the Python
+and shell linters, the release-helper, documentation-checker, or script-linter
+tests, the audit, or Renode, and it has no equivalent of the Windows host job,
+the tag check, or release staging. Run the ones your change can affect:
 
 | Change touches | Also run |
 | --- | --- |
 | `///` or `//!` comments only | `mask rustdoc-check`, which runs the four rustdoc builds without the rest of `mask ci` |
 | Markdown only, `src/config.rs`, `memory_sd.x`, `memory_sim.x`, `maskfile.md`, or a renamed file | `mask docs-check` |
 | Pure logic in `src/lib.rs` modules, or their tests | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` |
-| `.github/workflows/ci.yml` | `actionlint` |
+| `.github/workflows/ci.yml` | `actionlint`, with `shellcheck` on `PATH` so it checks the `run:` scripts |
+| A Python file, a `*.sh` script, a `maskfile.md` recipe, or `ruff.toml` | `mask lint-scripts` |
 | `scripts/release.py` or the release jobs | `python -m unittest discover -s scripts -p "release_test.py" -v` |
 | `Cargo.toml` or `Cargo.lock` | `cargo audit` |
 | UI, buttons, coordinator, `sim.rs`, `memory_sim.x`, or `renode/` | `mask sim-test` |
@@ -141,18 +145,21 @@ how to spot and discard that.
 
 ### File Length
 
-**Enforced for Rust sources.** No `.rs` file under `src/`, `tests/`, or
-`build.rs` may exceed 500 lines, counted with `wc -l` (blank and comment lines
-included). The host-tests job runs the check on Linux and lists each file over
-the limit. Split a file that grows past it along a responsibility, not at an
+**Enforced for Rust and Python sources.** No `.rs` file under `src/`,
+`tests/`, or `build.rs`, and no `.rs` or `.py` file under `scripts/`, may
+exceed 500 lines, counted with `wc -l` (blank and comment lines included). The
+host-tests job runs the check on Linux and lists each file over the limit. Split a file that grows past it along a responsibility, not at an
 arbitrary line: tests go to a sibling `*_tests.rs` file included with
 `#[cfg(test)] #[path = "..."] mod tests;` (as `ui_logic_tests.rs`,
 `reconnect_tests.rs`, and `coordinator_tests.rs` are), and a shell module
 splits by task or handler (as `multi_conn.rs` gave up `slot_worker.rs` and
 `bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10).
-Markdown guides and the vendored crate are not checked. On 2026-10-10 the
-largest files were `storage.rs` (488 lines) and `hid_descriptor_tests.rs`
-(486).
+A Python helper splits the same way: on 2026-10-10 the documentation checker
+(775 lines once formatted) became a thin `scripts/check_docs.py` driver and one
+module per check in `scripts/docs_checks/`. Markdown guides, `maskfile.md`, the
+shell scripts, and the vendored crate are not checked. On 2026-10-10 the
+largest Rust files were `storage.rs` (488 lines) and `hid_descriptor_tests.rs`
+(486), and the largest Python file was `scripts/check_docs_test.py` (436).
 
 ### Clippy
 
@@ -253,9 +260,9 @@ modules carry `///` comments that state units, bounds, and error meanings.
 | Files | Check | Kind |
 | --- | --- | --- |
 | Line endings | [.gitattributes](../.gitattributes) forces LF for shell scripts, `maskfile.md`, Renode files, Rust, TOML, linker scripts, Markdown, JSON, and YAML | Enforced by Git when files are committed and checked out |
-| `.github/workflows/ci.yml` | actionlint 1.7.12 in the Linux host job | Enforced |
-| `scripts/release.py` | 12 unit tests in `scripts/release_test.py`; no linter or type checker | Tests enforced; style not checked |
-| `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash blocks in `maskfile.md` | None. actionlint checks workflow `run:` blocks with ShellCheck when `shellcheck` is installed; the workflow does not install it, and whether the hosted runner image provides it is not recorded | Gap |
+| `.github/workflows/ci.yml` | actionlint 1.7.12 in the Linux host job, which passes each `run:` script to the pinned ShellCheck 0.11.0 | Enforced |
+| Python: `scripts/release.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 12 release-helper, 27 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
+| `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash recipes in `maskfile.md` | ShellCheck 0.11.0 ([Python And Shell Checks](#python-and-shell-checks)) | Enforced |
 | Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, and commands ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
 | Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job; not linted | Partial |
 
@@ -286,6 +293,44 @@ What it does not check: values written without the constant's name ("a 7.5 ms
 interval"), test and file counts, firmware sizes, coverage figures, and the
 content of external links. Those remain the reviewer's job, as the
 [review checklist](#review-checklist) says.
+
+### Python And Shell Checks
+
+[scripts/lint_scripts.py](../scripts/lint_scripts.py) runs every script
+linter in one pass, in the Linux host job and as `mask lint-scripts`. It needs
+`ruff` and `shellcheck` on `PATH`, exits 2 when either is missing, and exits 1
+after running every check when any of them reports a finding.
+
+| Check | Files | Settings |
+| --- | --- | --- |
+| `ruff check` | Every tracked `*.py` file | [ruff.toml](../ruff.toml): Python 3.11 target (the helpers use `tomllib`), 100-character lines, and Ruff's default rule set, which includes pyflakes, the pycodestyle errors, import sorting, bugbear, pyupgrade, and the simplify and Ruff-specific rules. The en dash is allowed in strings, because the documentation checker matches ranges written with it |
+| `ruff format --check` | The same files | Ruff's formatter at the same line length; `ruff format scripts/` applies it |
+| `shellcheck` | Every tracked `*.sh` file: `scripts/install-renode.sh`, `scripts/run-tool.sh`, `.devcontainer/post-create.sh` | ShellCheck's defaults, every severity down to style; each script's shebang selects the shell |
+| `shellcheck` on recipes | Every recipe in [maskfile.md](../maskfile.md) whose code block is `bash` or `sh` (all 34) | The recipe is checked as its own script under that shell |
+
+Mask runs the first code block under each heading as the recipe and passes its
+options and positional arguments as environment variables, with dashes turned
+into underscores. The linter writes each recipe to ShellCheck padded with
+blank lines, so a finding's line number is its line in `maskfile.md`, and
+assigns those variables on the first line, so `${release}` in a recipe with a
+`release` option is not reported as unassigned. A finding reads
+`maskfile.md:399:26: note: … [SC2086] (recipe rustdoc-check)`.
+
+Since actionlint runs after the linters are installed, the same ShellCheck
+also checks the workflow's `run:` scripts. Before 2026-10-10 that relied on
+whichever ShellCheck the runner image shipped.
+
+Fix a finding rather than silence it. When a rule is wrong for one line, use
+an inline `# noqa: <code>` or `# shellcheck disable=<code>` with the reason on
+the same line; a repository-wide exception belongs in `ruff.toml` with a
+comment, like the en-dash allowance. On 2026-10-10 the first run reported 19
+Ruff findings (unsorted imports, an unused `sys` import in `release.py`,
+`re.M` and `re.S` aliases, implicit string concatenation inside lists, and
+shebang scripts without the executable bit), unformatted Python in all four
+helper files, and six ShellCheck notes in `maskfile.md`, where
+`mask rustdoc-check` and `mask ci` built the rustdoc command in word-split
+strings. All were fixed: the rustdoc commands are Bash arrays, and the shebang
+scripts are executable.
 
 ## Unsafe Code Policy
 
@@ -552,7 +597,7 @@ its commit and scope cannot be checked and goes stale silently.
 | `nrf-softdevice`, `nrf-softdevice-s140` | Git `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"`; `nrf-softdevice` is replaced by `vendor/nrf-softdevice` through `[patch]` | Enforced by Cargo |
 | GitHub Actions | Each `uses:` names a full commit SHA, never an annotated tag object, with a comment naming the exact release that SHA is | Enforced by the SHA; the comment is informational |
 | Runner images | `ubuntu-24.04` for every Linux job and `windows-2025` for the Windows host job, instead of the moving `ubuntu-latest` and `windows-latest` labels | Enforced by the label; GitHub still updates the image's software weekly within that release |
-| cargo-audit, actionlint | `cargo-audit@0.22.2` through `taiki-e/install-action`; actionlint 1.7.12 with a SHA-256 check | Enforced in CI |
+| cargo-audit, actionlint, Ruff, ShellCheck | `cargo-audit@0.22.2` through `taiki-e/install-action`; actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 downloaded from their GitHub releases and checked against a SHA-256 before use | Enforced in CI. Ruff publishes a `.sha256` file per archive, and the recorded digest matches it; ShellCheck publishes none, so its digest was computed from the release archive on 2026-10-10. Ruff 0.16.9 was the newest release more than two weeks old on that date |
 | Developer tools | `cargo install --locked` with an exact `--version` in `mask deps`, `mask coverage-install`, and the devcontainer setup; the tarpaulin hint `mask coverage` prints uses the same form | Pinned by hand: the versions repeat in `maskfile.md`, `post-create.sh`, and the [development guide](development.md#toolchain), cargo-llvm-cov 0.9.1 also in the CI coverage job, and nothing checks that they agree |
 | SoftDevice, Renode, Robot Framework | Download URLs and versions without digests | Gap; see [security](security.md#supply-chain) |
 
@@ -751,7 +796,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
-| No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
 
 ## Related Guides
 

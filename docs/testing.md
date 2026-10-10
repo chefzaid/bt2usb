@@ -64,14 +64,15 @@ PowerShell, use the direct command.
 | Format check | `mask fmt-check` | `cargo fmt --package bt2usb -- --check` |
 | API documentation, every build, warnings denied | `mask rustdoc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
 | Workflow lint | — | `actionlint` |
+| Python and shell lint | `mask lint-scripts` | `python scripts/lint_scripts.py` (Ruff and ShellCheck), and its tests with `python -m unittest discover -s scripts -p "lint_scripts_test.py" -v` |
 | Dependency audit | — | `cargo audit` |
 | Board self-test | `mask selftest` | `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest` |
 | Local software gate | `mask ci` | See [what `mask ci` covers](#local-and-ci-coverage-compared) |
 
 `mask sim-setup` installs Renode and the `renode-test` dependencies, and
-`mask coverage-install` installs `cargo-llvm-cov`. `actionlint` and
-`cargo audit` are not installed by any mask recipe; CI pins actionlint 1.7.12
-and cargo-audit 0.22.2. [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)
+`mask coverage-install` installs `cargo-llvm-cov`. `actionlint`, Ruff,
+ShellCheck, and `cargo audit` are not installed by any mask recipe; CI pins
+actionlint 1.7.12, Ruff 0.16.9, ShellCheck 0.11.0, and cargo-audit 0.22.2. [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)
 explains the pinned toolchain, `--locked`, and the mask wrappers.
 
 ## Host Tests And Coverage
@@ -448,7 +449,7 @@ Cargo command and install no toolchain.
 
 | Job | Runner and limit | Checks, in order |
 | --- | --- | --- |
-| Host tests (`ubuntu-24.04`, `windows-2025`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit and a `//!` module comment for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
+| Host tests (`ubuntu-24.04`, `windows-2025`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs` and every `.rs` or `.py` file under `scripts/`, and a `//!` module comment for every `.rs` file; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 (each SHA-256 verified), run the script linter's tests and `scripts/lint_scripts.py` ([Python and shell checks](code-quality.md#python-and-shell-checks)), and run actionlint; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
 | Dependency security audit | Ubuntu, 10 min | `rustup install`; `cargo audit` with cargo-audit 0.22.2 |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
@@ -503,6 +504,7 @@ tracks it.
 | Release-helper tests | No | Yes, Linux and Windows |
 | Markdown checks (`scripts/check_docs.py`) | Yes (also `mask docs-check`, which adds its tests) | Yes, Linux, with its tests |
 | actionlint | No | Yes, Linux |
+| Ruff and ShellCheck (`scripts/lint_scripts.py`) | No (`mask lint-scripts`, which adds its tests) | Yes, Linux, with its tests |
 | rustdoc with private items and warnings denied, every build | Yes (also `mask rustdoc-check`) | Yes |
 | Coverage with the line floor | No (`mask coverage` reports without a floor) | Yes, Linux |
 | Dependency audit | No | Yes |
@@ -622,7 +624,8 @@ Specific to the current workflow and test tree:
   and region and function coverage have no floor.
 - The Renode job runs one scripted scenario on Linux; it does not exercise the
   OLED task, management screens, or the link-loss reservation path.
-- actionlint runs only in the Linux host job.
+- actionlint, Ruff, and ShellCheck run only in the Linux host job, and only
+  that job installs them; no mask recipe installs them locally.
 - rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
   documentation is not built or checked.
 - `cargo audit` runs without a deny option, so unmaintained-crate warnings do

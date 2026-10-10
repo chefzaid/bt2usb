@@ -393,12 +393,12 @@ binary share the name `bt2usb`, so they are documented in separate runs.
 ```bash
 set -e
 export RUSTDOCFLAGS="-D warnings"
-doc="./scripts/run-tool.sh cargo doc --locked --no-deps --document-private-items"
-arm="--target thumbv7em-none-eabihf"
-$doc --lib
-$doc --features embedded $arm --lib
-$doc --features embedded $arm --bin bt2usb --bin bt2usb-selftest
-$doc --features sim $arm --bin bt2usb-sim
+doc=(./scripts/run-tool.sh cargo doc --locked --no-deps --document-private-items)
+arm=(--target thumbv7em-none-eabihf)
+"${doc[@]}" --lib
+"${doc[@]}" --features embedded "${arm[@]}" --lib
+"${doc[@]}" --features embedded "${arm[@]}" --bin bt2usb --bin bt2usb-selftest
+"${doc[@]}" --features sim "${arm[@]}" --bin bt2usb-sim
 echo "All documentation builds are free of warnings."
 ```
 
@@ -419,6 +419,24 @@ py="$(command -v python3 || command -v python)"
 "$py" scripts/check_docs.py
 ```
 
+## lint-scripts
+
+> Lint the Python helpers, the shell scripts, and these recipes, as CI does
+
+Runs [scripts/lint_scripts.py](scripts/lint_scripts.py) and its unit tests:
+Ruff (`ruff check` and `ruff format --check`, settings in `ruff.toml`) over
+every tracked Python file, and ShellCheck over every tracked `*.sh` file and
+every bash or sh recipe in this file, with findings reported at their line
+here. Needs Ruff and ShellCheck on `PATH`; CI pins Ruff 0.16.9 and ShellCheck
+0.11.0.
+
+```bash
+set -e
+py="$(command -v python3 || command -v python)"
+"$py" -m unittest discover -s scripts -p "lint_scripts_test.py"
+"$py" scripts/lint_scripts.py
+```
+
 ## ci
 
 > Run local formatting, lint, host tests, rustdoc and Markdown checks, and firmware builds
@@ -435,12 +453,12 @@ echo "=== Running tests ==="
 ./scripts/run-tool.sh cargo test --locked --lib --tests
 echo "=== Checking documentation ==="
 export RUSTDOCFLAGS="-D warnings"
-doc="./scripts/run-tool.sh cargo doc --locked --no-deps --document-private-items"
-arm="--target thumbv7em-none-eabihf"
-$doc --lib
-$doc --features embedded $arm --lib
-$doc --features embedded $arm --bin bt2usb --bin bt2usb-selftest
-$doc --features sim $arm --bin bt2usb-sim
+doc=(./scripts/run-tool.sh cargo doc --locked --no-deps --document-private-items)
+arm=(--target thumbv7em-none-eabihf)
+"${doc[@]}" --lib
+"${doc[@]}" --features embedded "${arm[@]}" --lib
+"${doc[@]}" --features embedded "${arm[@]}" --bin bt2usb --bin bt2usb-selftest
+"${doc[@]}" --features sim "${arm[@]}" --bin bt2usb-sim
 unset RUSTDOCFLAGS
 echo "=== Checking Markdown documentation ==="
 "$(command -v python3 || command -v python)" scripts/check_docs.py

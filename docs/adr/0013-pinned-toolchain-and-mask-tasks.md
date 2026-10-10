@@ -167,7 +167,8 @@ Negative:
   run Cargo directly in PowerShell.
 - `mask ci` is a subset of CI. It includes rustdoc with warnings denied for
   every build since 2026-10-10. CI also runs the release-helper unit tests,
-  actionlint (Linux), the tag and version check on tags, the host coverage
+  actionlint, Ruff, and ShellCheck (Linux; `mask lint-scripts` runs the last
+  two locally), the tag and version check on tags, the host coverage
   floor ([ADR 0023](0023-host-coverage-floor.md)), `cargo audit`, the Renode
   simulation test, a Windows host job, and release staging. Run `mask sim-test` locally when touching the simulation or
   shared reducers.

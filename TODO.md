@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 21 | 0 | 0 |
+| [FIXME](#fixme) | 24 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 9 | 7 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 10 | 6 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **100** | **79** | **22** |
+| **Total** | **104** | **78** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -255,6 +255,23 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   `src/ble/coordinator_tests.rs` had none, and nothing checked the rule.
   Fixed: each now says what it owns, and the Linux host job fails on any Rust
   file under `src/`, `tests/`, or `build.rs` without a `//!` line.
+- [x] **P3** **The audit job installed its toolchain implicitly.** The hosted
+  run of `c0b4b48` showed rustup's "missing active toolchain has been
+  auto-installed" warning in the Dependency security audit job: `cargo audit`
+  goes through the rustup proxy, and that job was the only Cargo job without
+  the `rustup install` step. Fixed in `2622228`: it installs the pinned
+  toolchain first, like the other jobs.
+- [x] **P2** **The documentation checker exceeded the 500-line limit.**
+  `scripts/check_docs.py` was 676 lines when it landed (775 once formatted),
+  over the coding guide's 500-line limit, which CI enforced only for Rust.
+  Fixed: it is now a 73-line driver over one module per check in
+  `scripts/docs_checks/` (the largest, `config.py`, under 230 lines), and the
+  Linux host job applies the 500-line limit to Python files under `scripts/`
+  as well ([file length](docs/code-quality.md#file-length)).
+- [x] **P3** **`scripts/release.py` imported `sys` without using it**, and
+  `mask rustdoc-check` and `mask ci` built the rustdoc command in word-split
+  strings. Both were found by the first Ruff and ShellCheck run below and fixed:
+  the import is gone, and the recipes use Bash arrays.
 
 ## Needs Your Input
 
@@ -997,17 +1014,26 @@ Host tests, simulation, and code-health work. Context:
   from the bridge, application and vendored, is listed with the reason it
   cannot fire, or is replaced by an error path
   ([code quality](docs/code-quality.md#panics-allocation-and-arithmetic)).
-- [ ] **P2** **Lint the release helper and shell scripts.** CI runs no Python
-  or shell linter: CI runs `scripts/release.py` and its unit tests in
-  `scripts/release_test.py` but does not lint them, and
-  `scripts/install-renode.sh`,
-  `scripts/run-tool.sh`, `.devcontainer/post-create.sh`, and the 33 Bash
-  recipes in `maskfile.md` are not checked at all. Add Ruff (or an equivalent)
-  for the Python files and ShellCheck for the scripts and the extracted
-  `maskfile.md` recipes. Accept when a lint finding in any of them fails CI
-  ([code quality](docs/code-quality.md#other-files)).
+- [x] **P2** **Lint the release helper and shell scripts.** Since 2026-10-10
+  `scripts/lint_scripts.py` runs `ruff check` and `ruff format --check` (Ruff
+  0.16.9, settings in `ruff.toml`) over every tracked Python file, and
+  ShellCheck 0.11.0 over `scripts/install-renode.sh`, `scripts/run-tool.sh`,
+  `.devcontainer/post-create.sh`, and each of the 34 Bash recipes in
+  `maskfile.md`, which it extracts with mask's option and argument variables
+  declared and reports at their `maskfile.md` line. The Linux host job installs
+  both tools from their releases with a SHA-256 check, runs the script's 7
+  tests, then the script, then actionlint, which now uses the same ShellCheck
+  for the `run:` scripts; `mask lint-scripts` runs it locally. The first run's
+  19 Ruff findings, unformatted files, and 6 ShellCheck notes were fixed (see
+  FIXME). Verified locally: an unquoted variable added to a script, an unused
+  import added to `release.py`, and an unchecked `cd` added to a recipe each
+  made the script exit 1 with the finding
+  ([code quality](docs/code-quality.md#python-and-shell-checks);
+  `scripts/lint_scripts.py`, `scripts/lint_scripts_test.py`, `ruff.toml`,
+  `.github/workflows/ci.yml`, `maskfile.md`).
 - [x] **P2** **Keep source files within a size limit.** Every Rust file under
-  `src/`, `tests/`, and `build.rs` is at most 500 lines since the 2026-10-10
+  `src/`, `tests/`, and `build.rs`, and every Python file under `scripts/`, is
+  at most 500 lines since the 2026-10-10
   split (largest: `src/storage.rs` 488, `src/hid_descriptor_tests.rs` 486), and
   the host-tests job fails on any file over the limit
   ([code quality](docs/code-quality.md#file-length); `src/ble/bonder.rs`,
@@ -1148,7 +1174,7 @@ Tasks, tooling, and environments for working on the firmware. Context:
 - [x] WSL-aware task tooling and a VS Code devcontainer
   (`scripts/run-tool.sh`, `.devcontainer/`).
 - [x] Wrap build, flash, self-test, host tests, coverage, size, simulation,
-  SoftDevice, and probe tasks as 33 Bash `mask` recipes; `mask ci` runs the
+  SoftDevice, and probe tasks as 34 Bash `mask` recipes; `mask ci` runs the
   local formatting, lint, test, rustdoc, Markdown, and build subset
   (`maskfile.md`).
 - [x] Build host tests for the native platform by leaving `build.target` unset,

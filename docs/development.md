@@ -126,7 +126,9 @@ versions are pinned in three places that must change together: the `deps` and
 | cargo-bloat | 0.12.1 in `mask deps` (the devcontainer does not install it) | `mask bloat` |
 | cargo-audit | 0.22.2 in the CI `audit` job | Dependency audit |
 | actionlint | 1.7.12 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml) | Workflow lint |
-| Python | 3.11 or newer (`tomllib` in `scripts/release.py`) | Release helper and its tests |
+| Ruff | 0.16.9 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml); settings in [ruff.toml](../ruff.toml) | Python lint and formatting (`mask lint-scripts`) |
+| ShellCheck | 0.11.0 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml) | Shell script and recipe lint (`mask lint-scripts`), and actionlint's `run:` checks |
+| Python | 3.11 or newer (`tomllib` in `scripts/release.py` and the documentation checker) | Release helper, documentation checker, script linter, and their tests |
 | Renode | 1.16.1, default `RENODE_VERSION` in [install-renode.sh](../scripts/install-renode.sh) | `mask sim`, `mask sim-test` |
 | Robot Framework stack | `robotframework==6.1`, `pyyaml==6.0.*`, `robotframework-retryfailed==0.2.0`, `telnetlib3==2.0.*`, `psutil>=5.9.8` in `install-renode.sh` | `renode-test` |
 | SoftDevice S140 | 7.3.0, download URL in the `softdevice` recipe | Bridge and self-test on a board |
@@ -219,7 +221,12 @@ critical-section implementation and excludes SoftDevice, USB, and flash drivers;
 `--all-features` is not a supported firmware configuration.
 
 Release-helper tests require Python 3.11 or newer. When changing GitHub Actions,
-run `actionlint` as well; CI uses actionlint 1.7.12. The
+run `actionlint` as well, with `shellcheck` on `PATH` so it checks the `run:`
+scripts; CI uses actionlint 1.7.12. When changing a Python file, a shell
+script, or a recipe, run `mask lint-scripts`; it needs Ruff and ShellCheck,
+which CI pins at 0.16.9 and 0.11.0 (`pip install ruff==0.16.9`, and ShellCheck
+from its GitHub release or the system package manager). `ruff format scripts/`
+applies the formatting the check expects. The
 [deployment guide](deployment.md) explains version and provenance checks.
 
 Format only the application package, as CI does with `--package bt2usb`. The
@@ -248,8 +255,9 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask doc` | Generate embedded API documentation |
 | `mask rustdoc-check` | Check every rustdoc build with warnings denied, as CI does |
 | `mask docs-check` | Check Markdown links, documented constants, memory map, and commands |
+| `mask lint-scripts` | Lint the Python helpers, shell scripts, and recipes with Ruff and ShellCheck |
 
-The [mask command reference](#mask-command-reference) below lists all 33
+The [mask command reference](#mask-command-reference) below lists all 34
 recipes with their exact commands and options.
 
 Flashing the bridge requires S140 to have been installed. Complete
@@ -302,10 +310,12 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | `mask clippy` | `cargo clippy --locked --features embedded --target <arm> -- -D warnings` | Embedded configuration only; host and simulation Clippy run in `mask ci` |
 | `mask fmt` | `cargo fmt` | Formats the bt2usb package only |
 | `mask fmt-check` | `cargo fmt -- --check` | Same files as CI's `--package bt2usb` with the current manifest |
+| `mask lint-scripts` | `python3 -m unittest discover -s scripts -p "lint_scripts_test.py"`, then `python3 scripts/lint_scripts.py` (or `python` where `python3` is missing) | `ruff check` and `ruff format --check` over every tracked Python file, and ShellCheck over every `*.sh` file and every Bash recipe in `maskfile.md`; exits 2 when Ruff or ShellCheck is not on `PATH` ([code quality](code-quality.md#python-and-shell-checks)) |
 | `mask ci` | Format check; Clippy for host, embedded, and simulation; host tests; the four rustdoc builds of `mask rustdoc-check`; `scripts/check_docs.py`; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
 
-`mask ci` does not run the release-helper or documentation-checker tests,
-actionlint, the coverage floor, the audit, or Renode. The [testing guide](testing.md#local-and-ci-coverage-compared)
+`mask ci` does not run the release-helper, documentation-checker, or
+script-linter tests, actionlint, Ruff, ShellCheck, the coverage floor, the
+audit, or Renode. The [testing guide](testing.md#local-and-ci-coverage-compared)
 compares it with CI.
 
 ### Coverage
@@ -473,7 +483,8 @@ USB port attached to the PC whose enumeration/input behavior you are testing.
 5. prints tool versions and runs `cargo test --locked --lib --tests`; setup
    fails if the host tests fail
 
-It does not install Renode, cargo-bloat, cargo-audit, or actionlint; run
+It does not install Renode, cargo-bloat, cargo-audit, actionlint, Ruff, or
+ShellCheck; run
 `mask sim-setup` inside the container for the simulation.
 
 The editor settings point rust-analyzer at the firmware: target
@@ -561,9 +572,10 @@ in a public issue. See the [security policy](../SECURITY.md).
 | `sim.rs`, `ui/buttons.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
 | `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
 | `memory_sd.x`, storage constants, or `build.rs` | `mask ci` (its Markdown check compares the documented memory map), `mask size` | Self-test flash stage and the `softdevice RAM` log |
-| `.github/workflows/ci.yml` | `actionlint` | A hosted run |
-| `scripts/release.py` | Release-helper tests | The first hosted tag run ([deployment](deployment.md#validation-limits)) |
-| `maskfile.md` or `scripts/*.sh` | Run the changed recipe or script in Bash | |
+| `.github/workflows/ci.yml` | `actionlint` with `shellcheck` on `PATH` | A hosted run |
+| `scripts/release.py` | Release-helper tests, `mask lint-scripts` | The first hosted tag run ([deployment](deployment.md#validation-limits)) |
+| Another Python file, or `ruff.toml` | `mask lint-scripts`, and the file's tests (`mask docs-check` for the documentation checker) | |
+| `maskfile.md` or a `*.sh` script | `mask lint-scripts`, then run the changed recipe or script in Bash | |
 | Documentation only | `mask docs-check` | `mask rustdoc-check` when `///` or `//!` comments changed; figures the checker does not cover, such as counts and sizes, by hand |
 
 The [code-quality review checklist](code-quality.md#review-checklist) lists

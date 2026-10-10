@@ -10,13 +10,11 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
-import sys
 import tomllib
-
+from pathlib import Path
 
 TARGET = "thumbv7em-none-eabihf"
 INPUTS = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
@@ -90,9 +88,7 @@ def verify_staged(directory: Path) -> dict:
 
 
 def command(args: list[str], root: Path) -> str:
-    return subprocess.run(
-        args, cwd=root, check=True, capture_output=True, text=True
-    ).stdout.strip()
+    return subprocess.run(args, cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
 def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> None:
@@ -115,8 +111,14 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
     shutil.copyfile(build_dir / "bt2usb", output / "bt2usb.elf")
     shutil.copyfile(build_dir / "bt2usb-selftest", output / "bt2usb-selftest.elf")
     subprocess.run(
-        [str(objcopy.resolve()), "-O", "ihex", str((output / "bt2usb.elf").resolve()),
-         str((output / "bt2usb.hex").resolve())], check=True
+        [
+            str(objcopy.resolve()),
+            "-O",
+            "ihex",
+            str((output / "bt2usb.elf").resolve()),
+            str((output / "bt2usb.hex").resolve()),
+        ],
+        check=True,
     )
     for name in INPUTS:
         shutil.copyfile(root / name, output / name)
@@ -145,8 +147,13 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
 
 
 def package_release(
-    root: Path, source: Path, output: Path, tag: str,
-    expected_commit: str, expected_repository: str, expected_run_id: str,
+    root: Path,
+    source: Path,
+    output: Path,
+    tag: str,
+    expected_commit: str,
+    expected_repository: str,
+    expected_run_id: str,
 ) -> None:
     version, _ = validate_tag(root / "Cargo.toml", tag)
     metadata = verify_staged(source)
@@ -155,10 +162,16 @@ def package_release(
     if not expected_repository or not expected_run_id.isdecimal():
         raise ReleaseError("expected repository and workflow run ID are required")
     expected = {
-        "schema_version": 1, "package": "bt2usb", "version": version,
-        "source_commit": expected_commit, "source_ref": f"refs/tags/{tag}",
-        "repository": expected_repository, "workflow_run_id": expected_run_id,
-        "target": TARGET, "profile": "release", "features": ["embedded"],
+        "schema_version": 1,
+        "package": "bt2usb",
+        "version": version,
+        "source_commit": expected_commit,
+        "source_ref": f"refs/tags/{tag}",
+        "repository": expected_repository,
+        "workflow_run_id": expected_run_id,
+        "target": TARGET,
+        "profile": "release",
+        "features": ["embedded"],
         "defmt_log": "info",
     }
     for field, value in expected.items():
@@ -166,7 +179,10 @@ def package_release(
             raise ReleaseError(f"build metadata does not match expected {field}")
     for name in INPUTS:
         checksum = digest(root / name)
-        if digest(source / name) != checksum or metadata.get("input_sha256", {}).get(name) != checksum:
+        if (
+            digest(source / name) != checksum
+            or metadata.get("input_sha256", {}).get(name) != checksum
+        ):
             raise ReleaseError(f"build input differs from release source: {name}")
     for name in FIRMWARE:
         if metadata.get("artifact_sha256", {}).get(name) != digest(source / name):
@@ -215,9 +231,23 @@ def main() -> None:
         elif args.command == "stage":
             stage_build(args.root, args.build_dir, args.output, args.objcopy)
         else:
-            package_release(args.root, args.input, args.output, args.tag,
-                            args.expected_commit, args.expected_repository, args.expected_run_id)
-    except (ReleaseError, OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError) as error:
+            package_release(
+                args.root,
+                args.input,
+                args.output,
+                args.tag,
+                args.expected_commit,
+                args.expected_repository,
+                args.expected_run_id,
+            )
+    except (
+        ReleaseError,
+        OSError,
+        subprocess.CalledProcessError,
+        ValueError,
+        KeyError,
+        TypeError,
+    ) as error:
         parser.exit(1, f"Release check failed: {error}\n")
 
 

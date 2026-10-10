@@ -1,7 +1,8 @@
 name: CI
 
 # Build, lint, test, and (on tags) release the bt2usb firmware.
-# `mask ci` runs local code checks; CI adds audit, simulation and release packaging.
+# `mask ci` runs local code checks; CI adds the script and workflow linters,
+# coverage, audit, simulation, and release packaging.
 
 on:
   push:
@@ -46,10 +47,11 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check formatting
         run: cargo fmt --package bt2usb -- --check
-      - name: Keep Rust source files within 500 lines
+      - name: Keep Rust and Python source files within 500 lines
         if: runner.os == 'Linux'
         run: |
-          over=$(find src tests build.rs -name '*.rs' -exec wc -l {} + | awk '$2 != "total" && $1 > 500')
+          over=$(find src tests build.rs scripts \( -name '*.rs' -o -name '*.py' \) -exec wc -l {} + |
+            awk '$2 != "total" && $1 > 500')
           if [ -n "$over" ]; then
             echo "Split these files below 500 lines (docs/code-quality.md#file-length):"
             echo "$over"
@@ -72,21 +74,50 @@ jobs:
       - name: Check documentation links, constants, memory map, and commands
         if: runner.os == 'Linux'
         run: python scripts/check_docs.py
-      # install-action has no actionlint manifest; its cargo-binstall fallback
-      # looks for a nonexistent crate. Fetch the upstream release, pinned by digest.
-      - name: Install workflow linter
+      # install-action has no actionlint manifest, and its cargo-binstall
+      # fallback looks for a nonexistent crate, so each linter comes from its
+      # upstream release, pinned by version and SHA-256. ShellCheck is on PATH
+      # before actionlint runs, which passes every `run:` script to it.
+      - name: Install pinned linters
         if: runner.os == 'Linux'
         env:
           ACTIONLINT_VERSION: 1.7.12
           ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+          RUFF_VERSION: 0.16.9
+          RUFF_SHA256: 1bfbb819b5d4f9af501748862276b60e412d336034d99387691a4d4bce7a6f13
+          SHELLCHECK_VERSION: 0.11.0
+          SHELLCHECK_SHA256: 8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
         run: |
-          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
-          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
-            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/$archive"
-          echo "$ACTIONLINT_SHA256  $RUNNER_TEMP/$archive" | sha256sum --check --strict
-          mkdir -p "$RUNNER_TEMP/actionlint"
-          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/actionlint" actionlint
-          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
+          bin="$RUNNER_TEMP/linters"
+          mkdir -p "$bin"
+          fetch() {
+            curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$RUNNER_TEMP/$2" "$1/$2"
+            echo "$3  $RUNNER_TEMP/$2" | sha256sum --check --strict
+          }
+          actionlint="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          fetch "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}" \
+            "$actionlint" "$ACTIONLINT_SHA256"
+          tar -xzf "$RUNNER_TEMP/$actionlint" -C "$bin" actionlint
+          ruff="ruff-x86_64-unknown-linux-gnu.tar.gz"
+          fetch "https://github.com/astral-sh/ruff/releases/download/${RUFF_VERSION}" \
+            "$ruff" "$RUFF_SHA256"
+          tar -xzf "$RUNNER_TEMP/$ruff" -C "$bin" --strip-components=1 \
+            ruff-x86_64-unknown-linux-gnu/ruff
+          shellcheck="shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          fetch "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}" \
+            "$shellcheck" "$SHELLCHECK_SHA256"
+          tar -xJf "$RUNNER_TEMP/$shellcheck" -C "$bin" --strip-components=1 \
+            "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
+          echo "$bin" >> "$GITHUB_PATH"
+          "$bin/actionlint" -version | head -n 1
+          "$bin/ruff" --version
+          "$bin/shellcheck" --version | sed -n 2p
+      - name: Test the script linter
+        if: runner.os == 'Linux'
+        run: python -m unittest discover -s scripts -p "lint_scripts_test.py" -v
+      - name: Lint Python, shell scripts, and mask recipes
+        if: runner.os == 'Linux'
+        run: python scripts/lint_scripts.py
       - name: Validate GitHub Actions workflow
         if: runner.os == 'Linux'
         run: actionlint

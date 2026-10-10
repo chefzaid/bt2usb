@@ -1,0 +1,15 @@
+# Ruff settings for the Python helpers in scripts/. CI pins Ruff 0.16.9 and
+# runs `ruff check` and `ruff format --check` through scripts/lint_scripts.py
+# (docs/code-quality.md#python-and-shell-checks).
+
+# The helpers use tomllib, so they need Python 3.11 or newer.
+target-version = "py311"
+line-length = 100
+
+[lint]
+# Ruff's default rule set (pyflakes, pycodestyle errors, isort, bugbear,
+# pyupgrade, simplify, and Ruff's own rules among them) applies unchanged.
+
+# The documentation uses en dashes in ranges such as `0xF0000–0xF4000`, and the
+# checker matches them on purpose.
+allowed-confusables = ["–"]

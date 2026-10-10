@@ -44,7 +44,7 @@ layer before it cannot see.
 | Layer | What runs | Failure class it owns | Where |
 | --- | --- | --- | --- |
 | 1. Host tests | Unit and integration tests of the shared hardware-free modules ([ADR 0003](0003-pure-core-and-task-shell.md)) | Wrong decisions: parsing, reducers, aggregation, delivery and replay, storage validation, UI and power rules | CI on Linux and Windows, plus a line-coverage floor on Linux ([ADR 0023](0023-host-coverage-floor.md)); `mask test` |
-| 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with private items and warnings denied for every build; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; `cargo audit`; the Markdown checks | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow or release-helper mistakes, known vulnerable dependencies, and documentation that disagrees with the code | CI; `mask ci` runs the formatting, Clippy, test, rustdoc, Markdown, and build subset |
+| 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with private items and warnings denied for every build; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; Ruff and ShellCheck over the Python helpers, shell scripts, and mask recipes; `cargo audit`; the Markdown checks | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow, script, or release-helper mistakes, known vulnerable dependencies, and documentation that disagrees with the code | CI; `mask ci` runs the formatting, Clippy, test, rustdoc, Markdown, and build subset |
 | 3. Renode simulation | `bt2usb-sim` on an emulated nRF52840, with injected GPIO edges and a scripted BLE scenario | Boot, the executor and time driver, the GPIO and GPIOTE path, and the real UI and coordinator reducers running on the ARM target | CI `simulation` job; `mask sim-test` |
 | 4. Board self-test | `bt2usb-selftest` brings up each peripheral in stages and prints PASS, FAIL, or SKIP | SoftDevice RAM and enable, pairing-region flash, USB enumeration and an endpoint write, OLED, buttons, radio reception, stack margin | A board and probe; `mask selftest` |
 | 5. Hardware acceptance | The [first-flash checklist](../first-flash.md) on real peripherals, hosts, and hubs | Pairing, reconnect, held-input release, two active slots, LEDs, monitor hubs, sleep and wake, pre-OS use | A board and a person; a dated result record |
@@ -149,9 +149,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - [ci.yml](../../.github/workflows/ci.yml) jobs:
   - "Host tests (ubuntu-24.04, windows-2025)": `cargo fmt --package bt2usb
     -- --check`, `python -m unittest discover -s scripts -p "release_test.py"`,
-    actionlint 1.7.12 (Linux, checksum-verified download), tag validation on
-    tags, `cargo test --locked --lib --tests`, host Clippy, and host rustdoc
-    with private items and warnings denied.
+    actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 (Linux,
+    checksum-verified downloads) with `python scripts/lint_scripts.py`, tag
+    validation on tags, `cargo test --locked --lib --tests`, host Clippy, and
+    host rustdoc with private items and warnings denied.
   - "Host coverage": `cargo llvm-cov --locked --lib --tests` with
     cargo-llvm-cov 0.9.1, the report uploaded as an artifact, then the
     line-coverage floor ([ADR 0023](0023-host-coverage-floor.md)).

@@ -887,9 +887,9 @@ are open work.
   `47d6121c6e823120e8b883a7ac75f44ce7daa3aa`, and every build task passes
   `--locked`. The Cargo license metadata is `GPL-3.0-only`, matching
   [LICENSE](../LICENSE) ([ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)).
-- [`maskfile.md`](../maskfile.md) defines 33 tasks for building, flashing,
-  testing, coverage, linting, documentation checks, simulation, the SoftDevice, and the
-  devcontainer. `mask softdevice` stops on a failed download or extraction
+- [`maskfile.md`](../maskfile.md) defines 34 tasks for building, flashing,
+  testing, coverage, linting (Rust, and the Python and shell scripts),
+  documentation checks, simulation, the SoftDevice, and the devcontainer. `mask softdevice` stops on a failed download or extraction
   before flashing anything.
 - [`build.rs`](../build.rs) refuses to build the `embedded` and `sim` features
   together and selects `memory_sd.x` or `memory_sim.x`. The SoftDevice layout
@@ -908,7 +908,7 @@ at 07:23 UTC:
 
 | Job | What it checks |
 | --- | --- |
-| Host tests (ubuntu-24.04, windows-2025) | Formatting, the release helper's tests, actionlint 1.7.12 (downloaded and SHA-256 verified, Linux only), tag/version match on tags, host tests, host Clippy, the 500-line file limit and the Markdown checks (Linux only), host rustdoc with warnings denied |
+| Host tests (ubuntu-24.04, windows-2025) | Formatting, the release helper's tests, tag/version match on tags, host tests, host Clippy, host rustdoc with warnings denied; on Linux only, the 500-line file limit, module comments, the Markdown checks, Ruff and ShellCheck over the scripts and mask recipes, and actionlint (actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 downloaded and SHA-256 verified) |
 | Host coverage | `cargo llvm-cov` over the host tests, report uploaded, fails below 97% of lines ([ADR 0023](adr/0023-host-coverage-floor.md)) |
 | Dependency security audit | `cargo audit` with cargo-audit 0.22.2 |
 | Embedded build & clippy | Embedded Clippy, firmware rustdoc with warnings denied, release build, staged firmware and build manifest |

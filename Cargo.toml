@@ -105,6 +105,9 @@ static_cell       = { version = "2", optional = true }
 heapless          = { version = "0.8" }
 
 [dev-dependencies]
+# The firmware's OLED font, for tests/oled_font.rs, which keeps the Renode
+# panel model's glyph table (renode/oled-font-6x10.txt) equal to it.
+embedded-graphics = "0.8"
 
 # Every `unsafe` block needs a `// SAFETY:` comment. CI runs Clippy with
 # `-D warnings` for the host, firmware, self-test, and simulation builds, so a

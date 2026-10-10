@@ -5,9 +5,11 @@
 # Boots the `bt2usb-sim` binary (built with `--features sim`) on Renode's
 # bundled nRF52840 model, with its GPIO/GPIOTE swapped for models that
 # implement pin SENSE/LATCH and the GPIOTE PORT event (renode/*.cs, *.repl) so
-# injected button edges reach the firmware. The firmware reuses the real GPIO
-# button driver and the host-tested UI/coordinator logic, driven by a synthetic
-# BLE scenario plus the buttons you press. Human-readable output goes to UART0.
+# injected button edges reach the firmware, and its legacy TWI swapped for an
+# EasyDMA TWIM with an SSD1306 OLED model at 0x3C. The firmware reuses the real
+# GPIO button driver, the display task, and the host-tested UI/coordinator
+# logic, driven by a synthetic BLE scenario plus the buttons you press.
+# Human-readable output goes to UART0.
 #
 # Build the ELF first:
 #   mask sim-build   (cargo build --features sim --target thumbv7em-none-eabihf)
@@ -21,6 +23,10 @@
 #   gpio0 OnGPIO 24 false     # press SELECT
 #   gpio0 OnGPIO 24 true      # release SELECT
 #
+# Read the OLED: its text, or the whole panel as '#'/'.' pixels:
+#   sysbus.twi0.oled Text
+#   sysbus.twi0.oled Dump
+#
 # Headless / CI run (asserts the output, no GUI):
 #   renode-test renode/bt2usb-sim.robot
 # ─────────────────────────────────────────────────────────────────────────────
@@ -30,8 +36,11 @@ $bin ?= @target/thumbv7em-none-eabihf/debug/bt2usb-sim
 
 using sysbus
 
-# GPIO/GPIOTE models with pin SENSE/LATCH + GPIOTE PORT event (compiled here).
+# GPIO/GPIOTE models with pin SENSE/LATCH + GPIOTE PORT event, and the TWIM
+# and SSD1306 models (compiled here).
 include @renode/nrf52840_sense_gpio.cs
+include @renode/nrf52840_twim.cs
+include @renode/ssd1306.cs
 
 mach create "bt2usb-sim"
 machine LoadPlatformDescription @platforms/cpus/nrf52840.repl
@@ -40,6 +49,11 @@ sysbus Unregister sysbus.gpiote
 sysbus Unregister sysbus.gpio0
 sysbus Unregister sysbus.gpio1
 machine LoadPlatformDescription @renode/nrf52840-sense-gpio.repl
+# Swap the stock twi0 (legacy TWI, no EasyDMA) for the TWIM with the OLED, and
+# give the OLED the firmware's font so it can read its text back.
+sysbus Unregister sysbus.twi0
+machine LoadPlatformDescription @renode/nrf52840-twim-oled.repl
+sysbus.twi0.oled LoadFont @renode/oled-font-6x10.txt
 
 # Show UART0 output (the firmware's log) in a terminal window.
 showAnalyzer sysbus.uart0
@@ -56,6 +70,7 @@ echo "analyzer window once started. The BLE scenario runs on its own; press the"
 echo "buttons (active-low; SELECT=24, DOWN=12, UP=11) to drive the UI, e.g.:"
 echo "    gpio0 OnGPIO 24 false     # press SELECT"
 echo "    gpio0 OnGPIO 24 true      # release SELECT"
+echo "Read the OLED with:  sysbus.twi0.oled Text   (or Dump for the pixels)"
 echo ""
 
 start

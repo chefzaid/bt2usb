@@ -4,6 +4,7 @@
 
 use super::*;
 use crate::ble::coordinator::DeviceInfo;
+use crate::ui::layout::SCREEN_COLUMNS;
 
 type Addr = u8;
 
@@ -296,8 +297,6 @@ fn tick_abandons_an_unanswered_request_at_its_deadline() {
 
 #[test]
 fn every_error_has_a_distinct_message_that_fits_the_screen() {
-    // The display draws 6-pixel-wide characters on a 128-pixel line.
-    const SCREEN_COLUMNS: usize = 128 / 6;
     let tags = [
         ErrorTag::ScanFailed,
         ErrorTag::ConnectFailed,

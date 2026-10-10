@@ -162,7 +162,8 @@ a child module of it that shares its helpers, the codec and load tests.
 A Python helper splits the same way: on 2026-10-10 the documentation checker
 (775 lines once formatted) became a thin `scripts/check_docs.py` driver and one
 module per check in `scripts/docs_checks/`. Markdown guides, `maskfile.md`, the
-shell scripts, and the vendored crate are not checked. On 2026-10-10, after
+shell scripts, the Renode C# models (up to 700 lines each), and the vendored
+crate are not checked. On 2026-10-10, after
 the device-store move cut `storage.rs` from 488 lines to 350, the largest Rust
 files were `hid_descriptor_tests.rs` (486) and `coordinator_tests.rs` (465),
 and the largest Python file was `scripts/check_docs_test.py` (436).
@@ -202,7 +203,7 @@ each configuration lists different binaries.
 | Location | Allowance | Reason |
 | --- | --- | --- |
 | [selftest.rs](../src/selftest.rs) (crate level) | `dead_code, unused_imports` | The self-test reuses firmware modules without using all of their items or re-exports (comment in the file) |
-| [sim.rs](../src/sim.rs) (crate level) | `dead_code` | The simulation reuses shared modules, such as the display driver, that it does not fully exercise (comment in the file) |
+| [sim.rs](../src/sim.rs) (crate level) | `dead_code` | The simulation reuses shared modules, such as the self-test's display helpers, that it does not fully exercise (comment in the file) |
 | [display.rs](../src/ui/display.rs) `init` | `dead_code` | Used only by the self-test (`ui::display::init` in `selftest.rs`) |
 | [display.rs](../src/ui/display.rs) `draw_home` | `dead_code` | Used only by the self-test; no comment at the attribute |
 | [hid_device.rs](../src/usb/hid_device.rs) `is_configured` | `dead_code` | Used only by the self-test (comment at the attribute) |
@@ -271,7 +272,7 @@ modules carry `///` comments that state units, bounds, and error meanings.
 | Python: `scripts/release.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 12 release-helper, 27 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
 | `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash recipes in `maskfile.md` | ShellCheck 0.11.0 ([Python And Shell Checks](#python-and-shell-checks)) | Enforced |
 | Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, and commands ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
-| Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job; not linted | Partial |
+| Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job, which compiles the C# models when it loads them; not linted | Partial |
 
 ### Markdown Checks
 
@@ -447,7 +448,7 @@ file's `#[cfg(test)] mod`:
 
 | Site | Count | Why it cannot fire at runtime, or when it would |
 | --- | --- | --- |
-| `unwrap!(…)` on task spawns | 10 in `main.rs`, 2 in `selftest.rs`, 3 in `sim.rs` | Each spawn happens once at boot and fits the task's pool: one instance per task in `main.rs` and `selftest.rs`, and `pool_size = 3` for the simulation's `button_task`. A spawn beyond the pool would panic |
+| `unwrap!(…)` on task spawns | 9 in `main.rs`, 2 in `selftest.rs`, 4 in `sim.rs` | Each spawn happens once at boot and fits the task's pool: one instance per task in `main.rs` and `selftest.rs` (the `ble_slot_task` pool holds one per link), `pool_size = 3` for the simulation's `button_task`, and one `ui::display::task`, spawned by either the bridge or the simulation. A spawn beyond the pool would panic |
 | `.expect("two u32 hex words fit in 16 characters")` | 1 in `usb/hid_device.rs` | Formatting two `{:08X}` words always yields 16 characters |
 | `unreachable!()` after `join4` | 1 in `usb/hid_device.rs` | The four joined futures never complete |
 | `unreachable!()` for `SlotEvent::Quiesced` | 1 in `ble/multi_conn.rs` | The loop handles `Quiesced` and continues before this match |

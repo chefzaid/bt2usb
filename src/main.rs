@@ -30,7 +30,7 @@
 //! | `ble_slot{0,1}_task`| Per-slot connect/secure + HID notification loop      |
 //! | `usb_device_task`   | USB enumeration and endpoint servicing               |
 //! | `hid_writer_task`   | Dispatches aggregate state to independent USB workers |
-//! | `display_task`      | OLED rendering, initialization and fault recovery    |
+//! | `ui::display::task` | OLED rendering, initialization and fault recovery    |
 //! | `button_*_task`     | Per-button debounced GPIO watcher (×3)               |
 //!
 //! The UI state machine runs in `main`, reacting to button and BLE events and
@@ -169,11 +169,6 @@ async fn button_select_task(pin: Peri<'static, AnyPin>) -> ! {
     ui::buttons::button_task(pin, ButtonEvent::Select, &BUTTON_CHANNEL.sender()).await
 }
 
-#[embassy_executor::task]
-async fn display_task(twi: twim::Twim<'static, peripherals::TWISPI0>) -> ! {
-    ui::display::run(ui::display::StopSafeI2c::new(twi)).await
-}
-
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("bt2usb firmware starting");
@@ -212,22 +207,8 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(ble_task(sd)));
     info!("BLE task started");
 
-    let mut twi_config = twim::Config::default();
-    // Most SSD1306 modules carry their own I2C pull-ups, but a bare panel or
-    // a module without them would leave the bus floating. The internal
-    // pull-ups (~13 kΩ) are harmless in parallel with external ones.
-    twi_config.sda_pullup = true;
-    twi_config.scl_pullup = true;
-    // embassy-nrf 0.7's Twim requires a RAM scratch buffer for writes whose
-    // source isn't in RAM (e.g. flash-resident SSD1306 command sequences); the
-    // framebuffer flush is already RAM-backed. This lives for the program.
-    static TWI_TX_BUF: static_cell::StaticCell<[u8; 64]> = static_cell::StaticCell::new();
-    let twi_tx_buf = TWI_TX_BUF.init([0u8; 64]);
-    let twi = twim::Twim::new(
-        p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config, twi_tx_buf,
-    );
-
-    spawner.spawn(unwrap!(display_task(twi)));
+    let twi = ui::display::new_twim(p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27);
+    spawner.spawn(unwrap!(ui::display::task(twi)));
     spawner.spawn(unwrap!(button_up_task(p.P0_11.into())));
     spawner.spawn(unwrap!(button_down_task(p.P0_12.into())));
     spawner.spawn(unwrap!(button_select_task(p.P0_24.into())));

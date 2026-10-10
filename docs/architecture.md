@@ -46,16 +46,17 @@ The repository builds three firmware binaries from one source tree:
 The host library (`src/lib.rs`) exports the hardware-free modules those binaries
 share ([ADR 0003](adr/0003-pure-core-and-task-shell.md)). The three binaries use
 the same modules, not copies: the self-test reuses the SoftDevice setup, USB
-device, and display driver, and the simulation reuses the button driver, UI
-reducer, and BLE coordinator reducers with custom Renode GPIO models
-([ADR 0014](adr/0014-renode-gpio-models.md)).
+device, and display driver, and the simulation reuses the button driver, the
+display task, the UI controller, and the BLE coordinator and storage modules,
+with custom Renode GPIO models ([ADR 0014](adr/0014-renode-gpio-models.md))
+and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 
 ## Source Map
 
 | Area | Layer | Responsibility |
 | --- | --- | --- |
 | [main.rs](../src/main.rs) | Entry point | Hardware setup, task spawning, channels, and the UI loop that runs the UI controller |
-| [sim.rs](../src/sim.rs) | Entry point | SoftDevice-free Renode entry point: UART console, button tasks, and the UI loop over the UI controller |
+| [sim.rs](../src/sim.rs) | Entry point | SoftDevice-free Renode entry point: UART console, button tasks, the display task, and the UI loop over the UI controller |
 | [sim_ble.rs](../src/sim_ble.rs) | Simulation shell | Renode stand-in for the BLE coordinator task: the real coordinator reducers, scan merging, management barrier and commit, and device list, with workers, radio, and flash that answer at once |
 | [selftest.rs](../src/selftest.rs) | Entry point | Staged board bring-up image |
 | [lib.rs](../src/lib.rs) | Host crate | Host-test entry point for hardware-free logic |
@@ -95,7 +96,8 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [ui/ui_logic.rs](../src/ui/ui_logic.rs) | Pure core | Screens, button reducer, view model |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | Pure core | Device-list window and scan spinner |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | Pure core | OLED retry backoff policy |
-| [ui/display.rs](../src/ui/display.rs) | Board shell | OLED task, rendering, STOP-safe I2C wrapper |
+| [ui/layout.rs](../src/ui/layout.rs) | Pure core | Each screen's text lines and their baselines on the 128×64 panel |
+| [ui/display.rs](../src/ui/display.rs) | Board shell | OLED task, TWIM0 setup, panel initialization, drawing the layout's lines, STOP-safe I2C wrapper |
 | [ui/buttons.rs](../src/ui/buttons.rs) | Board shell | Debounced GPIO button task |
 
 ## Module Layers And Dependency Rules
@@ -107,8 +109,8 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, coordinator, management, and storage modules on the simulated target |
-| Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
+| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
@@ -278,8 +280,9 @@ appear in the code and reach the host through RTT; see
    then `usb_device_task` and `hid_writer_task` (`"USB HID device started"`),
    then both connection workers and `ble_task` (`"BLE task started"`).
 7. Creates TWIM0 on P0.26/P0.27 with internal pull-ups and a 64-byte RAM
-   transmit buffer, spawns `display_task` and the three button tasks, and logs
-   `"UI and isolated OLED tasks started"`.
+   transmit buffer (`ui::display::new_twim`, which the self-test and the
+   simulation also use), spawns the display task (`ui::display::task`) and the
+   three button tasks, and logs `"UI and isolated OLED tasks started"`.
 8. Creates the `UiController` (which holds the `UiState`, the management
    request tracker, and the saved-device addresses), the `PowerManager`, and a
    1-second housekeeping ticker, publishes the first frame, and enters the UI
@@ -712,7 +715,7 @@ sequenceDiagram
     participant D as HID dispatcher
     participant E as Endpoint workers
     participant M as UI loop
-    participant O as display_task
+    participant O as display task
     H->>U: bus suspend
     U->>U: suspended true, clear REMOTE_WAKE, set USB_SUSPENDED
     U->>E: replay, endpoints unavailable
@@ -854,7 +857,7 @@ and power loss during deletion are open
 flowchart LR
     E[Button, BLE event, suspend change or 1 s tick] --> S[UI loop updates UiState and PowerManager]
     S -->|publish overwrites| F[FRAMES latest frame]
-    F --> D[display_task]
+    F --> D[display task]
     D --> Q{New frame and backoff elapsed}
     Q -->|No| W[Wait for next frame or backoff timer]
     Q -->|Yes| R[Init if needed, draw, flush, set panel on or off]
@@ -871,11 +874,19 @@ flowchart LR
    `ui::display::publish(&ui.state, power.display_on())`. That overwrites a
    `Signal` with a copy of the view model; `main` never waits for I2C
    ([ADR 0009](adr/0009-isolated-display-task.md)).
-2. `display_task` owns TWIM0 and the panel. It renders only when the newest
+2. The display task (`ui::display::task`) owns TWIM0 and the panel. It renders only when the newest
    frame differs from the last one applied and the retry backoff allows it.
 3. `render` initializes the panel on first use and after any failure, draws
    and flushes the 128×64 framebuffer when the panel should be on, and then
-   switches the panel on or off.
+   switches the panel on or off. Initialization (`initialize`) first clears
+   the panel's RAM while power-up still holds the panel off, then runs the
+   `ssd1306` crate's `init`, which ends by turning the panel on, and turns it
+   off again until the frame is in, so the panel never shows the random RAM
+   content it powers up with. A render that initializes sends two full
+   frames, about 0.22 s at 100 kHz, well inside the 500 ms deadline. The
+   drawing is the lines
+   `ui::layout::lines` gives the screen, in `FONT_6X10`, so the layout is
+   host-tested and the Renode panel model reads the same lines back.
 4. `finish_or_stop` gives each render 500 ms. On overrun it logs `"OLED I2C
    stalled; requesting STOP, display task degraded until DMA completes"`,
    triggers TWIM RESUME and STOP, and keeps awaiting the same future; cancelling
@@ -896,7 +907,7 @@ flowchart LR
    traffic counts as activity: the dispatcher sets a flag that the next tick
    folds in.
 
-If the bus never completes a transfer, `display_task` stays blocked. The UI
+If the bus never completes a transfer, the display task stays blocked. The UI
 loop keeps publishing, and BLE, USB, and buttons keep working.
 
 ## HID Path And Limits
@@ -1002,13 +1013,14 @@ The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
 | `ble_slot_task` (one per link, slots 0 and 1) | Connection workers: connect, secure, discover, then the notification loop, coalescer drain, and LED writer | Slot command channel, SoftDevice, `HID_REPORT_CHANNEL` space |
 | `usb_device_task` | `run_usb_device`: enumeration, control requests, suspend, resume, remote wakeup | USB bus events, `REMOTE_WAKE` |
 | `hid_writer_task` | `join4` of the dispatcher and the keyboard, mouse, and consumer endpoint workers | `HID_REPORT_CHANNEL`, endpoint signals, host polling |
-| `display_task` | Sole owner of TWIM0 and the OLED | `FRAMES`, I2C DMA, retry timer |
+| `ui::display::task` | Sole owner of TWIM0 and the OLED | `FRAMES`, I2C DMA, retry timer |
 | `button_up_task`, `button_down_task`, `button_select_task` | Debounce one pin each and send a `ButtonEvent` | GPIO level, `BUTTON_CHANNEL` space |
 
 `bt2usb-selftest` spawns only `softdevice_task` and `usb_device_task` and runs
 its stages in `main`. `bt2usb-sim` spawns three instances of one
-`button_task` declared with `pool_size = 3` and runs its UI loop and the
-simulated coordinator (`sim_ble::SimBle`) in `main`.
+`button_task` declared with `pool_size = 3` and the same `ui::display::task`
+as the bridge, and runs its UI loop and the simulated coordinator
+(`sim_ble::SimBle`) in `main`.
 
 ### Interrupt Priorities
 
@@ -1064,7 +1076,7 @@ The other shared primitives:
 | `KEYBOARD_LEDS` | `Watch<KeyboardLeds, 2>` | USB control handler → connection workers | Latest value, one receiver per slot; each link reads the latest value when it starts |
 | `RECONNECTS` | Blocking mutex over `ReconnectTable` | Both workers ↔ reconnect scan callback | One registered target, at most one 2 s sighting, and a holdoff after a failed attempt per slot |
 | `RECONNECT_WAKE` | `Signal<()>` per slot | Reconnect scan callback → the other slot's worker | Wake-up between attempts; always equal to `ReconnectTable::wake_pending` |
-| `FRAMES` | `Signal<Frame>` | UI loop → `display_task` | Latest frame wins |
+| `FRAMES` | `Signal<Frame>` | UI loop → the display task | Latest frame wins |
 | Endpoint `pending` and `lifecycle` | `Signal<()>` per endpoint | Dispatcher and USB handler → endpoint worker | Wake-ups; `lifecycle` is cleared when each transfer starts |
 | Notification `wake` | `Signal<()>` per connection | GATT callback → drain future | Wake-up |
 | `GAP_PROCEDURE` | Async mutex | Scanner and both workers | One GAP scan or connect at a time |
@@ -1098,7 +1110,7 @@ Ownership of the data behind them is listed in the
   exchange.
 - **USB.** The dispatcher never waits for an endpoint; each endpoint worker
   waits for host polling under its own 100 ms deadline.
-- **Display.** `display_task` can wait indefinitely for a DMA that never
+- **Display.** The display task can wait indefinitely for a DMA that never
   completes; the isolation exists so that this blocks nothing else.
 - **Buttons.** A button task blocks when `BUTTON_CHANNEL` is full and re-arms
   only after a stable release.
@@ -1115,7 +1127,7 @@ returns `StoreError::{Unreadable, Serialization, Flash, NotFound}`, and the
 coordinator collapses every one of them into `StorageFailed`; a load failure
 produces no `StoreError` but disables writes and raises `StorageFailed` once at
 boot. A silent reconnect attempt that fails with `ConnectFailed` is retried
-without telling the UI. Display faults never become tags: `display_task` logs
+without telling the UI. Display faults never become tags: the display task logs
 them and retries with backoff while the rest of the bridge keeps running.
 
 The tag, every cause that raises it, and its OLED text are defined in one
@@ -1308,6 +1320,7 @@ change.
 - [ADR 0015: Reconnect Saved Devices At Power-Up With One Shared Scan](adr/0015-shared-reconnect-scan.md)
 - [ADR 0016: Bound A Peripheral's Connection Parameter Requests In The Application](adr/0016-bounded-peer-connection-parameters.md)
 - [ADR 0023: Hold Host Line Coverage At A Floor As A Regression Guard](adr/0023-host-coverage-floor.md)
+- [ADR 0024: Model The TWIM And SSD1306 In Renode And Read The Panel's Text Back](adr/0024-renode-oled-models.md)
 
 ## Proposed ADRs
 

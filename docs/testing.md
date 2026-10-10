@@ -49,6 +49,7 @@ PowerShell, use the direct command.
 | Host tests with output | `mask test-verbose` | `cargo test --locked --lib --tests -- --nocapture` |
 | One module or test name | — | `cargo test --locked --lib coordinator` |
 | Integration tests only | — | `cargo test --locked --test integration` |
+| Renode glyph table check, or rewrite after a font change | — | `cargo test --locked --test oled_font`, or with `UPDATE_OLED_FONT=1` |
 | Coverage summary | `mask coverage` | `cargo llvm-cov --locked --lib --tests` |
 | Coverage HTML / JSON | `mask coverage --html` / `--json` | `cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html` |
 | Coverage against the CI floor | — | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` (the floor is `COVERAGE_MIN_LINES` in [ci.yml](../.github/workflows/ci.yml)) |
@@ -146,17 +147,19 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
-2026-10-10, in the commit that moved the UI loop's decisions into
-`ui::controller`. The tree holds 344 `#[test]` functions: 341 in files
-compiled into the host library and 3 in
-`tests/integration.rs`, and every one of them runs under
+2026-10-10, in the commit that moved the screen layout into `ui::layout` and
+ran the OLED task in Renode. The tree holds 359 `#[test]` functions: 353 in
+files compiled into the host library, 3 in `tests/integration.rs`, and 3 in
+`tests/oled_font.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
 tests, before four advertisement tests moved into the host library and
 fourteen UI tests (the management deadline, the saved-device list, scans, and
 `UiState` link updates), four keyboard-report tests, one connection-parameter test, eight reconnect wake and identity tests, six crowded-scan tests, 27
-device-store tests, and 17 controller, message, and management-target tests were added; the 341 passed with `cargo test` on 2026-10-10. There are no `#[ignore]` or
+device-store tests, 17 controller, message, and management-target tests, and
+12 screen-layout tests were added; the 353 passed with `cargo test` on
+2026-10-10, as did the 6 integration tests. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -209,6 +212,7 @@ protect.
 | [ui/controller_tests.rs](../src/ui/controller_tests.rs), for [controller.rs](../src/ui/controller.rs) | 16 | Request tracking: one request runs at a time, stale replies are rejected, IDs stay unique across wraparound, an unanswered request expires at its deadline and its late reply is ignored, an answered request never expires. The commands presses send: scan results are listed and Connect sends the highlighted index, devices found outside a scan are not listed, buttons wait for the list reply while a stale reply is ignored, a list reply does not hide an error, Forget names the listed address and reports the stored result, Factory reset returns home without links, a failed change shows the coordinator's error, a Forget of an entry missing from the snapshot sends nothing, and a command that could not be queued reports Busy and frees its request. `tick` animates only a visible scan and abandons an unanswered request at its deadline. Every error tag has a distinct message that fits a 21-character display line. |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | 2 | OLED retry backoff of 1, 2, 4, 8, 16, then 30 s (capped) without blocking new frames, reset on recovery, and saturating deadlines. |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | 3 | The device-list window keeps the selection visible, handles an empty list and a stale selection, and the scan spinner recovers from an out-of-range state. |
+| [ui/layout_tests.rs](../src/ui/layout_tests.rs), for [layout.rs](../src/ui/layout.rs) | 12 | Every screen's lines and baselines: Home's title and hints, the scan's dots cycling, the one-line waiting screens, a device list that marks the selection with `> ` and scrolls to keep it among four rows, an empty list, the saved list ending with Factory reset and its footer, the Forget confirmation naming the device (or "Device unavailable") with Cancel as the default, the reset confirmation, and the name or message under each status title. Every fixed label fits the 21 columns of the panel, lines stay on the panel and never overlap, and a name wider than the panel is kept whole for the panel to cut. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
 
 ### Integration Tests
@@ -216,6 +220,7 @@ protect.
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
 | [tests/integration.rs](../tests/integration.rs) | 3 | Keyboard (report ID 1), mouse (ID 2), and consumer (ID 3) notifications classified and serialized through the crate's public `bt2usb::hid` API, as an external crate sees it. |
+| [tests/oled_font.rs](../tests/oled_font.rs) | 3 | The glyph table the Renode panel model reads text with, [oled-font-6x10.txt](../renode/oled-font-6x10.txt), equals `FONT_6X10` as embedded-graphics draws it (rewrite it with `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font`); every printable ASCII glyph is distinct, so text reads back unambiguously; and the font's 6×10 cell, zero spacing, and baseline 7 are what `ui::layout` and the text reader assume, and `display.rs` draws in no other font. It uses `embedded-graphics` as a dev-dependency. |
 
 ### Tests That Do Not Run
 
@@ -243,19 +248,22 @@ exercises.
 | `usb/hid_device.rs`, `usb/host_requests.rs` | Embedded build and Clippy; delivery, aggregation, wake policy, and host LED decoding and forwarding are host-tested; self-test USB stages; hardware acceptance |
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
 | `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` mirrors the order in which `ble/multi_conn.rs` calls the pure modules, but nothing checks that the two stay in step |
-| `ui/display.rs` | Embedded build and Clippy; recovery policy is host-tested; self-test OLED stages |
+| `ui/display.rs` | Embedded and simulation builds and Clippy; the screen layout (`ui::layout`) and the recovery policy are host-tested; the Renode scenario runs the display task on modelled TWIM and SSD1306 peripherals and reads every screen it draws back ([OLED checks](#oled-checks)); self-test OLED stages |
 | `stack.rs`, `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice and stack stages |
 | `power.rs` | Embedded build and Clippy; its policy (`power_logic.rs`) is host-tested; hardware acceptance (sleep and wake) |
 
 ## Renode Simulation
 
 The simulation runs the firmware's UI controller (`ui::controller` over
-`ui::ui_logic`) and the pure BLE and storage modules (`ble::coordinator`,
-`ble::management`, `ble::messages`, `ble::adv_parser`, and
-`storage::{devices, codec, framing, record}`) on an emulated nRF52840. The
+`ui::ui_logic`), its display task (`ui::display` with the `ui::layout`
+screens), its button task, and the pure BLE and storage modules
+(`ble::coordinator`, `ble::management`, `ble::messages`, `ble::adv_parser`,
+and `storage::{devices, codec, framing, record}`) on an emulated nRF52840. The
 radio, the connection workers, and flash are stand-ins that answer at once;
 BLE events come from a scripted scenario and from the commands the buttons
-send. UART0 carries logs, so no probe or defmt decoder is required.
+send. UART0 carries logs, so no probe or defmt decoder is required, and the
+SSD1306 model reads the panel's text back, so the test can check what the
+user would see.
 
 Build from the repository root:
 
@@ -294,6 +302,13 @@ Leave the press active longer than the configured debounce interval; UP is pin
 REPL implement the SENSE/LATCH/GPIOTE PORT-event path used by Embassy. GPIO edges
 therefore go through the actual button task and `BUTTON_CHANNEL` to the UI.
 
+Read the OLED from the monitor, as text or as the whole panel in `#` and `.`:
+
+```text
+sysbus.twi0.oled Text
+sysbus.twi0.oled Dump
+```
+
 For repeatable headless execution:
 
 ```sh
@@ -303,16 +318,17 @@ renode-test renode/bt2usb-sim.robot
 ```
 
 The Robot test asserts boot, the scripted scenario, and the UI flows the GPIO
-presses drive, including a link loss and saved-device management. Run it when
-changing the simulation, the GPIO path, or any pure module the simulation
-runs. A simulated scan hears three fixed advertisements at once; this is not a
+presses drive, including a link loss and saved-device management, and reads
+the OLED after each screen change it checks. Run it when changing the
+simulation, the GPIO path, the display task or a screen layout, the Renode
+models, or any pure module the simulation runs. A simulated scan hears three fixed advertisements at once; this is not a
 test of scan timing or advertisement interoperability.
 
 ### What The Simulation Build Contains
 
 `--features sim` builds [sim.rs](../src/sim.rs) and
-[sim_ble.rs](../src/sim_ble.rs) without SoftDevice, USB, the flash shell, or
-the OLED task, links them with [memory_sim.x](../memory_sim.x) from address 0
+[sim_ble.rs](../src/sim_ble.rs) without SoftDevice, USB, or the flash shell,
+links them with [memory_sim.x](../memory_sim.x) from address 0
 (no SoftDevice reservation), and supplies the single-core `cortex-m` critical
 section that the SoftDevice provides in firmware builds.
 [build.rs](../build.rs) selects the memory map by feature and refuses to build
@@ -322,7 +338,8 @@ section that the SoftDevice provides in firmware builds.
 | Part | Firmware code that runs | Stand-in |
 | --- | --- | --- |
 | Buttons | `ui::buttons::button_task` on P0.11, P0.12, P0.24, through the custom GPIO/GPIOTE models | Edges injected with `gpio0 OnGPIO` |
-| UI loop | `UiController::{button, event, tick}`, `UiState`, `on_button` | `sim.rs` applies each event as `main.rs` does, but without the power manager, the display, or the command and event channels: commands run to completion before the next button |
+| UI loop | `UiController::{button, event, tick}`, `UiState`, `on_button`, and `display::publish` after every iteration | `sim.rs` applies each event as `main.rs` does, but without the power manager (the panel is always on) or the command and event channels: commands run to completion before the next button |
+| Display | `ui::display::task` on TWIM0 (SDA P0.26, SCL P0.27) from `display::new_twim`: `run`, `render`, `initialize`, `StopSafeI2c`, `finish_or_stop`, the `ssd1306` driver, and the `ui::layout` lines in `FONT_6X10` | The TWIM model in [nrf52840_twim.cs](../renode/nrf52840_twim.cs) and the SSD1306 model in [ssd1306.cs](../renode/ssd1306.cs) at `0x3C`; see [OLED checks](#oled-checks) |
 | Coordinator | `plan_start_scan`, `plan_connect`, `plan_disconnect`, `on_slot_connected`, `on_slot_disconnected`, `on_slot_link_lost`, `link_state`, and the `ConnManager` | `SimBle` in `sim_ble.rs` executes their `Action`s in the order `multi_conn::execute_action` does; a connection worker connects or disconnects as soon as it is told |
 | Scan | `merge_advertisement` and `adv_parser` | Three fixed advertisements: `Keyboard` (address `0xA1`, RSSI −42, HID UUID), `Phone` (`0xC3`, −30, no HID UUID), `Mouse` (`0xB2`, −55, HID UUID) |
 | Forget and Factory reset | `forget_targets`, `Quiescence`, `commit`, then the link status and `ManagementResult`, as `multi_conn::manage_devices` orders them | Targeted workers acknowledge the barrier at once |
@@ -339,7 +356,76 @@ unregisters its `gpiote`, `gpio0`, and `gpio1`, and loads
 [nrf52840-sense-gpio.repl](../renode/nrf52840-sense-gpio.repl), which places the
 custom models at the same addresses and IRQ. The stock models do not implement
 LATCH or DETECTMODE, so edge waits never complete with them. See
-[ADR 0014](adr/0014-renode-gpio-models.md).
+[ADR 0014](adr/0014-renode-gpio-models.md). It then unregisters `twi0`, whose
+stock model is the legacy TWI without EasyDMA, loads
+[nrf52840-twim-oled.repl](../renode/nrf52840-twim-oled.repl), which puts the
+TWIM model at `0x40003000` on IRQ 3 with the SSD1306 model at `0x3C`, and
+loads the glyph table into the panel model. See
+[ADR 0024](adr/0024-renode-oled-models.md).
+
+### OLED Checks
+
+Renode 1.16.1 has no EasyDMA TWIM and no SSD1306, so two models written for
+this project stand in for them:
+
+- **TWIM** ([nrf52840_twim.cs](../renode/nrf52840_twim.cs)) moves whole
+  buffers with EasyDMA from the pointer and count latched at the start task,
+  takes the time the bytes take on the wire at the programmed frequency (the
+  firmware's 100 kHz, about 0.1 s for a full frame), raises TXSTARTED,
+  LASTTX, STOPPED, ERROR, and SUSPENDED with the shortcuts and interrupt
+  enables the Product Specification describes, and NACKs an address no
+  target answers. STOP takes effect after the byte on the wire and is
+  ignored while suspended, STOPPED follows the STOP condition, a change of
+  direction sends a repeated START with the address, and a buffer outside
+  Data RAM moves no bytes, all as on the chip.
+- **SSD1306** ([ssd1306.cs](../renode/ssd1306.cs)) decodes the I2C control
+  bytes and the commands the `ssd1306` crate sends, keeps the 1 KiB display
+  RAM with its addressing modes, applies segment remap to the data written
+  after it, and shows a picture only while the display and the charge pump
+  are on. A power-on reset leaves the RAM holding a fixed noise pattern, and
+  `NoisyBytes` counts the bytes the panel receives while it is lit and still
+  shows some of it.
+
+`Text` reads the panel back with the firmware's font: it finds each row where
+21 six-pixel cells all match glyphs from
+[oled-font-6x10.txt](../renode/oled-font-6x10.txt), which
+[tests/oled_font.rs](../tests/oled_font.rs) keeps equal to `FONT_6X10`, and
+returns those lines top to bottom, keeping leading spaces. Lit pixels that no
+line explains come back as `(unreadable pixels in rows A-B)`, a dark panel as
+`(display off)` or `(display dark: charge pump off)`, and a multiplex ratio,
+offset, start line, COM pins configuration, or scrolling other than the
+128×64 defaults as `(picture not modelled: ...)`, so a check cannot pass
+while something else is on the screen. The `Oled Should Show` keyword runs
+the emulation in 50 ms steps, up to 0.5 s by default, until the text equals
+the expected lines exactly.
+
+| Robot step | Panel text checked | What it proves |
+| --- | --- | --- |
+| After boot | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices`; then `NoisyBytes` is 0 | The display task initializes the panel over the modelled TWIM and draws the published Home view, and the panel was never lit while its RAM held power-on noise |
+| After each link change | `Connected` with `Keyboard`, `2 devices`, or `Mouse`, and both hints | Coordinator events reach the screen through the controller and `publish` |
+| After the scan and a DOWN | `Select device`, `> Keyboard`, `  Mouse`, then the mark on `Mouse` | The device list and its selection mark |
+| Saved devices | `Saved devices`, `> Mouse`, `  Keyboard`, `  Factory reset`, `UP at first: back` | The saved list, newest first, ends with Factory reset |
+| Forget and reset confirmations | `Forget device?`, `Keyboard`, `> Cancel`, `  Forget` (then the mark on `Forget`); `Reset all pairings?`, `Disconnect all`, `  Cancel`, `> Reset` | Confirmations name their subject and open on Cancel |
+| Notices | `Complete` with `Device forgotten` or `Pairings reset`, and `SELECT: back` | Management results reach the screen |
+| Unplug, SELECT, plug back in | `(display off)` right after the panel powers up again, then Home within 2 s, and `NoisyBytes` 0 again | A frame that fails on an address NACK leaves the UI loop running; the 1 s retry initializes the panel again and draws the latest view without showing noise |
+
+`Unplug The OLED` makes the TWIM NACK address `0x3C`
+(`twi0 SetDevicePresent 0x3C false`); `Plug The OLED Back In` resets the panel
+model, as a power cycle would, and makes it answer again.
+
+A second test case, `TWIM And SSD1306 Models Follow Their Specifications`,
+checks the models at register level on a halted CPU, for behavior the
+firmware's display traffic does not reach:
+
+| Check | Expected | Specification |
+| --- | --- | --- |
+| Empty write to an absent target, STARTTX then STOP at once | STOPPED only after the STOP condition, then ERROR, `ERRORSRC.ANACK`, and `TXD.AMOUNT` 0 | STOP takes effect after the byte on the wire, so the address byte is still NACKed |
+| STOP while suspended by `LASTTX_SUSPEND` | No STOPPED until RESUME, then STOPPED | The TWI master cannot be stopped while suspended |
+| SUSPEND of an empty buffer | SUSPENDED after the address byte | embassy-nrf suspends an empty write that another write follows |
+| STOP 500 µs into a 17-byte write at 100 kHz | `TXD.AMOUNT` 5, no LASTTX, STOPPED | The byte on the wire finishes; later bytes are not sent |
+| `TXD.MAXCNT` rewritten after STARTTX | `TXD.AMOUNT` 2 and LASTTX for the 2-byte transfer | `PTR` and `MAXCNT` are double-buffered |
+| Panel lit before its RAM is cleared, then a NOP | `NoisyBytes` 2, and the panel reads as unreadable pixels | The panel powers up with undefined RAM |
+| COM pins configuration `0x02`, then `0x12` | `(picture not modelled: COM pins 0x02)`, then the picture again | Only the 128×64 module's geometry is modelled |
 
 ## Renode Scenario Map
 
@@ -388,10 +474,13 @@ host tests cover both.
 
 ### Robot Test Case
 
-[bt2usb-sim.robot](../renode/bt2usb-sim.robot) has one test case,
-`Sim Runs The UI Controller, Coordinator, Management, And Store`. It loads the
-GPIO models, creates the machine, swaps the GPIO peripherals, loads the ELF,
-attaches a terminal tester to `sysbus.uart0` with `timeout=20`, and starts
+[bt2usb-sim.robot](../renode/bt2usb-sim.robot) compiles the GPIO, TWIM, and
+SSD1306 models once, in its suite setup, and has two test cases: the model
+checks in [OLED checks](#oled-checks), and the scenario,
+`Sim Runs The UI Controller, Display, Coordinator, Management, And Store`,
+described here. The scenario creates the machine, swaps the GPIO
+peripherals and `twi0`, loads the glyph table and the ELF, attaches a terminal
+tester to `sysbus.uart0` with `timeout=20`, and starts
 emulation. `Wait For Line On Uart` consumes output in order, so each expected
 line must follow the previous one; it matches a substring of a line. The
 `Press Button` keyword drives the pin low, waits for the expected line with
@@ -415,8 +504,12 @@ interrupted by a scenario step.
 | 11 | SELECT | `button Select -> screen Home (selected 0)` | Dismissing with no link returns home |
 | 12 | Timer (step 3, then step 0) | `disconnect all`, `active_count=0 occupied_count=0`, `connect device 0 (Keyboard)`, `holds 1 device(s); reload matches`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | Nothing is left to close, and the reset store accepts writes again |
 
-The test does not exercise the OLED task, a full command channel, a management
-timeout, a storage failure, bonds or IRK resolution, or anything about real
+Between these steps it reads the OLED as listed in
+[OLED checks](#oled-checks).
+
+The test does not exercise the power manager's panel blanking, a full command
+channel, a management timeout, a storage failure, bonds or IRK resolution, a
+bus held low (the TWIM model has no stuck-bus fault), or anything about real
 radio timing. Override inputs with `--variable ELF:/abs/path` or
 `--variable PLATFORM:@/abs/nrf52840.repl`; the interactive script takes
 `renode -e "$bin=@/abs/path" renode/bt2usb-sim.resc`.
@@ -669,10 +762,18 @@ Specific to the current workflow and test tree:
 - The coverage floor is one line-coverage total over the 22 host-library source
   modules; a single module can lose coverage while the total stays above 97%,
   and region and function coverage have no floor.
-- The Renode job runs one scripted scenario on Linux. It covers the UI
-  controller, link loss, and saved-device management, but not the OLED task,
-  and its connection workers, radio, and flash are stand-ins that answer at
-  once ([Renode Scenario Map](#renode-scenario-map)).
+- The Renode job runs one scripted scenario on Linux, plus register-level
+  checks of its TWIM and SSD1306 models. The scenario covers the UI
+  controller, link loss, saved-device management, and the OLED task with its
+  recovery after an address NACK, but its connection workers, radio, and
+  flash are stand-ins that answer at once
+  ([Renode Scenario Map](#renode-scenario-map)), and the TWIM and SSD1306
+  models are written from the Product Specification and the datasheet, not
+  checked against silicon. They have no stuck-bus or data-NACK fault, so the
+  STOP request after the 500 ms deadline and `wait_stopped`'s re-request are
+  still unexercised, and `StopSafeI2c`'s wait for STOPPED runs without being
+  proven: the 1 s retry backoff would hide its absence
+  ([OLED checks](#oled-checks)).
 - actionlint, Ruff, and ShellCheck run only in the Linux host job, and only
   that job installs them; no mask recipe installs them locally.
 - rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
@@ -681,7 +782,7 @@ Specific to the current workflow and test tree:
   released dependency lets the graph drop them; any other warning fails the
   job ([auditing](code-quality.md#auditing)).
 - Connection workers, the security handler, the GATT HID client, the storage
-  shell, the USB device, and the display driver have no host tests
+  shell, the USB device, and the display driver's I2C shell have no host tests
   ([details](#modules-without-host-tests)). For storage that leaves the
   conversion between SoftDevice and stored types, IRK resolution through the
   SoftDevice, and the flash retries, which only the embedded build and
@@ -780,6 +881,31 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-10, OLED In Renode
+
+This record covers the commit that moves each screen's text into
+`ui::layout`, shares the TWIM0 setup and the display task between the bridge,
+the self-test, and the simulation, clears the panel's RAM before the
+`ssd1306` driver turns it on, and runs the display task in Renode on the TWIM
+and SSD1306 models of [ADR 0024](adr/0024-renode-oled-models.md). The checks
+ran locally on Linux in a container, on the working tree just before that
+commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 353 unit tests, 3 integration tests, and 3 glyph-table tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.16% of lines, 98.53% of regions, 99.20% of functions; `ui/layout.rs` 100% of lines |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --all` | No changes left |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five ([commands](code-quality.md#documentation-comments)) |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A` on the release ELF: with `DEFMT_LOG=debug` (the `.cargo/config.toml` default), `.text` 112,848 bytes, `.rodata` 11,708, `.data` 1,640, `.bss` 23,236, `.uninit` 1,024; with `DEFMT_LOG=info`, the release setting, `.text` 111,868 bytes and the other sections unchanged |
+| Release helper policy/integrity tests | Python 3.13, Linux | Passed: 17 tests |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 44 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 18.49 s and the model checks in 1.36 s. With the RAM clear removed from `display::initialize`, the scenario failed at boot with 2 noisy bytes. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
+| Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change (`embedded-graphics`, already a dependency, is added as a dev-dependency) |
+| Hosted CI | GitHub Actions | Runs on the push; not recorded here |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the display change needs the OLED checks in the first-flash checklist, including a power-up without noise ([6. Device management and degraded display](first-flash.md#6-device-management-and-degraded-display)) |
+
 ## Validation Record — 2026-10-10, UI Controller And Renode Scenario
 
 This record covers the commit that moves the UI loop's decisions into
@@ -802,7 +928,7 @@ on a board.
 | Documentation checker | `python3 scripts/check_docs.py` | Passed: 43 Markdown files |
 | Headless Renode scenario | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: 1 test in 18.55 s. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
 | Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change |
-| Hosted CI | GitHub Actions | Runs on the push; not recorded here |
+| Hosted CI | GitHub Actions | Push run 38081477998 for `61e1963` passed every job, including the Renode simulation test with the stock platform |
 | Board/radio/USB acceptance | Physical hardware | Not performed; the UI loop change needs the pairing and device-management checks in the first-flash checklist ([4. Pairing and daily use](first-flash.md#4-pairing-and-daily-use), [6. Device management and degraded display](first-flash.md#6-device-management-and-degraded-display)) |
 
 ## Validation Record — 2026-10-10

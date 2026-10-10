@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 30 | 0 | 0 |
+| [FIXME](#fixme) | 31 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 11 | 5 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 12 | 4 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 9 | 7 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **115** | **73** | **21** |
+| **Total** | **117** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -323,6 +323,21 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   updating the guide for the controller; fixed: the row names the deadline,
   the No reply screen, and `controller.rs`
   ([retries](docs/architecture.md#retries-deadlines-and-backoff)).
+- [x] **P3** **The OLED showed power-on noise while its first frame was
+  drawn.** The `ssd1306` crate's `init` ends by turning the panel on while its
+  RAM still holds whatever it powered up with, and `render` then sent the
+  1,024-byte frame at the TWIM's default 100 kHz, so for about 0.1 s after
+  boot, and after a retry that followed a power loss of the panel, it showed
+  random pixels. Found by the Renode SSD1306 model, which counted 1,024 frame
+  bytes written to a lit panel at boot. Turning the panel off right after
+  `init` still left it lit with noise for the two bytes of that command, so
+  the fix clears the panel's RAM before `init`, while power-up still holds
+  the panel off, then turns it off after `init` until the first frame is in
+  (`display::initialize` in `src/ui/display.rs`); a render that initializes
+  now sends two full frames, about 0.22 s at 100 kHz, inside the 500 ms
+  deadline. The Robot test asserts that the panel receives no byte while lit
+  with noise, at boot and after it is plugged back in
+  ([OLED checks](docs/testing.md#oled-checks)).
 
 ## Needs Your Input
 
@@ -1079,23 +1094,35 @@ Host tests, simulation, and code-health work. Context:
   the log lines; host line coverage rose to 97.90%
   ([testing](docs/testing.md#pairing-storage); [data model](docs/data-model.md#pairing-store);
   `src/storage.rs`, `src/lib.rs`).
-- [ ] **P1** **Broaden the Renode scenarios.** Since 2026-10-10 the Robot
-  test covers link loss and the saved-device management screens. Step 2 of the
-  scenario now calls `coordinator::on_slot_link_lost`, and the test asserts
-  `slot 0 kept reserved for 0xa1` with `active_count=1 occupied_count=2`; until
-  then it called `on_slot_disconnected`, which frees the slot, under a "link
-  lost" label. The simulation runs the firmware's UI loop decisions, moved
-  out of `main.rs` into the host-tested `ui::controller` (16 tests), and a
-  simulated coordinator (`src/sim_ble.rs`) that calls the real coordinator
-  reducers, `merge_advertisement`, `management::{forget_targets, Quiescence,
-  commit}`, and `DeviceList` with its codec, reading every saved item back.
-  The test lists the saved devices, cancels and then confirms a Forget of the
-  device whose slot is reserved, and confirms a Factory reset; it passed
-  locally with Renode 1.16.1
-  ([scenario map](docs/testing.md#renode-scenario-map)). Still open: the
-  OLED task. Renode's nRF52840 model has no TWIM (EasyDMA I2C) or SSD1306, so
-  `display::run` cannot run there yet. Accept when `mask sim-test` and the CI
-  simulation job also assert the OLED task's output.
+- [x] **P1** **Broaden the Renode scenarios.** Since 2026-10-10 the Robot
+  test covers link loss, the saved-device management screens, and the OLED.
+  Step 2 of the scenario now calls `coordinator::on_slot_link_lost`, and the
+  test asserts `slot 0 kept reserved for 0xa1` with
+  `active_count=1 occupied_count=2`; until then it called
+  `on_slot_disconnected`, which frees the slot, under a "link lost" label. The
+  simulation runs the firmware's UI loop decisions, moved out of `main.rs`
+  into the host-tested `ui::controller` (16 tests), and a simulated
+  coordinator (`src/sim_ble.rs`) that calls the real coordinator reducers,
+  `merge_advertisement`, `management::{forget_targets, Quiescence, commit}`,
+  and `DeviceList` with its codec, reading every saved item back. The test
+  lists the saved devices, cancels and then confirms a Forget of the device
+  whose slot is reserved, and confirms a Factory reset
+  ([scenario map](docs/testing.md#renode-scenario-map)). The simulation also
+  spawns the firmware's display task (`ui::display::task`, shared with the
+  bridge through `display::new_twim`) on two C# models written for Renode,
+  which has neither: an EasyDMA TWIM (`renode/nrf52840_twim.cs`) and an
+  SSD1306 (`renode/ssd1306.cs`), attached by `renode/nrf52840-twim-oled.repl`.
+  The panel model reads its text back with the firmware's font
+  (`renode/oled-font-6x10.txt`, kept equal to `FONT_6X10` by
+  `tests/oled_font.rs`), and the screens' lines moved into the host-tested
+  `ui::layout` (12 tests in `src/ui/layout_tests.rs`). The test checks the
+  panel's text on every screen it reaches, an OLED that stops answering and
+  comes back, and that the panel is never lit while it shows power-on noise;
+  a second test case checks the models against the Product Specification and
+  the datasheet ([OLED checks](docs/testing.md#oled-checks),
+  [ADR 0024](docs/adr/0024-renode-oled-models.md)). Both passed locally with
+  Renode 1.16.1, and the CI simulation job runs the same Robot file
+  (`renode/bt2usb-sim.robot`).
 - [x] **P1** **Coverage and firmware documentation in CI.** Since 2026-10-10
   the Host coverage job runs `cargo llvm-cov` 0.9.1, uploads the summary,
   lcov, and HTML reports as `coverage-report-<attempt>`, and then fails below
@@ -1774,7 +1801,7 @@ The checklist, adapted to this firmware:
 | Static analysis | `cargo fmt`, and host, firmware, and simulation Clippy with `-D warnings`, rustdoc with warnings denied |
 | Security | Every peer-, host-, or flash-controlled value bounded and validated; no key material or keystrokes logged; no unreviewed dependency |
 | Robustness | No lost wakeups, unbounded waits, or panics reachable from outside input; bounded work in callbacks |
-| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 97.9% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
+| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 98.2% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
 | Documentation | The owning guide, ADRs, and this plan match the code; dependencies pinned and current |
 
 ## Updating This Checklist

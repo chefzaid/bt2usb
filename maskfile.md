@@ -289,7 +289,8 @@ echo "Sim ELF: target/thumbv7em-none-eabihf/debug/bt2usb-sim"
 
 Boots the SoftDevice-free firmware on a simulated nRF52840; UART0 output (the
 coordinator + UI logic running on the target) appears in the Renode terminal
-window. No probe or board needed. See docs/testing.md.
+window, and `sysbus.twi0.oled Text` in the monitor prints what the simulated
+OLED shows. No probe or board needed. See docs/testing.md.
 
 ```bash
 ./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf
@@ -304,11 +305,12 @@ fi
 
 ## sim-test
 
-> Build + run the headless Renode robot test (asserts the sim's UART output)
+> Build + run the headless Renode robot test (asserts the sim's UART output and OLED text)
 
 Boots the sim in Renode (no GUI), presses the GPIO buttons, and asserts that
-both pure cores (`ble::coordinator` and `ui::ui_logic`) run on the simulated MCU. Suitable for
-CI. Requires `renode-test` on PATH (ships with Renode).
+the UI controller, the coordinator, management, and the store run on the
+simulated MCU and that the simulated OLED shows each screen's text. Suitable
+for CI. Requires `renode-test` on PATH (ships with Renode).
 
 ```bash
 ./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf

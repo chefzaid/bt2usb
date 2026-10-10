@@ -8,11 +8,13 @@
 //! the rest of the bridge continues and the latest requested frame is retained.
 
 use super::display_logic::Recovery;
+use super::layout;
 use super::ui_logic::{Screen, UiState};
 use defmt::{info, warn};
 use embassy_futures::select::{select, Either};
+use embassy_nrf::gpio::Pin as GpioPin;
 use embassy_nrf::peripherals::TWISPI0;
-use embassy_nrf::twim;
+use embassy_nrf::{interrupt, twim, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::signal::Signal;
 use embassy_time::{Duration, Instant, Timer};
@@ -21,9 +23,11 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
+use ssd1306::command::AddrMode;
 use ssd1306::mode::BufferedGraphicsModeAsync;
 use ssd1306::prelude::*;
 use ssd1306::{I2CDisplayInterface, Ssd1306Async};
+use static_cell::StaticCell;
 
 pub type Display<I2C> = Ssd1306Async<
     I2CInterface<I2C>,
@@ -67,6 +71,37 @@ pub fn request_bus_stop() {
     let peripheral = embassy_nrf::pac::TWIM0;
     peripheral.tasks_resume().write_value(1);
     peripheral.tasks_stop().write_value(1);
+}
+
+/// TWIM0 set up for the OLED on SDA and SCL, as the firmware, the self-test,
+/// and the simulation all use it. Call it once: the copy buffer is a static.
+pub fn new_twim(
+    twim: Peri<'static, TWISPI0>,
+    irq: impl interrupt::typelevel::Binding<
+            interrupt::typelevel::TWISPI0,
+            twim::InterruptHandler<TWISPI0>,
+        > + 'static,
+    sda: Peri<'static, impl GpioPin>,
+    scl: Peri<'static, impl GpioPin>,
+) -> twim::Twim<'static, TWISPI0> {
+    let mut config = twim::Config::default();
+    // Most SSD1306 modules carry their own I2C pull-ups, but a bare panel or
+    // a module without them would leave the bus floating. The internal
+    // pull-ups (~13 kΩ) are harmless in parallel with external ones.
+    config.sda_pullup = true;
+    config.scl_pullup = true;
+    // embassy-nrf 0.7's Twim requires a RAM scratch buffer for writes whose
+    // source isn't in RAM (e.g. flash-resident SSD1306 command sequences); the
+    // framebuffer flush is already RAM-backed. This lives for the program.
+    static TX_BUF: StaticCell<[u8; 64]> = StaticCell::new();
+    twim::Twim::new(twim, irq, sda, scl, config, TX_BUF.init([0; 64]))
+}
+
+/// The display task: the sole owner of TWIM0 and the OLED, rendering the
+/// latest frame [`publish`] hands it.
+#[embassy_executor::task]
+pub async fn task(twim: twim::Twim<'static, TWISPI0>) -> ! {
+    run(StopSafeI2c::new(twim)).await
 }
 
 /// TWIM0 wrapper whose error returns follow the end of DMA.
@@ -143,157 +178,50 @@ pub async fn init<I2C: embedded_hal_async::i2c::I2c>(
     i2c: I2C,
 ) -> Result<Display<I2C>, DisplayFault> {
     let mut display = new(i2c);
-    display.init().await.map_err(|_| DisplayFault)?;
-    display.clear_buffer();
-    display.flush().await.map_err(|_| DisplayFault)?;
+    initialize(&mut display).await?;
+    display
+        .set_display_on(true)
+        .await
+        .map_err(|_| DisplayFault)?;
     Ok(display)
 }
 
-fn text<I2C: embedded_hal_async::i2c::I2c>(display: &mut Display<I2C>, value: &str, y: i32) {
-    // Framebuffer drawing cannot fail; I2C failures are handled at flush.
-    let _ = Text::new(
-        value,
-        Point::new(0, y),
-        MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
-    )
-    .draw(display);
-}
-
-fn draw_list<I2C: embedded_hal_async::i2c::I2c>(
+/// Configure the panel and leave it dark with its RAM cleared. The driver's
+/// `init` ends by turning the panel on, and a panel powers up with random RAM,
+/// so the RAM is cleared first, while power-up still holds the panel off;
+/// `init` then lights a blank panel, and turning it off again lets the caller
+/// show its first frame whole. The clear costs one full frame, ~0.1 s at
+/// 100 kHz, on every initialization.
+async fn initialize<I2C: embedded_hal_async::i2c::I2c>(
     display: &mut Display<I2C>,
-    names: &[heapless::String<32>],
-    selected: usize,
-    saved: bool,
-) {
-    text(
-        display,
-        if saved {
-            "Saved devices"
-        } else {
-            "Select device"
-        },
-        10,
-    );
-    let count = names.len() + usize::from(saved);
-    for (row, index) in super::input_logic::device_list_window(count, selected, 4).enumerate() {
-        let name = names
-            .get(index)
-            .map(|n| n.as_str())
-            .unwrap_or("Factory reset");
-        let mut line = heapless::String::<36>::new();
-        let _ = line.push_str(if index == selected { "> " } else { "  " });
-        let _ = line.push_str(name);
-        text(display, &line, 23 + row as i32 * 10);
-    }
-    if saved {
-        text(display, "UP at first: back", 63);
-    }
+) -> Result<(), DisplayFault> {
+    // Power-up selects page addressing, which ignores the draw area a flush
+    // sets; `init` selects horizontal addressing again.
+    display
+        .set_addr_mode(AddrMode::Horizontal)
+        .await
+        .map_err(|_| DisplayFault)?;
+    display.clear_buffer();
+    display.flush().await.map_err(|_| DisplayFault)?;
+    display.init().await.map_err(|_| DisplayFault)?;
+    display
+        .set_display_on(false)
+        .await
+        .map_err(|_| DisplayFault)
 }
 
+/// Draw `state`'s screen into the framebuffer: every line [`layout::lines`]
+/// gives it, in the 6×10 font. Drawing cannot fail; I2C failures surface at
+/// flush.
 fn draw_view<I2C: embedded_hal_async::i2c::I2c>(display: &mut Display<I2C>, state: &UiState) {
     display.clear_buffer();
-    match state.screen {
-        Screen::Home => {
-            text(display, "bt2usb / Idle", 10);
-            text(display, "SELECT: scan", 30);
-            text(display, "UP: saved devices", 48);
-        }
-        Screen::Scanning => {
-            text(display, "Scanning", 10);
-            text(
-                display,
-                match state.scan_dots % 4 {
-                    0 => "",
-                    1 => ".",
-                    2 => "..",
-                    _ => "...",
-                },
-                30,
-            );
-        }
-        Screen::Connecting => {
-            text(display, "Connecting...", 20);
-        }
-        Screen::Managing => {
-            text(display, "Please wait...", 20);
-        }
-        Screen::DeviceList => draw_list(display, &state.devices, state.selected, false),
-        Screen::SavedDevices => draw_list(display, &state.paired_names, state.selected, true),
-        Screen::ConfirmForget(index) => {
-            text(display, "Forget device?", 10);
-            text(
-                display,
-                state
-                    .paired_names
-                    .get(index)
-                    .map(|n| n.as_str())
-                    .unwrap_or("Device unavailable"),
-                24,
-            );
-            text(
-                display,
-                if state.selected == 0 {
-                    "> Cancel"
-                } else {
-                    "  Cancel"
-                },
-                40,
-            );
-            text(
-                display,
-                if state.selected == 1 {
-                    "> Forget"
-                } else {
-                    "  Forget"
-                },
-                54,
-            );
-        }
-        Screen::ConfirmReset => {
-            text(display, "Reset all pairings?", 10);
-            text(display, "Disconnect all", 24);
-            text(
-                display,
-                if state.selected == 0 {
-                    "> Cancel"
-                } else {
-                    "  Cancel"
-                },
-                40,
-            );
-            text(
-                display,
-                if state.selected == 1 {
-                    "> Reset"
-                } else {
-                    "  Reset"
-                },
-                54,
-            );
-        }
-        Screen::Connected => {
-            text(display, "Connected", 10);
-            text(display, &state.connected_name, 24);
-            text(display, "SEL:add DOWN:disc", 40);
-            text(display, "UP:saved devices", 54);
-        }
-        Screen::Error => {
-            text(display, "ERROR", 10);
-            text(display, &state.message, 26);
-            text(display, "SEL:retry DOWN:back", 44);
-            text(display, "UP:saved devices", 58);
-        }
-        Screen::Notice => {
-            text(display, "Complete", 10);
-            text(display, &state.message, 28);
-            text(display, "SELECT: back", 48);
-        }
-        Screen::NoReply => {
-            text(display, "No reply", 10);
-            text(display, &state.message, 26);
-            text(display, "SELECT: back", 44);
-            text(display, "UP:saved devices", 58);
-        }
+    for line in layout::lines(state) {
+        let _ = Text::new(
+            &line.text,
+            Point::new(0, line.y),
+            MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
+        )
+        .draw(display);
     }
 }
 
@@ -318,7 +246,7 @@ async fn render<I2C: embedded_hal_async::i2c::I2c>(
     initialize: bool,
 ) -> Result<(), DisplayFault> {
     if initialize {
-        display.init().await.map_err(|_| DisplayFault)?;
+        self::initialize(display).await?;
     }
     if frame.powered_on {
         draw_view(display, &frame.state);

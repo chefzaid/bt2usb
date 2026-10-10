@@ -31,12 +31,14 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── hid/               report types, descriptors, aggregation, delivery, wake
 │   ├── usb/               composite USB HID device
 │   ├── storage.rs, storage/  pairing store: flash shell, device list, codec, framing
-│   ├── ui/                display, buttons, UI controller and state machine
+│   ├── ui/                display task and screen layout, buttons, UI controller
+│   │                      and state machine
 │   └── lib_tests.rs, lib_logic_tests.rs, hid_classify_tests.rs,
 │       hid_descriptor_tests.rs, hid_keyboard_report_tests.rs
 │                          host test modules included by lib.rs
 ├── tests/                 host integration tests
-├── renode/                platform description, GPIO/GPIOTE models, Robot test
+├── renode/                platform overlays, GPIO/GPIOTE, TWIM, and SSD1306
+│                          models, OLED glyph table, Robot test
 ├── scripts/               release helper and tests, Renode installer, WSL tool shim
 ├── vendor/nrf-softdevice/ pinned upstream crate with a small reviewed patch
 ├── .cargo/config.toml     probe-rs runner, ARM link flags, default DEFMT_LOG
@@ -577,9 +579,10 @@ in a public issue. See the [security policy](../SECURITY.md).
 
 | You changed | Run before review | Also needed |
 | --- | --- | --- |
-| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `management`, `messages`, `controller`, `ui_logic`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
+| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `management`, `messages`, `controller`, `ui_logic`, `layout`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
-| `sim.rs`, `sim_ble.rs`, `ui/buttons.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
+| `sim.rs`, `sim_ble.rs`, `ui/buttons.rs`, `ui/display.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
+| The display font, or the `embedded-graphics` version | `cargo test --locked --test oled_font`, which also checks that `display.rs` draws in `FONT_6X10`; when only the glyphs changed, `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font` rewrites [oled-font-6x10.txt](../renode/oled-font-6x10.txt); then `mask sim-test` | Review the glyph table diff. A font with another cell size also needs the test's font, the text reader's cell size in [ssd1306.cs](../renode/ssd1306.cs), and the baselines in `ui::layout` changed ([OLED checks](testing.md#oled-checks)) |
 | `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
 | `memory_sd.x`, storage constants, or `build.rs` | `mask ci` (its Markdown check compares the documented memory map), `mask size` | Self-test flash stage and the `softdevice RAM` log |
 | `.github/workflows/ci.yml` | `actionlint` with `shellcheck` on `PATH` | A hosted run |
@@ -653,9 +656,9 @@ Pins are not constants. They are instantiated as `embassy_nrf` peripherals:
 
 | File | Pins |
 | --- | --- |
-| [main.rs](../src/main.rs) | `P0_11`, `P0_12`, `P0_24` buttons; `P0_26` SDA, `P0_27` SCL |
+| [main.rs](../src/main.rs) | `P0_11`, `P0_12`, `P0_24` buttons; `P0_26` SDA, `P0_27` SCL, passed to `ui::display::new_twim` |
 | [selftest.rs](../src/selftest.rs) | The same, plus the stage names `button UP (P0.11)` and similar |
-| [sim.rs](../src/sim.rs) | The three buttons; UART0 on `P0_08` (RX) and `P0_06` (TX) |
+| [sim.rs](../src/sim.rs) | The three buttons; `P0_26` SDA and `P0_27` SCL (the TWIM model ignores the pin selection); UART0 on `P0_08` (RX) and `P0_06` (TX); the `display task started` log line names the I2C pins |
 | [config.rs](../src/config.rs) | The pin comment block |
 | [bt2usb-sim.robot](../renode/bt2usb-sim.robot), [bt2usb-sim.resc](../renode/bt2usb-sim.resc) | `${PIN_UP}`, `${PIN_DOWN}`, `${PIN_SELECT}`; the `OnGPIO` examples |
 
@@ -673,10 +676,12 @@ Files:
   `UiCommand` variant. `on_button` ends in `_ => {}`, so a missing transition
   silently ignores the button; add explicit arms. `UiState` holds the view
   model the display renders.
-- [ui/display.rs](../src/ui/display.rs): `draw_view` matches every `Screen`, so
-  the compiler requires a rendering. Text uses `FONT_6X10` on a 128-pixel-wide
-  panel, which fits 21 characters per line; `UiState::message` holds at most
-  32 bytes.
+- [ui/layout.rs](../src/ui/layout.rs): `lines` matches every `Screen`, so
+  the compiler requires a layout: up to `MAX_LINES` lines of text, each with
+  its baseline in pixels. [ui/display.rs](../src/ui/display.rs) draws them in
+  `FONT_6X10` and needs no change. The 128-pixel-wide panel fits 21
+  characters per line and cuts off the rest; `UiState::message` holds at most
+  32 bytes. Keep baselines at least 10 pixels apart and between 7 and 63.
 - [ui/controller.rs](../src/ui/controller.rs): `UiController::button` maps
   each `UiCommand` to a `messages::Command` in an exhaustive `match`, so the
   host library fails to build until a new variant is handled. Management
@@ -691,10 +696,16 @@ in `main.rs` and `sim.rs`, a `check_button` stage in `selftest.rs`, and a
 Renode pin.
 
 Tests: transitions next to the existing `on_button` tests in `ui_logic.rs`,
-including the ignored combinations, and the command it sends in
-`controller_tests.rs`. The Renode build runs the same controller, so extend
-the Robot test with the presses that reach the screen
-([scenario map](testing.md#renode-scenario-map)). Docs:
+including the ignored combinations; the command it sends in
+`controller_tests.rs`; and the screen's lines in
+[layout_tests.rs](../src/ui/layout_tests.rs), whose
+`every_fixed_label_fits_across_the_panel` and
+`lines_stay_on_the_panel_and_never_overlap` cover a new `Screen` only once it
+is added to `every_screen`. The Renode build runs the same controller and
+display task, so extend the Robot test with the presses that reach the screen
+and an `Oled Should Show` check of its text
+([scenario map](testing.md#renode-scenario-map),
+[OLED checks](testing.md#oled-checks)). Docs:
 [features](features.md#using-the-bridge) (controls and screen flow); the
 first-flash checklist when it adds an acceptance step. ADR: only when the
 change alters the display-task isolation

@@ -51,10 +51,12 @@ Run the OLED in its own Embassy task, with a latest-state hand-off, bounded
 retry, and I2C error handling that never releases a buffer before the hardware
 has stopped using it.
 
-- **Single owner.** `display_task` in [main.rs](../../src/main.rs) receives the
-  TWIM0 peripheral (SDA P0.26, SCL P0.27, internal pull-ups on, a 64-byte RAM
-  transmit buffer) wrapped in `StopSafeI2c`, and passes it to
-  `ui::display::run`. Nothing else touches TWIM0 or the panel. The TWISPI0
+- **Single owner.** `ui::display::task` in
+  [display.rs](../../src/ui/display.rs), which [main.rs](../../src/main.rs)
+  spawns, receives the TWIM0 peripheral that `ui::display::new_twim` sets up
+  (SDA P0.26, SCL P0.27, internal pull-ups on, a 64-byte RAM transmit
+  buffer), wraps it in `StopSafeI2c`, and passes it to `ui::display::run`.
+  Nothing else touches TWIM0 or the panel. The TWISPI0
   interrupt runs at priority 2, like the other application interrupts that
   `main` configures, because the SoftDevice reserves priorities 0, 1, and 4.
 - **Latest-state hand-off.** The UI loop calls `ui::display::publish(&state,
@@ -67,6 +69,10 @@ has stopped using it.
   applied and skips a frame equal to it. A render initializes the panel when
   needed, draws and flushes the framebuffer only when the frame says the
   display is powered on, and then sends the display-on or display-off command.
+  Initialization clears the panel's RAM before the driver's `init` turns it
+  on and then leaves it off, so its random power-on RAM never shows; a render
+  that initializes therefore sends two full frames, about 0.22 s at 100 kHz
+  ([ADR 0024](0024-renode-oled-models.md)).
 - **Bounded retry with re-initialization.** A failed render clears the
   "initialized" flag and the applied frame, logs
   `OLED operation failed; retry in {} ms (bridge remains active)`, and waits
@@ -208,14 +214,14 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 | Concern | Where |
 | --- | --- |
-| Task, pins, pull-ups, transmit buffer | `display_task` and the TWIM setup in [main.rs](../../src/main.rs); `UI and isolated OLED tasks started` is logged after spawning |
+| Task, pins, pull-ups, transmit buffer | `task` and `new_twim` in [display.rs](../../src/ui/display.rs), spawned from [main.rs](../../src/main.rs), which logs `UI and isolated OLED tasks started` after spawning; the simulation spawns the same task ([ADR 0024](0024-renode-oled-models.md)) |
 | Interrupt priority | `interrupt::TWISPI0.set_priority(Priority::P2)` in `main.rs` and [selftest.rs](../../src/selftest.rs) |
 | Latest-state hand-off | `FRAMES`, `Frame`, and `publish` in [display.rs](../../src/ui/display.rs); called at the end of every UI loop iteration in `main.rs` |
-| Render loop | `run` and `render` in `display.rs` |
+| Render loop | `run`, `render`, and `initialize` in `display.rs`; each screen's lines come from `ui::layout::lines` in [layout.rs](../../src/ui/layout.rs) |
 | Backoff policy | `Recovery` in [display_logic.rs](../../src/ui/display_logic.rs) |
 | Deadline and STOP request | `finish_or_stop` and `request_bus_stop` in `display.rs` |
 | Error hold until STOPPED | `StopSafeI2c` and `wait_stopped` in `display.rs` |
-| Self-test use | OLED stage in `selftest.rs`: address probe `[0x00, 0xAE]` at `0x3C`, then `init` and `draw_home` through `finish_or_stop` |
+| Self-test use | OLED stage in `selftest.rs`: TWIM0 from `new_twim` wrapped in `StopSafeI2c`, address probe `[0x00, 0xAE]` at `0x3C`, then `init` and `draw_home` through `finish_or_stop` |
 | Async driver feature | `ssd1306/async` in the `embedded` and `sim` features of [Cargo.toml](../../Cargo.toml) |
 
 ### Verification Status
@@ -229,9 +235,15 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   locally. The CI "Embedded build & clippy" job runs the same checks and
   passed on GitHub-hosted runners in push runs 36441995385 (`8a04b25`,
   2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and scheduled run
-  37338711407 (2026-10-05). No automated test
-  exercises the TWIM stop sequence: host tests cannot reach the driver, and
-  the Renode simulation does not run the display.
+  37338711407 (2026-10-05). Since 2026-10-10 the Renode simulation runs
+  this task on modelled TWIM and SSD1306 peripherals
+  ([ADR 0024](0024-renode-oled-models.md)): it checks every screen the
+  scenario reaches and a recovery in which the panel stops answering, the
+  frame fails on the address NACK, and the retry re-initializes the panel.
+  `StopSafeI2c`'s wait for STOPPED runs on that path, but the test would
+  still pass without it: the next transfer starts only after the 1 s
+  backoff, long after STOPPED. The models have no stuck bus or data NACK, so
+  the STOP request after the 500 ms deadline is not exercised either.
 - **Hardware-verified:** not yet. The repository holds no board record for the
   [first-flash](../first-flash.md) OLED checks.
 
@@ -244,3 +256,4 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - [ADR 0003: Hardware-free decision modules](0003-pure-core-and-task-shell.md)
 - [ADR 0004: Layered verification](0004-layered-verification.md)
 - [ADR 0012: Bus-powered, no System-OFF](0012-bus-powered-no-system-off.md)
+- [ADR 0024: Renode OLED models](0024-renode-oled-models.md)

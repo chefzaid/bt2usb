@@ -11,7 +11,7 @@ Every capability carries one of three evidence levels:
 | Status | Meaning |
 | --- | --- |
 | Implemented | The source is present. No automated test exercises the behavior. |
-| Software-verified | Host tests or the Renode scenario exercise the decision logic. Radio, USB, flash, and I2C I/O around that logic is implemented but not exercised. |
+| Software-verified | Host tests or the Renode scenario exercise the decision logic. Radio, USB, and flash I/O around that logic is implemented but not exercised; the OLED's I2C I/O runs only against Renode's modelled peripherals. |
 | Hardware-verified | A recorded [first-flash](first-flash.md) result covers the behavior on a real board. |
 
 No completed first-flash result is recorded in the repository yet, so no
@@ -56,8 +56,8 @@ are not translated.
 | Remote wakeup on new presses only | Software-verified (policy) | [`hid/wake.rs`](../src/hid/wake.rs), [`usb/hid_device.rs`](../src/usb/hid_device.rs) | [Remote Wakeup](#remote-wakeup) |
 | Versioned, fail-closed pairing store | Software-verified (framing, record validation, commit) | [`storage.rs`](../src/storage.rs), [`storage/`](../src/storage/) | [Pairing Storage](#pairing-storage), [ADR 0006](adr/0006-fail-closed-pairing-store.md) |
 | Saved-device Forget and Factory reset | Software-verified (UI reducer, request IDs, quiescence, commit; Renode runs them on the target) | [`ui/ui_logic.rs`](../src/ui/ui_logic.rs), [`ui/controller.rs`](../src/ui/controller.rs), [`ble/management.rs`](../src/ble/management.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Saved-Device Management](#saved-device-management) |
-| OLED screens and three-button navigation | Software-verified (reducer and controller; Renode drives the button driver through them) | [`ui/`](../src/ui/), [`main.rs`](../src/main.rs) | [Using The Bridge](#using-the-bridge) |
-| Isolated display task with fault recovery | Software-verified (backoff policy) | [`ui/display.rs`](../src/ui/display.rs), [`ui/display_logic.rs`](../src/ui/display_logic.rs) | [Local UI And Power](#local-ui-and-power), [ADR 0009](adr/0009-isolated-display-task.md) |
+| OLED screens and three-button navigation | Software-verified (reducer, controller, and screen layout; Renode drives the button driver through them and reads each screen back from the modelled panel) | [`ui/`](../src/ui/), [`main.rs`](../src/main.rs) | [Using The Bridge](#using-the-bridge), [ADR 0024](adr/0024-renode-oled-models.md) |
+| Isolated display task with fault recovery | Software-verified (backoff policy; Renode runs the task and a recovery from an unanswered address on modelled TWIM and SSD1306 peripherals) | [`ui/display.rs`](../src/ui/display.rs), [`ui/display_logic.rs`](../src/ui/display_logic.rs) | [Local UI And Power](#local-ui-and-power), [ADR 0009](adr/0009-isolated-display-task.md) |
 | Activity-driven display power, no System-OFF | Software-verified (policy) | [`power_logic.rs`](../src/power_logic.rs), [`power.rs`](../src/power.rs) | [Wake and display](#wake-and-display), [ADR 0012](adr/0012-bus-powered-no-system-off.md) |
 | Board self-test image | Implemented | [`selftest.rs`](../src/selftest.rs) | [Bring-Up And Diagnostics](#bring-up-and-diagnostics) |
 | Memory layout guards and stack high-water | Implemented | [`memory_sd.x`](../memory_sd.x), [`build.rs`](../build.rs), [`stack.rs`](../src/stack.rs) | [ADR 0010](adr/0010-static-memory-layout.md) |
@@ -91,7 +91,7 @@ Three rules apply before any screen sees a press:
 ### Screens And Buttons
 
 The screen text below is quoted from
-[`ui/display.rs`](../src/ui/display.rs); transitions come from the reducer in
+[`ui/layout.rs`](../src/ui/layout.rs); transitions come from the reducer in
 [`ui/ui_logic.rs`](../src/ui/ui_logic.rs), whose `Screen` variant is named in
 the second column. A dash means the button does nothing on that screen. The
 state behind these screens is in the
@@ -116,9 +116,10 @@ Lists show four rows at a time and scroll to keep the highlighted row visible.
 A highlighted row that a newer list no longer contains is clamped to the last
 row before any button acts on it, and SELECT on an empty device list does
 nothing.
-The OLED uses the 6×10 ASCII font on a 128-pixel line, about 21 characters, so
-longer names do not fit and non-ASCII characters in a name are not drawn as
-written. Names themselves are stored as UTF-8 of up to 32 bytes.
+The OLED uses the 6×10 ASCII font on a 128-pixel line, 21 characters, so
+the panel cuts off the rest of a longer line (a list row shows `> ` and the
+first 19 characters of a name), and non-ASCII characters in a name are not
+drawn as written. Names themselves are stored as UTF-8 of up to 32 bytes.
 
 ### Screen Flow
 
@@ -796,6 +797,11 @@ interrupted write must leave a documented state ([TODO.md](../TODO.md)).
   I2C. A separate display task owns the TWIM0 bus and the SSD1306, and renders
   only the newest snapshot it has not yet drawn
   ([ADR 0009](adr/0009-isolated-display-task.md)).
+- **Clean first frame.** Initialization clears the panel's memory before
+  the display driver turns the panel on, and the display task turns it on
+  for good only after the first frame is in, so the random contents the
+  SSD1306 powers up with never show
+  ([ADR 0024](adr/0024-renode-oled-models.md)).
 - **Fault recovery.** A failed display operation re-initializes the panel after
   a backoff of 1, 2, 4, 8, and 16 seconds, then every 30 seconds, logging
   `OLED operation failed; retry in {} ms (bridge remains active)` and, on
@@ -872,26 +878,31 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 327 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 324 unit tests and the 3
-  integration tests in [`tests/integration.rs`](../tests/integration.rs), all
-  of which run with `mask test`.
+- The source contains 359 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 353 unit tests, the 3
+  integration tests in [`tests/integration.rs`](../tests/integration.rs), and
+  the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
+  all of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
   `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)), and CI
   fails when host line coverage drops below 97%
   ([coverage in CI](code-quality.md#coverage-in-ci)).
 - The `bt2usb-sim` binary boots without the SoftDevice or USB on Renode's
   nRF52840 model. It runs the real button driver, the firmware's UI
-  controller, and the real coordinator reducers, scan merging, management
-  barrier and commit, and paired-device list with its flash record codec,
-  against a scripted BLE scenario, writing to UART0. Custom GPIO and GPIOTE
-  models implement the pin SENSE, LATCH, and PORT event chain that
-  embassy-nrf waits on ([ADR 0014](adr/0014-renode-gpio-models.md)). The
+  controller and display task, and the real coordinator reducers, scan
+  merging, management barrier and commit, and paired-device list with its
+  flash record codec, against a scripted BLE scenario, writing to UART0.
+  Custom GPIO and GPIOTE models implement the pin SENSE, LATCH, and PORT event
+  chain that embassy-nrf waits on
+  ([ADR 0014](adr/0014-renode-gpio-models.md)), and custom TWIM and SSD1306
+  models carry the display task's I2C frames to a modelled panel whose text
+  the test reads back ([ADR 0024](adr/0024-renode-oled-models.md)). The
   headless Robot test
-  `Sim Runs The UI Controller, Coordinator, Management, And Store` presses the
-  three buttons through a scan and connect, a link loss that keeps its slot
-  reserved, a cancelled and a confirmed Forget, and a Factory reset, and checks
-  the output (`mask sim-test`,
+  `Sim Runs The UI Controller, Display, Coordinator, Management, And Store`
+  presses the three buttons through a scan and connect, a link loss that
+  keeps its slot reserved, a cancelled and a confirmed Forget, a Factory
+  reset, and an OLED that stops answering and comes back, and checks the
+  console output and the text on the panel (`mask sim-test`,
   [testing](testing.md#renode-scenario-map)).
 
 ### Builds, Toolchain And Tasks

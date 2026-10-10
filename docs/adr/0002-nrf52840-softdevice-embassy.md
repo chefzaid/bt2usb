@@ -200,7 +200,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | SoftDevice configuration | `softdevice_config()` in [sd_setup.rs](../../src/sd_setup.rs), shared by the bridge and the self-test |
 | USB power events | `enable_usb_power_events()` in `sd_setup.rs`; `softdevice_task` in [main.rs](../../src/main.rs) forwards `PowerUsbDetected`, `PowerUsbRemoved`, and `PowerUsbPowerReady` to the `SoftwareVbusDetect` used by [hid_device.rs](../../src/usb/hid_device.rs) |
 | Interrupt priorities | `main.rs` and `selftest.rs` set GPIOTE and the time driver through `embassy_nrf::config::Config`, then USBD and TWISPI0 explicitly, all to `Priority::P2` |
-| Tasks | `main.rs` spawns `softdevice_task`, `usb_device_task`, `hid_writer_task`, one `ble_slot_task` per link, `ble_task`, `display_task`, and three button tasks; the UI loop runs in `main` |
+| Tasks | `main.rs` spawns `softdevice_task`, `usb_device_task`, `hid_writer_task`, one `ble_slot_task` per link, `ble_task`, `ui::display::task` (from [display.rs](../../src/ui/display.rs)), and three button tasks; the UI loop runs in `main` |
 | Flash access | `nrf_softdevice::Flash::take(sd)` in `ble_task` ([multi_conn.rs](../../src/ble/multi_conn.rs)) and in the self-test |
 | Build profiles | Release: `opt-level = "s"`, fat LTO, one codegen unit, `debug = 2` for probe-rs; dev: `opt-level = 1`, which the manifest notes is required by SoftDevice timing |
 | Stack measurement | `cortex-m-rt/paint-stack` and `high_water()` in [stack.rs](../../src/stack.rs), logged as `stack high-water: {} of {} bytes` |

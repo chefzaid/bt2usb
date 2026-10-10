@@ -1,0 +1,20 @@
+// TWIM0 + SSD1306 overlay for the stock nRF52840 platform.
+//
+// Replaces Renode's twi0 (the legacy TWI, without EasyDMA) with the TWIM model
+// in renode/nrf52840_twim.cs, at the same name, address, and IRQ (TWISPI0 is
+// IRQ 3), and attaches the SSD1306 model in renode/ssd1306.cs at the OLED's
+// I2C address, 0x3C.
+//
+// Load it after the stock platform, once twi0 is unregistered:
+//
+//   include @renode/nrf52840_twim.cs
+//   include @renode/ssd1306.cs
+//   machine LoadPlatformDescription @platforms/cpus/nrf52840.repl
+//   sysbus Unregister sysbus.twi0
+//   machine LoadPlatformDescription @renode/nrf52840-twim-oled.repl
+//   oled LoadFont @renode/oled-font-6x10.txt
+
+twi0: I2C.NRF52840_TWIM @ sysbus 0x40003000
+    -> nvic@3
+
+oled: Video.SSD1306 @ twi0 0x3C

@@ -173,7 +173,10 @@ The storage load reports `No paired devices in flash` or
       with no panic.
 - [ ] `USB configured by host: true` appears, and the PC lists the device
       (keyboard, mouse and consumer-control interfaces).
-- [ ] The OLED shows the Home screen.
+- [ ] The OLED shows the Home screen, and at power-up it goes from dark to
+      Home without a flash of random pixels. The firmware clears the panel's
+      memory before the display driver turns it on
+      ([ADR 0024](adr/0024-renode-oled-models.md)); watch a few cold power-ups.
 - [ ] `stack high-water: X of Y bytes` lines appear; the firmware logs a new one
       whenever the high-water mark grows.
 

@@ -28,7 +28,7 @@ deadline and are bounded only by the SoftDevice, the Core or the hardware:
 | `ble_slot_task`, running `connection_slot_task` ([slot_worker.rs](../../src/ble/slot_worker.rs)) | A command (line 60); notifications while the link lives (line 298) | `connect_with_security`, raced against neither commands nor a timer (lines 237 to 245); `close_connection`, which polls every 10 ms with no deadline (lines 178 to 183) |
 | `usb_device_task`, running `run_usb_device` ([hid_device.rs](../../src/usb/hid_device.rs) lines 371 to 385) | Bus events and resume | `remote_wakeup` (line 377), which waits for USBWUALLOWED, RESUME or USBRESET (`embassy-nrf` `src/usb/mod.rs` lines 361 to 394) |
 | `hid_writer_task` (lines 389 to 427) | Reports and host polling | None: each endpoint write has a 100 ms deadline and at most 1 s backoff ([delivery.rs](../../src/hid/delivery.rs) lines 147 to 184) |
-| `display_task` ([display.rs](../../src/ui/display.rs)) | Frames | DMA on an electrically stuck bus, forever (lines 112 to 138; [ADR 0009](0009-isolated-display-task.md)) |
+| `ui::display::task` ([display.rs](../../src/ui/display.rs)) | Frames | DMA on an electrically stuck bus, forever (`wait_stopped` and `finish_or_stop`, lines 147 to 173; [ADR 0009](0009-isolated-display-task.md)) |
 | `softdevice_task`, three button tasks | SoftDevice events; GPIO edges | None. The `Bonder` callbacks ([bonder.rs](../../src/ble/bonder.rs)) run synchronously inside `softdevice_task`, as the boot-protocol and LED handlers ([host_requests.rs](../../src/usb/host_requests.rs)) do inside `usb_device_task`, so a hang there stalls the executor |
 
 Scans end under `with_timeout` after 6 s or 10 s

@@ -7,7 +7,7 @@
 //!
 //! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
 //! reconnect, long_read, management, messages}`, `ui::{controller, ui_logic,
-//! input_logic, display_logic}` and
+//! input_logic, layout, display_logic}` and
 //! `power_logic`, plus `storage::{codec, devices, framing, record}` under `cfg(test)` only, and
 //! `config`, whose capacities the pure modules size their buffers from.
 //! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, bonder,
@@ -67,6 +67,8 @@ mod ui_controller_impl;
 mod ui_display_logic_impl;
 #[path = "ui/input_logic.rs"]
 mod ui_input_logic_impl;
+#[path = "ui/layout.rs"]
+mod ui_layout_impl;
 #[path = "ui/ui_logic.rs"]
 mod ui_ui_logic_impl;
 
@@ -112,6 +114,11 @@ pub mod ui {
 
     pub mod input_logic {
         pub use crate::ui_input_logic_impl::{device_list_window, next_scan_dots};
+    }
+
+    /// Each screen's text lines and where they sit on the OLED.
+    pub mod layout {
+        pub use crate::ui_layout_impl::*;
     }
 
     /// Pure UI state-machine logic (screen transitions).

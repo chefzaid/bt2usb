@@ -142,12 +142,13 @@ press.
 | Property | Value | Source |
 | --- | --- | --- |
 | Controller and size | SSD1306, 128×64, rotation 0 | [ui/display.rs](../src/ui/display.rs) |
-| Bus | TWIM0 (`TWISPI0`), SDA P0.26, SCL P0.27 | [main.rs](../src/main.rs) |
+| Bus | TWIM0 (`TWISPI0`), SDA P0.26, SCL P0.27; `display::new_twim` sets it up for the bridge, the self-test, and the simulation | [main.rs](../src/main.rs), [ui/display.rs](../src/ui/display.rs) |
 | I2C address | `0x3C`, from the `ssd1306` crate's default `I2CDisplayInterface::new`; the self-test probes the same `OLED_ADDR` | [ui/display.rs](../src/ui/display.rs), [selftest.rs](../src/selftest.rs) |
-| Bus frequency | Not set; the `embassy-nrf` `twim::Config` default applies | [main.rs](../src/main.rs) |
-| Pull-ups | Internal SDA and SCL pull-ups enabled (about 13 kΩ per the source comment); harmless alongside module pull-ups | [main.rs](../src/main.rs) |
-| Transmit scratch buffer | 64 bytes in RAM, needed for flash-resident command sequences | [main.rs](../src/main.rs) |
-| Rendering | Buffered graphics mode (a 1024-byte framebuffer for 128×64 pixels), `FONT_6X10` | [ui/display.rs](../src/ui/display.rs) |
+| Bus frequency | 100 kHz, the `embassy-nrf` 0.7 `twim::Config` default, which `new_twim` leaves; a full frame (64 writes of 17 bytes) takes about 0.1 s, and a render that initializes the panel sends two, about 0.22 s | [ui/display.rs](../src/ui/display.rs) |
+| Pull-ups | Internal SDA and SCL pull-ups enabled (about 13 kΩ per the source comment); harmless alongside module pull-ups | [ui/display.rs](../src/ui/display.rs) |
+| Transmit scratch buffer | 64 bytes in RAM, needed for flash-resident command sequences | [ui/display.rs](../src/ui/display.rs) |
+| Rendering | Buffered graphics mode (a 1024-byte framebuffer for 128×64 pixels), `FONT_6X10`; each screen's lines come from `ui::layout` | [ui/display.rs](../src/ui/display.rs), [ui/layout.rs](../src/ui/layout.rs) |
+| Initialization | Horizontal addressing and a blank frame while power-up still holds the panel off, then the `ssd1306` crate's `init` (which ends by turning the panel on) and display off until the first frame is sent, so the panel never shows the random RAM content it powers up with | `initialize` in [ui/display.rs](../src/ui/display.rs) |
 | Display power | `set_display_on(false)` after inactivity; the module stays powered | [ui/display.rs](../src/ui/display.rs) |
 | Operation deadline | 500 ms, then a TWIM STOP request while the DMA future is kept | `finish_or_stop` |
 | Retry backoff | 1 s, doubling, capped at 30 s, reset after a success | [ui/display_logic.rs](../src/ui/display_logic.rs) |

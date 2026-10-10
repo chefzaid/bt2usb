@@ -14,15 +14,20 @@
 //!   underneath), fed by the buttons and by the simulated BLE side in
 //!   [`sim_ble`], which runs the **real** host-tested coordinator reducers, scan
 //!   merging, management barrier and commit, and paired-device list with its
-//!   flash record codec, with `Address` substituted by a `u32` stand-in.
+//!   flash record codec, with `Address` substituted by a `u32` stand-in,
+//! - the firmware's display task (`ui::display`) on TWIM0 (SDA=P0.26,
+//!   SCL=P0.27), which renders every published view on the SSD1306 at 0x3C.
+//!   Renode has neither an EasyDMA TWIM nor an SSD1306, so
+//!   `renode/nrf52840_twim.cs` and `renode/ssd1306.cs` model them, and the
+//!   panel model reads the screen's text back for the Robot test.
 //!
 //! Output is written to **UART0** (Renode's `uart0`), which Renode shows on its
 //! console / analyzer with no probe or decoder. See docs/testing.md.
 
 #![no_std]
 #![no_main]
-// This binary reuses shared modules (e.g. the SSD1306 display driver) that it
-// does not fully exercise; don't warn about the unused parts.
+// This binary reuses shared modules (e.g. the self-test's display helpers)
+// that it does not fully exercise; don't warn about the unused parts.
 #![allow(dead_code)]
 
 mod ble;
@@ -49,6 +54,7 @@ use embassy_executor::Spawner;
 use embassy_futures::select::{select, Either};
 use embassy_nrf::gpio::AnyPin;
 use embassy_nrf::peripherals::UARTE0;
+use embassy_nrf::twim;
 use embassy_nrf::uarte::{self, Uarte};
 use embassy_nrf::{bind_interrupts, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -62,6 +68,7 @@ use crate::ui::ButtonEvent;
 
 bind_interrupts!(struct Irqs {
     UARTE0 => uarte::InterruptHandler<peripherals::UARTE0>;
+    TWISPI0 => twim::InterruptHandler<peripherals::TWISPI0>;
 });
 
 static BUTTON_CHANNEL: Channel<CriticalSectionRawMutex, ButtonEvent, 4> = Channel::new();
@@ -186,6 +193,9 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(button_task(p.P0_12.into(), ButtonEvent::Down)));
     spawner.spawn(unwrap!(button_task(p.P0_24.into(), ButtonEvent::Select)));
     slog!(console, "buttons ready (UP=P0.11 DOWN=P0.12 SELECT=P0.24)");
+    let twi = ui::display::new_twim(p.TWISPI0, Irqs, p.P0_26, p.P0_27);
+    spawner.spawn(unwrap!(ui::display::task(twi)));
+    slog!(console, "display task started (TWIM0 SDA=P0.26 SCL=P0.27)");
 
     let mut ui = UiController::<SimAddr>::new();
     let mut ble = SimBle::new();
@@ -195,6 +205,10 @@ async fn main(spawner: Spawner) {
         "entering sim UI loop (screen={:?})",
         ui.state.screen
     );
+    // As in the firmware, the display task gets the latest view after every
+    // change and never holds up this loop; the panel stays on, because the
+    // simulation has no USB power state to blank it for.
+    ui::display::publish(&ui.state, true);
     loop {
         // A button press runs the UI controller, and the command it sends, if
         // any, runs through the simulated BLE side at once. Two seconds without
@@ -229,5 +243,6 @@ async fn main(spawner: Spawner) {
                 }
             }
         }
+        ui::display::publish(&ui.state, true);
     }
 }

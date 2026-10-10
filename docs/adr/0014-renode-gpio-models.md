@@ -194,12 +194,14 @@ Negative:
 - The models are written from the Product Specification, not checked against
   silicon. Agreement between the model and a real nRF52840 is assumed, and
   the board self-test's button stage remains the hardware check.
-- The simulation covers no BLE radio, SoftDevice, USB, flash writes, OLED, or
+- The simulation covers no BLE radio, SoftDevice, USB, flash writes, or
   scan timing. Its BLE events are a script and the commands the buttons send,
   answered at once, and a simulated scan hears three fixed advertisements.
 - Since 2026-10-10 the simulation runs the same `UiController` as `main`, so
-  management requests and error retention are exercised; the power manager,
-  the command and event channels, and the display task in `main` are not.
+  management requests and error retention are exercised, and the same
+  display task on modelled TWIM and SSD1306 peripherals
+  ([ADR 0024](0024-renode-oled-models.md)); the power manager and the command
+  and event channels are not.
 - Renode is downloaded without a checksum by `install-renode.sh`.
 - A check of the upstream Renode source on its `master` branch, made outside
   the repository while writing this record on 2026-10-09, found `LATCH` and
@@ -210,9 +212,10 @@ Negative:
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
-- "Broaden the Renode scenarios": since 2026-10-10 the scenario covers the
-  saved-device management screens and the link-loss slot reservation; the
-  OLED task is still not exercised.
+- "Broaden the Renode scenarios": done on 2026-10-10. The scenario covers
+  the saved-device management screens, the link-loss slot reservation, and
+  the OLED's text on every screen it reaches
+  ([ADR 0024](0024-renode-oled-models.md)).
 - "Supply-chain and tooling maintenance": verify digests for downloaded
   non-Cargo tooling, which includes Renode.
 - "Async task fault tests": deterministic tests for cancellation, full
@@ -244,7 +247,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
   (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The
   broadened scenario of 2026-10-10 passed locally with Renode 1.16.1 on Linux
-  ([2026-10-10 controller record](../testing.md#validation-record--2026-10-10-ui-controller-and-renode-scenario)).
+  ([2026-10-10 controller record](../testing.md#validation-record--2026-10-10-ui-controller-and-renode-scenario))
+  and in CI push run 38081477998 (`61e1963`), and with the OLED checks
+  locally
+  ([2026-10-10 OLED record](../testing.md#validation-record--2026-10-10-oled-in-renode)).
 - **Hardware-verified:** not applicable to the models themselves. The button
   path they emulate is checked on a board by the self-test's button stage,
   for which the repository holds no board record.
@@ -257,3 +263,4 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - [ADR 0004: Layered verification](0004-layered-verification.md)
 - [ADR 0010: Static memory layout](0010-static-memory-layout.md)
 - [ADR 0013: Pinned toolchain and mask tasks](0013-pinned-toolchain-and-mask-tasks.md)
+- [ADR 0024: Renode OLED models](0024-renode-oled-models.md)

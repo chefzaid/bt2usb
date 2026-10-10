@@ -170,14 +170,8 @@ async fn main(spawner: Spawner) {
     }
 
     // 4. OLED. Probe the address, then check initialization and framebuffer I/O.
-    let mut twi_config = twim::Config::default();
-    twi_config.sda_pullup = true;
-    twi_config.scl_pullup = true;
-    static TWI_TX_BUF: static_cell::StaticCell<[u8; 64]> = static_cell::StaticCell::new();
-    let twi_tx_buf = TWI_TX_BUF.init([0u8; 64]);
-    let mut twi = ui::display::StopSafeI2c::new(twim::Twim::new(
-        p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27, twi_config, twi_tx_buf,
-    ));
+    let mut twi =
+        ui::display::StopSafeI2c::new(ui::display::new_twim(p.TWISPI0, TwimIrqs, p.P0_26, p.P0_27));
     // Control byte 0x00 (command stream) + 0xAE (display off): harmless, and
     // the panel is re-initialised right after. A missing panel NACKs here.
     let probe = embedded_hal_async::i2c::I2c::write(&mut twi, OLED_ADDR, &[0x00, 0xAE]);

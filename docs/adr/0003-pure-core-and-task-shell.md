@@ -182,7 +182,7 @@ Follow-up obligations:
   [tests/integration.rs](../../tests/integration.rs).
 - CI runs `cargo test --locked --lib --tests`, `cargo clippy --locked --lib
   --tests -- -D warnings`, and `cargo doc --locked --no-deps --lib` with
-  warnings denied on `ubuntu-latest` and `windows-latest`
+  warnings denied on `ubuntu-24.04` and `windows-2025`
   ([ci.yml](../../.github/workflows/ci.yml)). `mask coverage` measures the same
   library with `cargo-llvm-cov`, or `cargo-tarpaulin` as a fallback.
 

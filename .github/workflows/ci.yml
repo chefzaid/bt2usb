@@ -32,16 +32,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain
-        run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        run: |
+          rustup install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Check formatting
         run: cargo fmt --package bt2usb -- --check
       - name: Keep Rust source files within 500 lines
@@ -98,22 +100,23 @@ jobs:
   # The report uploads before the floor is checked, so a drop can be read.
   coverage:
     name: Host coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       # Baseline: 97.59% of lines on 2026-10-10 (docs/testing.md#validation-record--2026-10-10).
       # Raise the floor as coverage grows; lower it only with a reason in the commit.
       COVERAGE_MIN_LINES: 97
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain + LLVM tools
         run: |
+          rustup install
           rustup show active-toolchain
           rustup component add llvm-tools
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-llvm-cov@0.9.1
       - name: Run host tests with coverage instrumentation
@@ -125,7 +128,7 @@ jobs:
           cargo llvm-cov report --lcov --output-path "$RUNNER_TEMP/coverage/lcov.info"
           cargo llvm-cov report --html --output-dir "$RUNNER_TEMP/coverage"
       - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-report-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage
@@ -135,13 +138,13 @@ jobs:
 
   audit:
     name: Dependency security audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-audit@0.22.2
       - run: cargo audit
@@ -149,17 +152,19 @@ jobs:
   # Embedded clippy (deny warnings) + release build for the nRF52840 target.
   embedded:
     name: Embedded build & clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     outputs:
       firmware-artifact-id: ${{ steps.upload.outputs.artifact-id }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain + ARM target
-        run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        run: |
+          rustup install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Clippy (embedded, deny warnings)
         run: cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings
       # The library and the binary share the name bt2usb, so document them apart.
@@ -183,7 +188,7 @@ jobs:
             --objcopy "$llvm_bin/llvm-objcopy"
       - name: Upload checked firmware and build manifest
         id: upload
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bt2usb-checked-firmware-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-input/*
@@ -193,15 +198,17 @@ jobs:
   # and asserts the coordinator + UI logic run on the simulated MCU.
   simulation:
     name: Renode simulation test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Install pinned Rust toolchain + ARM target
-        run: rustup show active-toolchain
-      - uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c # v2
+        run: |
+          rustup install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Clippy (simulation, deny warnings)
         run: cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
       - name: Build simulation documentation (deny warnings)
@@ -218,7 +225,7 @@ jobs:
           renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot
       - name: Upload simulation diagnostics
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: renode-results-${{ github.run_attempt }}
           path: ${{ runner.temp }}/renode-results
@@ -230,7 +237,7 @@ jobs:
     name: Verify and attest release package
     needs: [lint-and-test, coverage, audit, embedded, simulation]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
@@ -240,7 +247,7 @@ jobs:
       release-artifact-id: ${{ steps.upload.outputs.artifact-id }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Validate exact release version, including prerelease
@@ -278,7 +285,7 @@ jobs:
         run: cp "$ATTESTATION_BUNDLE" dist/provenance.sigstore.json
       - name: Upload attested release package
         id: upload
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bt2usb-attested-release-${{ github.run_attempt }}
           path: dist/*
@@ -289,7 +296,7 @@ jobs:
     name: Prepare draft firmware release
     needs: release-package
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
@@ -314,7 +321,7 @@ jobs:
             exit 1
           fi
       - name: Create draft for hardware validation and review
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           draft: true
           prerelease: ${{ needs.release-package.outputs.prerelease == 'true' }}

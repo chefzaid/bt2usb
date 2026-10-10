@@ -54,7 +54,7 @@ CI holds the host library's total line coverage at a floor, and treats the
 floor as a regression guard, never as evidence.
 
 - **Where.** A separate "Host coverage" job in
-  [ci.yml](../../.github/workflows/ci.yml) runs on `ubuntu-latest` for every
+  [ci.yml](../../.github/workflows/ci.yml) runs on `ubuntu-24.04` for every
   trigger, like the other check jobs, and release packaging needs it to pass.
 - **What it runs.** `cargo llvm-cov --locked --lib --tests --no-report` with
   cargo-llvm-cov 0.9.1 (the version `mask coverage-install` pins) and the

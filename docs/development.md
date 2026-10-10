@@ -504,7 +504,7 @@ stay with the host whose HID behavior you are testing. Then check `lsusb` and
 
 Mask recipes are Bash, so use WSL or Git Bash for `mask`. The Cargo and Python
 commands behind them also work directly in PowerShell; CI runs its host job on
-`windows-latest` that way.
+`windows-2025` that way.
 
 | Goal | PowerShell |
 | --- | --- |

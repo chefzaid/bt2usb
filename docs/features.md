@@ -908,7 +908,7 @@ at 07:23 UTC:
 
 | Job | What it checks |
 | --- | --- |
-| Host tests (ubuntu-latest, windows-latest) | Formatting, the release helper's tests, actionlint 1.7.12 (downloaded and SHA-256 verified, Linux only), tag/version match on tags, host tests, host Clippy, the 500-line file limit and the Markdown checks (Linux only), host rustdoc with warnings denied |
+| Host tests (ubuntu-24.04, windows-2025) | Formatting, the release helper's tests, actionlint 1.7.12 (downloaded and SHA-256 verified, Linux only), tag/version match on tags, host tests, host Clippy, the 500-line file limit and the Markdown checks (Linux only), host rustdoc with warnings denied |
 | Host coverage | `cargo llvm-cov` over the host tests, report uploaded, fails below 97% of lines ([ADR 0023](adr/0023-host-coverage-floor.md)) |
 | Dependency security audit | `cargo audit` with cargo-audit 0.22.2 |
 | Embedded build & clippy | Embedded Clippy, firmware rustdoc with warnings denied, release build, staged firmware and build manifest |
@@ -916,9 +916,10 @@ at 07:23 UTC:
 | Verify and attest release package; Prepare draft firmware release | Tags only; see below |
 
 The default token permission is read-only; only the two release jobs get more.
-Every action is pinned to a full commit SHA with a comment naming an upstream
-tag; the comments for `Swatinem/rust-cache` and `taiki-e/install-action` name
-only the major tag `v2`. Dependabot proposes weekly Cargo and Actions updates.
+Every action is pinned to a full commit SHA with a comment naming its exact
+upstream release, all on the Node 24 runtime or composite, and the jobs run on
+the pinned `ubuntu-24.04` and `windows-2025` images. Dependabot proposes weekly
+Cargo and Actions updates.
 Release inputs and Renode results are staged in the runner's temporary
 directory, not in the cached `target/`.
 

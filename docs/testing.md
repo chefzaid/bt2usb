@@ -439,11 +439,14 @@ attestation and release APIs; see
 pushes of tags matching `v*`, pull requests, manual dispatch, and a weekly
 schedule (cron `23 7 * * 1`, Mondays 07:23 UTC). A newer run for the same ref
 cancels an in-progress one, except for tag refs. The default token permission is
-`contents: read`, and builds use `DEFMT_LOG=info`.
+`contents: read`, and builds use `DEFMT_LOG=info`. Every job runs on a pinned
+runner image, `ubuntu-24.04` or `windows-2025`, so a change of the `-latest`
+labels cannot change the build environment unannounced, and each job installs
+the toolchain from `rust-toolchain.toml` with `rustup install`.
 
 | Job | Runner and limit | Checks, in order |
 | --- | --- | --- |
-| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
+| Host tests (`ubuntu-24.04`, `windows-2025`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
 | Dependency security audit | Ubuntu, 10 min | `cargo audit` with cargo-audit 0.22.2 |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |

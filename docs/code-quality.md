@@ -548,26 +548,35 @@ its commit and scope cannot be checked and goes stale silently.
 | Rust toolchain | `channel = "1.95.0"` in `rust-toolchain.toml`; `rust-version = "1.95"` in `Cargo.toml` | Enforced: rustup installs exactly this version, and `release.py package` rejects a build whose `rustc` differs |
 | Crate graph | `Cargo.lock` is tracked (the `.gitignore` comment says so), and every Cargo build, test, Clippy, doc, size, bloat, and llvm-cov command in CI and `maskfile.md` passes `--locked` | Enforced: Cargo fails instead of changing the lockfile |
 | `nrf-softdevice`, `nrf-softdevice-s140` | Git `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"`; `nrf-softdevice` is replaced by `vendor/nrf-softdevice` through `[patch]` | Enforced by Cargo |
-| GitHub Actions | Each `uses:` names a full commit SHA with a tag comment | Enforced by the SHA; the comment is informational |
+| GitHub Actions | Each `uses:` names a full commit SHA, never an annotated tag object, with a comment naming the exact release that SHA is | Enforced by the SHA; the comment is informational |
+| Runner images | `ubuntu-24.04` for every Linux job and `windows-2025` for the Windows host job, instead of the moving `ubuntu-latest` and `windows-latest` labels | Enforced by the label; GitHub still updates the image's software weekly within that release |
 | cargo-audit, actionlint | `cargo-audit@0.22.2` through `taiki-e/install-action`; actionlint 1.7.12 with a SHA-256 check | Enforced in CI |
 | Developer tools | `cargo install --locked` with an exact `--version` in `mask deps`, `mask coverage-install`, and the devcontainer setup; the tarpaulin hint `mask coverage` prints uses the same form | Pinned by hand: the versions repeat in `maskfile.md`, `post-create.sh`, and the [development guide](development.md#toolchain), cargo-llvm-cov 0.9.1 also in the CI coverage job, and nothing checks that they agree |
 | SoftDevice, Renode, Robot Framework | Download URLs and versions without digests | Gap; see [security](security.md#supply-chain) |
 
 The action pins and their comments are:
 
-| Action | Tag comment |
-| --- | --- |
-| `actions/checkout` | `v4.4.0` |
-| `Swatinem/rust-cache` | `v2` |
-| `taiki-e/install-action` | `v2` |
-| `actions/upload-artifact` | `v4.6.2` |
-| `actions/download-artifact` | `v8.0.1` |
-| `actions/attest` | `v4.2.2` |
-| `softprops/action-gh-release` | `v2.6.2` |
+| Action | Tag comment | Runtime |
+| --- | --- | --- |
+| `actions/checkout` | `v7.0.1` | Node 24 |
+| `Swatinem/rust-cache` | `v2.9.2` | Node 24 |
+| `taiki-e/install-action` | `v2.87.21` | Composite (shell) |
+| `actions/upload-artifact` | `v7.0.1` | Node 24 |
+| `actions/download-artifact` | `v8.0.1` | Node 24 |
+| `actions/attest` | `v4.2.2` | Node 24 |
+| `softprops/action-gh-release` | `v3.0.3` | Node 24 |
 
-Two comments name a major-version tag rather than an exact release, so they do
-not say which release the SHA was taken from. Replacing them with exact tags
-is part of the open item [CI runtime maintenance](../TODO.md#release-provenance-and-supply-chain).
+On 2026-10-10 `git ls-remote` confirmed that each SHA is the commit of the
+named tag (for annotated tags, the commit the tag object points to), and
+`runs.using` in each action's `action.yml` at that SHA gave the runtime.
+Updates take an older, settled release over one published days before:
+`upload-artifact` v7.0.2 and `download-artifact` v8.0.2 were three days old,
+so v7.0.1 and v8.0.1 stay. Before taking a new major release, read its
+changelog for changed inputs and outputs; the 2026-10-10 updates kept every
+input and output this workflow uses (`name`, `path`, `if-no-files-found`, and
+the `artifact-id` output of upload-artifact; `persist-credentials` of
+checkout; `draft`, `prerelease`, `target_commitish`, `files`,
+`fail_on_unmatched_files`, and `generate_release_notes` of action-gh-release).
 
 ### Auditing
 
@@ -739,7 +748,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
-| Two action pin comments (`Swatinem/rust-cache`, `taiki-e/install-action`) say `# v2` instead of an exact release | [CI runtime maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 | No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
 

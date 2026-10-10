@@ -1050,9 +1050,7 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
 - [x] Stage release inputs and Renode results in the runner's temporary
   directory instead of the Rust-cached `target/`. Fail the release job before
   upload when the tag's release is already published; reruns may update only a
-  draft. Action pin comments name the exact upstream tag each SHA resolves to,
-  except `Swatinem/rust-cache` and `taiki-e/install-action`, whose comments name
-  only the moving major tag `v2` (open under CI runtime maintenance below)
+  draft. Action pin comments name the exact upstream tag each SHA resolves to
   (`.github/workflows/ci.yml`,
   [deployment](docs/deployment.md#re-running-a-tag-workflow)).
 - [ ] **P0** **Hosted provenance and release recovery acceptance.**
@@ -1112,18 +1110,20 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   passes, existing stores load after the upgrade, and the affected first-flash
   sections pass on a board
   ([security](docs/security.md#supply-chain)).
-- [ ] **P1** **CI runtime maintenance.** The 2026-10-09 run reports that the
-  pinned `actions/checkout` v4.4.0 and `actions/upload-artifact` v4.6.2 target
-  the deprecated Node.js 20 runtime, and that `ubuntu-latest` moves to Ubuntu 26
-  from 2026-10-19. Move to maintained action releases (Dependabot pull
-  requests #4 and #5 were closed unmerged) and pin or validate the runner
-  image. Replace the `# v2` comments on the `Swatinem/rust-cache` and
-  `taiki-e/install-action` pins with the exact release each SHA resolves to.
-  On 2026-10-09 `git ls-remote` showed the `install-action` SHA is tag
-  `v2.87.21`, and the `rust-cache` SHA is the annotated `v2` tag object, whose
-  commit `6323deb` is tag `v2.9.2`; pin that commit instead of the tag object.
-  Accept when a run shows no deprecation annotations and every pin is a commit
-  SHA whose comment names its exact tag
+- [ ] **P1** **CI runtime maintenance.** Since 2026-10-10 every action runs
+  on Node 24 or is composite: `actions/checkout` v7.0.1 and
+  `actions/upload-artifact` v7.0.1 replace the Node 20 v4.4.0 and v4.6.2, and
+  `softprops/action-gh-release` v3.0.3 replaces the Node 20 v2.6.2 in the
+  tag-only release job. `Swatinem/rust-cache` is pinned to commit `6323deb`
+  (`v2.9.2`) instead of the `v2` tag object, `taiki-e/install-action` names
+  `v2.87.21`, every job runs on `ubuntu-24.04` or `windows-2025` instead of the
+  moving `-latest` labels (`ubuntu-latest` was to move to Ubuntu 26 from
+  2026-10-19), and the toolchain steps call `rustup install`, ending rustup's
+  warning that implicit installation is deprecated
+  ([pinning](docs/code-quality.md#pinning)). Accept when a hosted run of the
+  check jobs shows no deprecation annotation. The release jobs' actions were
+  checked from their `action.yml`; they first run with the first tag, under
+  [Hosted provenance and release recovery acceptance](#release-provenance-and-supply-chain)
   ([testing](docs/testing.md#continuous-integration)).
 - [ ] **P1** **Reproducible firmware evidence.** Compare artifacts from two
   clean environments, document remaining nondeterminism, and enforce release

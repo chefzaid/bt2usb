@@ -862,8 +862,8 @@ are open work.
   connection parameter policy, long-read assembly, management primitives,
   advertisement parser, storage framing and record validation, power policy,
   and UI logic.
-- The source contains 294 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 291 unit tests and the 3
+- The source contains 300 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 297 unit tests and the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), all
   of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
@@ -995,9 +995,11 @@ implemented, so do not describe them as features.
   example one saved by firmware older than the bonding store, and to any
   device that copies its address
   ([Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing)).
-- **The scan list holds the first eight devices heard.** In a crowded room, or
-  with deliberate fake advertisers nearby, the device you want may be missing
-  from the list; move it closer and scan again
+- **The scan list holds eight devices.** Since 2026-10-10 it keeps the eight
+  HID advertisers received most strongly, so a peripheral held next to the
+  bridge is listed however many others are in range. Fake advertisers that
+  reach the bridge more strongly than your device can still push it out; move
+  it closer and scan again
   ([Scan list under crowding](../TODO.md#ble-central-and-pairing)).
 - **Readiness for firmware setup keys is unmeasured.** The bridge starts
   reconnecting saved devices at power-up and listens for them half the time,

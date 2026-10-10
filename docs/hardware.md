@@ -295,7 +295,7 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | --- | --- | --- |
 | `BLE_MAX_CONNECTIONS` | 2 | Simultaneous links; sizes the coordinator slots, slot workers and channels, report-merger sources, host-LED receivers, and SoftDevice link counts |
 | `BLE_SCAN_DURATION_SECS` | 8 | Scan window in seconds |
-| `BLE_MAX_DISCOVERED` | 8 | Maximum cached scan results; also the Devices screen's list capacity |
+| `BLE_MAX_DISCOVERED` | 8 | Maximum cached scan results, the strongest HID advertisers heard; also the Devices screen's list capacity |
 | `BLE_CONN_INTERVAL_MIN` / `MAX` | 6 / 12 | 7.5–15 ms, in 1.25 ms units |
 | `BLE_SLAVE_LATENCY` | 0 | Connection events a peripheral may skip |
 | `BLE_CONN_EVENT_LENGTH` | 6 | 7.5 ms SoftDevice event length, in 1.25 ms units |

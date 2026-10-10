@@ -350,8 +350,11 @@ which can be too late for a firmware setup key.
    *before* taking the GAP lock, then runs an active scan
    (`"BLE scan starting ({} s window)"`). Each advertisement goes through
    `merge_advertisement`: a new entry needs the HID service UUID `0x1812`; a
-   later name-only scan response updates a known entry. The list holds at most
-   `BLE_MAX_DISCOVERED` (8) devices.
+   later name-only scan response updates a known entry, and every response
+   refreshes the entry's RSSI. The list holds at most `BLE_MAX_DISCOVERED` (8)
+   devices. When it is full, a new HID advertiser replaces the entry with the
+   weakest latest RSSI if it is received more strongly, so the scan ends with
+   the eight strongest HID advertisers rather than the first eight heard.
 3. The scan stops at the 8-second deadline, checked when an advertisement
    arrives, or at a 10-second wall-clock backstop
    (`"BLE scan hit hard timeout backstop"`). The GAP lock is released before

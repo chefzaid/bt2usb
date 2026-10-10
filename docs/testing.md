@@ -146,17 +146,16 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
-2026-10-10, in the commit that moves the reconnect wake and saved-device
-identity into the pure table. The tree holds 294 `#[test]` functions: 291 in
-files compiled into the host library
-and 3 in
+2026-10-10, in the commit that keeps the strongest devices in a crowded scan
+list. The tree holds 300 `#[test]` functions: 297 in files compiled into the
+host library and 3 in
 `tests/integration.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
 tests, before four advertisement tests moved into the host library and
 fourteen UI tests (the management deadline, the saved-device list, scans, and
-`UiState` link updates), four keyboard-report tests, one connection-parameter test, and eight reconnect wake and identity tests were added; the 291 passed
+`UiState` link updates), four keyboard-report tests, one connection-parameter test, eight reconnect wake and identity tests, and six crowded-scan tests were added; the 297 passed
 with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
@@ -182,7 +181,7 @@ with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 26 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved, reconnection, and disconnect during retry. `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. |
+| [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 32 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved, reconnection, and disconnect during retry. `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 7 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
 | [ble/management.rs](../src/ble/management.rs) | 5 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |

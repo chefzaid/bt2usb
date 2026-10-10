@@ -691,8 +691,9 @@ the wanted device is missing from `Select device`.
   not advertising.
 - Its advertisement does not include the HID service UUID (`0x1812`); only HID
   advertisers are listed.
-- The list holds at most 8 devices (`BLE_MAX_DISCOVERED`); in a crowded room,
-  the first eight HID advertisers fill it.
+- The list holds at most 8 devices (`BLE_MAX_DISCOVERED`), the eight HID
+  advertisers received most strongly. In a crowded room a distant peripheral
+  can be left out; hold it next to the bridge and scan again.
 - A radio or antenna problem. A scan that fails outright logs
   `BLE scan ended with error` and shows `Scan failed`.
 

@@ -225,8 +225,9 @@ pub async fn scan(
         // this synchronous SoftDevice callback cannot await UI backpressure.
         merge_advertisement(&mut found, address, params.rssi, data);
 
-        // Continue through the window even when full so scan responses can
-        // still supply names for the devices already in the bounded list.
+        // Continue through the window even when full: scan responses still
+        // supply names for listed devices, and a HID advertiser received more
+        // strongly than the weakest listed one still replaces it.
         None
     });
 

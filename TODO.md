@@ -25,7 +25,7 @@ probe, or USB host to close.
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
 | [FIXME](#fixme) | 24 | 0 | 0 |
-| [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
+| [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **105** | **77** | **22** |
+| **Total** | **106** | **76** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -434,13 +434,21 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   demonstrate full reads and error handling, and same-length incompatible
   layouts are rejected by the supported descriptor-driven translation policy
   ([architecture](docs/architecture.md#hid-path-and-limits)).
-- [ ] **P1** **Scan list under crowding.** The scan keeps the first
-  `BLE_MAX_DISCOVERED` (8) HID advertisers it hears, so a crowded room, or
-  deliberate fake advertisers, can hide the intended device. Decide how the
-  bounded list chooses entries (for example by signal strength or by letting
-  the user rescan with a name filter). Accept when host tests show the intended
-  device is listed with more than eight HID advertisers present
-  ([security](docs/security.md#threat-model)).
+- [x] **P1** **Scan list under crowding.** The scan kept the first
+  `BLE_MAX_DISCOVERED` (8) HID advertisers it heard, so a crowded room, or
+  deliberate fake advertisers, could hide the intended device. Decided on
+  signal strength, the choice that needs no new UI: since 2026-10-10
+  `merge_advertisement` lets a new HID advertiser replace the listed device
+  with the weakest latest RSSI when it is received more strongly, so a scan
+  ends with the eight strongest HID advertisers and a peripheral held next to
+  the bridge is always listed. Ties keep the listed device, an unavailable RSSI
+  (127) ranks last, and a replaced device can return only through an
+  advertisement that carries the HID UUID. Six host tests in
+  `src/ble/coordinator_tests.rs` cover it, including a keyboard at -40 dBm
+  heard after twenty advertisers at -70 to -89 dBm. Advertisers that reach the
+  bridge more strongly than the intended device can still crowd it out
+  ([security](docs/security.md#threat-model); `src/ble/coordinator.rs`,
+  `src/ble/scanner.rs`).
 - [ ] **P1** **Keyboard ready in time for firmware setup keys.** *(hardware)*
   A monitor that powers its hub together with the PC boots the bridge at the
   same moment as the PC, and the keyboard must work before the PC's firmware

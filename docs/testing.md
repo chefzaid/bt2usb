@@ -905,6 +905,7 @@ commit; nothing ran on a board.
 | Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 18.00 s and the model checks in 1.30 s. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
 | Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change (enabling a feature of an existing dependency does not change the lock file) |
 | Vendored panic fixes | Review | Reviewed, not tested: no test reaches the vendored crate, and exercising the fixed paths needs a peer that misbehaves on purpose |
+| Hosted CI | GitHub Actions | Push run 38093287153 for `5783f5b` passed every job |
 | Board/radio/USB acceptance | Physical hardware | Not performed; the change needs the pairing, reconnect, and device-management checks in the first-flash checklist ([4. Pairing and daily use](first-flash.md#4-pairing-and-daily-use)) |
 
 ## Validation Record — 2026-10-10, OLED In Renode

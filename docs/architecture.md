@@ -388,7 +388,9 @@ which can be too late for a firmware setup key.
    `BLE_FAST_SCAN_WINDOW`), because the device was just seen advertising, a
    7.5–15 ms interval,
    zero peripheral latency, and a 4-second supervision timeout. The call also
-   performs the MTU exchange. The GAP lock is released when it returns.
+   performs the MTU exchange; the link uses the smaller of 64 and the
+   peripheral's offer, or the default 23 when the peripheral refuses the
+   exchange. The GAP lock is released when it returns.
 7. Security: `encrypt()` uses stored keys. If the `Bonder` holds no keys for
    the peer (`PeerKeysNotFound`) and this is a user connection, the worker calls
    `request_pairing()`. The bond handler reports no input/output capability and

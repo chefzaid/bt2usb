@@ -122,7 +122,16 @@ where
     #[cfg(feature = "ble-gatt-client")]
     {
         let mtu = config.att_mtu.unwrap_or(_sd.att_mtu);
-        crate::ble::gatt_client::att_mtu_exchange(&conn, mtu).await?;
+        // bt2usb patch: a server may refuse the Exchange MTU Request with an
+        // ATT error, such as Request Not Supported; the link then keeps the
+        // default ATT_MTU of 23 and is still usable. A timeout, a disconnect,
+        // or a SoftDevice error still fails the connect.
+        match crate::ble::gatt_client::att_mtu_exchange(&conn, mtu).await {
+            Err(MtuExchangeError::Gatt(_err)) => {
+                warn!("att mtu exchange refused: {:?}; keeping the default mtu", _err);
+            }
+            result => result?,
+        }
     }
 
     Ok(conn)

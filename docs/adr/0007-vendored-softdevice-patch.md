@@ -73,6 +73,10 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
     exchange, the smaller of the requested MTU and the server's offer and
     never below 23, instead of the server's offer; the Report Map reader
     sizes its fragments from it
+  - since 2026-10-10, keep a connection whose peripheral refuses the MTU
+    exchange with an ATT error, at the default MTU of 23, instead of failing
+    the connect (`central::connect_inner`, the one change outside
+    `gatt_client.rs` in this list)
 - Since 2026-10-10 ([ADR 0025](0025-panic-lints-and-inventory.md)), remove the
   panics a peer could reach outside the GATT client: bt2usb enables the
   crate's `evt-max-size-256` feature, so the event buffer holds the largest
@@ -92,8 +96,9 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
 - Record the base commit, every change, and the removal condition in
   [vendor/nrf-softdevice/README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md).
 - Remove the patch only when the pinned upstream provides equivalent offset
-  reads, timeout errors, bounded discovery, the panic fixes above, and the
-  negotiated ATT MTU. Never
+  reads, timeout errors, bounded discovery, the panic fixes above, the
+  negotiated ATT MTU, and a connect that survives a refused MTU exchange.
+  Never
   deploy a change by editing Cargo's git checkout.
 
 ## Alternatives Considered
@@ -176,7 +181,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | --- | --- |
 | Pin and patch | `nrf-softdevice` and `nrf-softdevice-s140` with `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"` and the `[patch]` entry in [Cargo.toml](../../Cargo.toml); the resolved graph in `Cargo.lock` |
 | Vendored crate | `vendor/nrf-softdevice/` with `LICENSE-MIT`, `LICENSE-APACHE`, and its own `Cargo.toml`, which differs from upstream only in turning the sibling crates' `path` dependencies into git dependencies at the same `rev` and in adding the `log-sensitive-data` feature |
-| Patched functions | `read_by_offset` (new), `read`, the new variants `ReadError::{Timeout, InvalidResponse}`, `DiscoverError::{Timeout, InvalidResponse, TooManyAttributes}`, and `MtuExchangeError::Timeout` (`ReadError::Truncated` is upstream's), and the stored MTU in `att_mtu_exchange` (since 2026-10-10), in `vendor/nrf-softdevice/src/ble/gatt_client.rs` |
+| Patched functions | `read_by_offset` (new), `read`, the new variants `ReadError::{Timeout, InvalidResponse}`, `DiscoverError::{Timeout, InvalidResponse, TooManyAttributes}`, and `MtuExchangeError::Timeout` (`ReadError::Truncated` is upstream's), and the stored MTU in `att_mtu_exchange` (since 2026-10-10), in `vendor/nrf-softdevice/src/ble/gatt_client.rs`; the refused-exchange arm in `central::connect_inner` (since 2026-10-10) |
 | Fragment assembly | `LongRead` in [long_read.rs](../../src/ble/long_read.rs): `MAX_ATTRIBUTE_LEN = 512`, MTU accepted only in `23..=517`, completion only on a short final fragment or a valid end-of-value response |
 | Report Map read | `read_report_map` in [hid_client.rs](../../src/ble/hid_client.rs) maps failures to `BleErrorTag::ReportMapReadFailed`, `ReportMapTooLarge`, or `ReportMapInvalid`, shown as "HID map read failed", "HID map too large", and "Unsupported HID map" |
 | Absent map | Only a missing Report Map characteristic allows legacy classification, logged as `HID report map absent; using legacy report classification` |

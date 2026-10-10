@@ -28,7 +28,12 @@ server's offer, and never less than 23 (the S140 documentation of
 `sd_ble_gattc_exchange_mtu_request`). Upstream stored the server's offer, so
 with a peripheral offering more than bt2usb's 64, `Connection::att_mtu`
 overstated the link's MTU, and bt2usb's Report Map reader took the first
-63-byte fragment for the last one.
+63-byte fragment for the last one. And `central::connect_inner` no longer
+fails the connection when the peripheral answers the Exchange MTU Request
+with an ATT error, such as Request Not Supported: it logs `att mtu exchange
+refused: {:?}; keeping the default mtu` and keeps the link at the default
+ATT MTU of 23. A timeout, a disconnect, or a SoftDevice error still fails the
+connect.
 
 Discovery no longer panics on peer-controlled counts or handles. With the
 configured 64-byte ATT MTU one response can carry eight characteristic
@@ -87,6 +92,7 @@ Remove this patch only when the pinned upstream provides equivalent offset
 reads, timeout errors, bounded discovery, a way for the application to
 answer connection parameter requests, a way to keep peer addresses,
 passkeys, and notification bytes out of debug and trace logs, no panic
-on an unexpected timeout source or a disconnect error, and an ATT MTU that
-matches the one the SoftDevice uses. Do not edit the Cargo checkout to deploy this change; the root Cargo
+on an unexpected timeout source or a disconnect error, an ATT MTU that
+matches the one the SoftDevice uses, and a connect that survives a refused
+MTU exchange. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

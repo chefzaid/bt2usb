@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 35 | 4 | 0 |
+| [FIXME](#fixme) | 36 | 3 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **122** | **75** | **21** |
+| **Total** | **123** | **74** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -421,16 +421,20 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   not public or random static is not stored, with a log line and a UI error),
   no code path calls `address_type` on a peer-supplied address, and host tests
   cover each identity type.
-- [ ] **P1** **A peripheral that refuses the MTU exchange cannot connect.**
-  `central::connect_with_security` runs `att_mtu_exchange` inside the vendored
-  `connect_inner` and fails the whole connection when it returns an error. A
-  GATT server may answer the Exchange MTU Request with an ATT error (Request
-  Not Supported), after which the Core specification has both sides use the
-  default 23-byte MTU; such a peripheral would fail every connect, shown as a
-  connect failure on the OLED. A timeout or a disconnect during the exchange
-  should still fail the connect. Found by the panic inventory's reviewer; not
-  reproduced. Accept when an ATT error response keeps the link at MTU 23 and
-  the connect continues, and the vendor notes record the change.
+- [x] **P1** **A peripheral that refused the MTU exchange could not
+  connect.** `central::connect_with_security` runs `att_mtu_exchange` inside
+  the vendored `connect_inner` and failed the whole connection when it
+  returned an error. A GATT server may answer the Exchange MTU Request with an
+  ATT error (Request Not Supported), after which both sides keep the default
+  23-byte MTU; such a peripheral failed every connect. Found by the panic
+  inventory's reviewer; not reproduced. Fixed: an ATT error response logs
+  `att mtu exchange refused: {:?}; keeping the default mtu` and the connect
+  continues at MTU 23, while a timeout, a disconnect, or a SoftDevice error
+  still fails it (`vendor/nrf-softdevice/src/ble/central.rs`, marked
+  `bt2usb patch:`; [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
+  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
+  embedded builds and Clippy; hardware evidence belongs to "Report Map
+  interoperability and legacy policy".
 - [ ] **P1** **A peripheral's own MTU exchange or CCCD access is never
   answered.** With the `ble-gatt-server` feature off, the vendored
   `ble::on_evt` drops every GATT server event, including

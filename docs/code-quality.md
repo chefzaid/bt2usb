@@ -52,7 +52,7 @@ Clippy warning into an error.
 | Release firmware build | `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` | `mask ci`, `mask build-release` | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest` |
 | Simulation build | `cargo build --locked --features sim --target thumbv7em-none-eabihf` | `mask ci`, `mask sim-build` | Renode simulation test | Fails the job |
 | Renode scenario | `renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot` | `mask sim-test` (needs `renode-test` on PATH; `mask sim-setup` installs it on Linux or WSL) | Renode simulation test | Fails the job; results upload even on failure |
-| Dependency audit | `cargo audit`, cargo-audit 0.22.2 | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory; unmaintained-crate warnings do not fail it |
+| Dependency audit | `cargo audit`, cargo-audit 0.22.2, with [.cargo/audit.toml](../.cargo/audit.toml) | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory or an unmaintained, unsound, or yanked crate, except the two advisories ignored by ID ([auditing](#auditing)) |
 | Workflow lint | `actionlint`, 1.7.12, with ShellCheck 0.11.0 on `PATH` for the `run:` scripts; both SHA-256 checked before use | `actionlint` | Host tests, Linux only | Fails the Linux job |
 | Python lint and formatting | `ruff check` and `ruff format --check` over every tracked `*.py` file, Ruff 0.16.9, settings in `ruff.toml`, run by `python scripts/lint_scripts.py` ([Python And Shell Checks](#python-and-shell-checks)) | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job and lists each finding |
 | Shell lint | `shellcheck` 0.11.0 over every tracked `*.sh` file and every Bash recipe in `maskfile.md`, run by the same script | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job; a recipe finding names its `maskfile.md` line and recipe |
@@ -629,25 +629,25 @@ checkout; `draft`, `prerelease`, `target_commitish`, `files`,
 
 ### Auditing
 
-`cargo audit` runs in every CI run, including the weekly schedule. It has no
-configuration file, no ignore list, and no `--deny` option. It fails the job
-for a vulnerability advisory; warnings, such as unmaintained crates, are
-printed but do not fail it.
+`cargo audit` runs in every CI run, including the weekly schedule, with the
+settings in [.cargo/audit.toml](../.cargo/audit.toml). Since 2026-10-10
+`deny = ["warnings"]` makes it fail on unmaintained, unsound, and yanked crates
+as well as on vulnerability advisories, so a new advisory against any crate in
+`Cargo.lock` fails the next push or weekly run. Two advisories are ignored by
+ID, each with a comment naming the chain and what would remove it; an ignore
+covers that advisory only, so a different advisory against the same crate
+still fails.
 
-The last recorded audit, on 2026-09-28
-([validation record](testing.md#validation-record--2026-09-28)), reported no
-vulnerabilities and two unmaintained transitive dependencies. Both versions
-are still in `Cargo.lock`. The chains below were traced from `Cargo.lock`
-with a script, because `cargo tree` needs network access to the Git
-dependencies; the audit itself was not re-run for this guide.
+| Crate | Advisory (ignored) | Pulled in by | What removes it |
+| --- | --- | --- | --- |
+| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. 0.7.9 is the newest release, and cortex-m's main branch still depends on `bare-metal` 0.2 (checked 2026-10-10, commit `f259e37`) |
+| `proc-macro-error 1.0.4` | `RUSTSEC-2024-0370` (unmaintained) | `maybe-async-cfg 0.2.4`, which `ssd1306 0.10.0` pins with `=0.2.4` | `maybe-async-cfg 0.2.5` replaced it with `manyhow`, but neither the `ssd1306` 0.10.0 release nor its main branch (commit `79cb629`, checked 2026-10-10) accepts 0.2.5. Raising the pin alone does not work: `ssd1306` then fails to compile with 19 errors, because 0.2.5 generates the async variants differently (tried on 2026-10-10 with a patched copy), so `ssd1306` itself needs porting or replacing |
 
-| Crate | Advisory | Pulled in by |
-| --- | --- | --- |
-| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (unmaintained) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on |
-| `proc-macro-error 1.0.4` | `RUSTSEC-2024-0370` (unmaintained) | `maybe-async-cfg 0.2.4`, a dependency of `ssd1306 0.10.0` |
-
-Both arrive through other crates, so removing them means upgrading or
-replacing those crates rather than changing bt2usb code. The work is tracked in
+The 2026-10-10 run of cargo-audit 0.22.2 against the then-current advisory
+database (1296 advisories, 169 locked crates) found no vulnerabilities and only
+these two warnings; with the configuration it exits 0, and with either ignore
+removed it exits 1. Removing them means upgrading or replacing other crates,
+not changing bt2usb code; the options are in
 [TODO.md](../TODO.md#release-provenance-and-supply-chain).
 
 ### Updates
@@ -795,7 +795,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The connection workers, security handler, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
-| `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 

@@ -910,7 +910,7 @@ at 07:23 UTC:
 | --- | --- |
 | Host tests (ubuntu-24.04, windows-2025) | Formatting, the release helper's tests, tag/version match on tags, host tests, host Clippy, host rustdoc with warnings denied; on Linux only, the 500-line file limit, module comments, the Markdown checks, Ruff and ShellCheck over the scripts and mask recipes, and actionlint (actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 downloaded and SHA-256 verified) |
 | Host coverage | `cargo llvm-cov` over the host tests, report uploaded, fails below 97% of lines ([ADR 0023](adr/0023-host-coverage-floor.md)) |
-| Dependency security audit | `cargo audit` with cargo-audit 0.22.2 |
+| Dependency security audit | `cargo audit` with cargo-audit 0.22.2; fails on any vulnerability, unmaintained, unsound, or yanked advisory except two ignored by ID |
 | Embedded build & clippy | Embedded Clippy (also with the `log-sensitive-data` opt-in), firmware rustdoc with warnings denied, release build, staged firmware and build manifest |
 | Renode simulation test | Simulation Clippy, simulation rustdoc with warnings denied, build, headless Robot test, results uploaded |
 | Verify and attest release package; Prepare draft firmware release | Tags only; see below |

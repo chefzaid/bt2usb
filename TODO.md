@@ -291,6 +291,7 @@ it becomes workable again.
 | Item | What is needed | Options (recommendation first) |
 | --- | --- | --- |
 | [Security maintenance ownership](#release-provenance-and-supply-chain) (P0) | A private reporting channel, which versions get fixes, who triages, and how fast reporters hear back. SECURITY.md cannot name a channel until one exists | 1. Enable GitHub private vulnerability reporting as the only channel; fix only the latest release tag and `main`; you triage; acknowledge within 7 days and give a fix or plan within 30 days. 2. Publish a security email address instead, with the same policy |
+| [Replace unmaintained transitive dependencies](#release-provenance-and-supply-chain) (P1) | How to drop `proc-macro-error` (via `ssd1306`), and whether documented audit ignores may close the item while no released `cortex-m` drops `bare-metal`. The audit already fails on any other unmaintained crate | 1. Keep both ignores until upstream releases remove the crates, and accept "dropped, or ignored by ID with its chain and removal trigger" as the closing criterion; both are low risk (compile-time only, or stable core types). 2. Replace `ssd1306` with a small in-tree async driver for the 128x64 panel, under a new ADR, with host tests for the command bytes and a Renode and board display check; drops `proc-macro-error`, `maybe-async-cfg`, and their `syn` 1 tree. 3. Port `ssd1306` to `maybe-async-cfg` 0.2.5 and offer it upstream from your GitHub account, keeping the ignore until a release carries it |
 | [Hardware-evidence label and private reporting](#release-provenance-and-supply-chain) (P2) | Two repository settings no tool here can change: create the `hardware-evidence` label (Issues, Labels, New label) that the hardware-result template applies, and turn on private vulnerability reporting (Settings, Code security) | 1. Do both; the loop then updates SECURITY.md and checks a new hardware-result issue. 2. Create only the label and choose an email channel in the row above |
 
 ## Contribution Rules For This Plan
@@ -1162,11 +1163,24 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained; both are still
   in `Cargo.lock`. Trace their dependency chains, track the upstream migration,
   and adopt maintained replacements through dependency upgrades; CI runs
-  `cargo audit` without a deny option, so these warnings do not fail the job
-  today. Accept when the lockfile no longer selects these affected versions,
+  `cargo audit` without a deny option until 2026-10-10, so these warnings did
+  not fail the job. Accept when the lockfile no longer selects these affected versions,
   the audit is clean without advisory suppression, the CI audit fails on
   unmaintained-crate warnings, and host/firmware/simulation regression checks
   pass ([testing](docs/testing.md#validation-record--2026-09-28)).
+  Progress (2026-10-10): `.cargo/audit.toml` now makes `cargo audit` fail on
+  unmaintained, unsound, and yanked crates, and ignores only these two
+  advisories by ID, each with its chain and removal trigger, so any new
+  advisory fails CI. Neither crate can be dropped by an upgrade today:
+  `bare-metal` has no patched version and comes from `cortex-m` 0.7.9, the
+  newest release, whose main branch still uses it; `ssd1306` 0.10.0 and its
+  main branch pin `maybe-async-cfg =0.2.4`, and with 0.2.5 (which drops
+  `proc-macro-error`) `ssd1306` fails to compile, so it needs porting or
+  replacing. Both run no code that a peer can reach: `proc-macro-error` runs
+  only at compile time, and `bare-metal` supplies the `Mutex` and
+  `CriticalSection` types of `cortex-m` 0.7
+  ([auditing](docs/code-quality.md#auditing)). The route for
+  `proc-macro-error` waits on [Needs Your Input](#needs-your-input).
 - [ ] **P1** **Major dependency upgrades.** *(hardware)* Dependabot proposed
   embassy-nrf 0.11, embassy-sync 0.8, and sequential-storage 8. Pull requests
   #7 and #8 (the first two) were closed unmerged, and the open sequential-storage

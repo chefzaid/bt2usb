@@ -150,7 +150,9 @@ rustup toolchain install 1.95.0 --profile minimal \
 Release packaging refuses build metadata whose recorded compiler is not the
 pinned 1.95.0, so do not override the toolchain (`cargo +stable`,
 `RUSTUP_TOOLCHAIN`) for anything that becomes evidence. To reproduce CI's audit
-locally, install the same version:
+locally, install the same version; it reads
+[.cargo/audit.toml](../.cargo/audit.toml), so it fails on the same warnings and
+ignores the same two advisories:
 
 ```sh
 cargo install --locked cargo-audit --version 0.22.2

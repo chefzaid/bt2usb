@@ -155,7 +155,7 @@ implemented in the source cited; none is hardware-verified.
 | Physical attacker with SWD | Read LTK/IRK from flash, impersonate peers, or decrypt recorded traffic | None | No readout protection: every boot leaves the debug port open ([Physical Access And Debug Port](#physical-access-and-debug-port)); keys unencrypted. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning) |
 | Physical attacker with SWD | Replace firmware with a keylogger | None on the device; release provenance helps only people who verify before flashing | No secure boot or signed updates. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning), TODO: [Signed USB/BLE DFU](../TODO.md#updates-and-host-tools) |
 | Physical attacker with buttons | Pair their own keyboard, or Forget/reset the user's devices | Default-Cancel confirmations for destructive actions ([ui_logic.rs](../src/ui/ui_logic.rs)) | No lock or PIN on the local UI. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
-| Supply-chain attacker | Ship a malicious crate or toolchain update | `Cargo.lock` with `--locked`, pinned Rust 1.95.0, fixed `nrf-softdevice` revision with a reviewed vendored patch, `cargo audit` on every run and weekly | No license check or SBOM; two unmaintained transitive crates. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain), TODO: [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) |
+| Supply-chain attacker | Ship a malicious crate or toolchain update | `Cargo.lock` with `--locked`, pinned Rust 1.95.0, fixed `nrf-softdevice` revision with a reviewed vendored patch, `cargo audit` on every run and weekly, failing on any vulnerability, unmaintained, unsound, or yanked advisory | No license check or SBOM; two unmaintained transitive crates whose advisories the audit ignores by ID. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain), TODO: [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) |
 | Supply-chain attacker | Compromise a GitHub Action or a workflow job | Actions pinned to commit SHAs; default permission `contents: read`; `persist-credentials: false`; signing and publication split into separate jobs | Dependabot action updates have no assigned reviewer. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) |
 | Supply-chain attacker | Tamper with the SoftDevice, Renode, or pip downloads | HTTPS downloads; the CI actionlint, Ruff, and ShellCheck archives are checked against a SHA-256 | `mask softdevice` and `scripts/install-renode.sh` verify no digest. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) |
 | Supply-chain attacker | Substitute a release artifact | Attested `dist/*` subjects, draft-only releases, refusal to modify a published release ([ADR 0008](adr/0008-attested-draft-releases.md)) | Hosted attestation not yet exercised end to end. TODO: [Hosted provenance and release recovery acceptance](../TODO.md#release-provenance-and-supply-chain) |
@@ -495,8 +495,10 @@ The device itself accepts any image written through SWD. See
   ([ADR 0007](adr/0007-vendored-softdevice-patch.md)).
 - CI actions are pinned to commit SHAs with the upstream tag in a comment, and
   the default workflow permission is read-only.
-- `cargo audit` runs in CI and weekly; Dependabot proposes Cargo and Actions
-  updates weekly.
+- `cargo audit` runs in CI and weekly and fails on unmaintained, unsound, and
+  yanked crates as well as vulnerabilities, apart from two advisories ignored
+  by ID in [.cargo/audit.toml](../.cargo/audit.toml); Dependabot proposes Cargo
+  and Actions updates weekly.
 - SoftDevice is obtained from Nordic separately; record its archive hash with
   hardware evidence.
 
@@ -513,8 +515,9 @@ The device itself accepts any image written through SWD. See
 | Devcontainer | `mcr.microsoft.com/devcontainers/rust:1-bookworm`; `cargo install --locked` without versions | None | Tag not digest; `--privileged` container |
 
 License checks, an SBOM, and digest verification for non-Cargo downloads are
-open in [TODO.md](../TODO.md). The 2026-09-28 audit's two unmaintained-crate
-warnings are listed in the [testing record](testing.md). Toolchain and task
+open in [TODO.md](../TODO.md). The two ignored unmaintained-crate advisories,
+their dependency chains, and what would remove them are in
+[code quality](code-quality.md#auditing). Toolchain and task
 pinning is recorded in
 [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md).
 

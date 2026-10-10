@@ -450,7 +450,7 @@ Cargo command and install no toolchain.
 | --- | --- | --- |
 | Host tests (`ubuntu-24.04`, `windows-2025`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs` and every `.rs` or `.py` file under `scripts/`, and a `//!` module comment for every `.rs` file; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 (each SHA-256 verified), run the script linter's tests and `scripts/lint_scripts.py` ([Python and shell checks](code-quality.md#python-and-shell-checks)), and run actionlint; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
-| Dependency security audit | Ubuntu, 10 min | `rustup install`; `cargo audit` with cargo-audit 0.22.2 |
+| Dependency security audit | Ubuntu, 10 min | `rustup install`; `cargo audit` with cargo-audit 0.22.2 and [.cargo/audit.toml](../.cargo/audit.toml), which denies warnings and ignores two advisories by ID |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`, without and with the `log-sensitive-data` opt-in; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
 | Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; rustdoc with private items and warnings denied for `bt2usb-sim`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
 | Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after every check job | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload |
@@ -637,8 +637,9 @@ Specific to the current workflow and test tree:
   that job installs them; no mask recipe installs them locally.
 - rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
   documentation is not built or checked.
-- `cargo audit` runs without a deny option, so unmaintained-crate warnings do
-  not fail the job; see the [validation record](#validation-record--2026-09-28).
+- `cargo audit` ignores two unmaintained-crate advisories by ID, because no
+  released dependency lets the graph drop them; any other warning fails the
+  job ([auditing](code-quality.md#auditing)).
 - Connection workers, the security handler, the GATT HID client, the storage
   shell and codec, the USB device, and the display driver have no host tests
   ([details](#modules-without-host-tests)).
@@ -816,6 +817,8 @@ The dependency audit reports `bare-metal 0.2.5` (`RUSTSEC-2026-0110`) and
 `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained transitive
 dependencies. These warnings remain open maintenance work in
 [TODO.md](../TODO.md); the audit result is not a warning-free dependency bill.
+Since 2026-10-10 the CI audit denies warnings and ignores exactly these two
+advisories by ID ([auditing](code-quality.md#auditing)).
 
 Later history: the record was written before the hardening changes were
 committed as `2479c79` and last edited in `8a04b25` (both 2026-09-28). Since

@@ -1,0 +1,25 @@
+# cargo-audit settings, read by `cargo audit` in CI and locally
+# (docs/code-quality.md#auditing).
+
+[advisories]
+# Unmaintained crates that no released dependency lets bt2usb drop yet. Each
+# entry names the chain and what removes it; delete the entry as soon as
+# `Cargo.lock` stops selecting the crate (TODO.md, "Replace unmaintained
+# transitive dependencies").
+ignore = [
+    # bare-metal 0.2.5, deprecated: cortex-m 0.7.9, the newest release and
+    # cortex-m's main branch, depends on it, and every Embassy crate and
+    # nrf-softdevice use cortex-m 0.7. No patched version exists.
+    "RUSTSEC-2026-0110",
+    # proc-macro-error 1.0.4, unmaintained: ssd1306 0.10.0 pins
+    # maybe-async-cfg =0.2.4; maybe-async-cfg 0.2.5 replaced it with manyhow,
+    # but neither the ssd1306 release nor its main branch allows 0.2.5 yet,
+    # and ssd1306 does not compile against 0.2.5 without porting.
+    "RUSTSEC-2024-0370",
+]
+
+[output]
+# Fail on unmaintained, unsound, and yanked crates, not only on
+# vulnerabilities.
+deny = ["warnings"]
+quiet = false

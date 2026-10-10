@@ -28,6 +28,7 @@ use devices::{
 };
 
 use crate::config::{MAX_PAIRED_DEVICES, STORAGE_FLASH_END, STORAGE_FLASH_START};
+use crate::sd_setup::FlashBuffer;
 use defmt::{debug, error, info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -182,7 +183,7 @@ impl DeviceStore {
         &mut self,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) {
-        let mut buf = [0u8; MAX_RECORD_SIZE];
+        let mut buf = FlashBuffer::<MAX_RECORD_SIZE>::new();
 
         // sequential-storage 7 exposes a stateful `MapStorage` (the standalone
         // `map::fetch_item` free function was removed). It borrows the flash for
@@ -191,7 +192,10 @@ impl DeviceStore {
             sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END);
         let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
 
-        match map.fetch_item::<&[u8]>(&mut buf, &KEY_PAIRED_DEVICES).await {
+        match map
+            .fetch_item::<&[u8]>(&mut buf.0, &KEY_PAIRED_DEVICES)
+            .await
+        {
             Ok(Some(data)) => {
                 if self.list.load(data, &resolve) {
                     info!("Loaded {} devices from flash", self.list.len());
@@ -215,7 +219,7 @@ impl DeviceStore {
         &mut self,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) -> Result<(), StoreError> {
-        let mut buf = [0u8; MAX_RECORD_SIZE];
+        let mut buf = FlashBuffer::<MAX_RECORD_SIZE>::new();
         let mut data_buf = [0u8; MAX_RECORD_SIZE];
 
         let len = match self.list.pending_item(&mut data_buf) {
@@ -244,7 +248,7 @@ impl DeviceStore {
         // runs right at connect time). Retry a few times with a short backoff.
         for attempt in 1..=FLASH_WRITE_ATTEMPTS {
             match map
-                .store_item::<&[u8]>(&mut buf, &KEY_PAIRED_DEVICES, &item)
+                .store_item::<&[u8]>(&mut buf.0, &KEY_PAIRED_DEVICES, &item)
                 .await
             {
                 Ok(_) => {

@@ -283,6 +283,11 @@ which then erases pages 240–243 before writing an empty frame. Ordinary saves 
 ### Write Rules
 
 - Saves happen only when the cache is dirty and the store is writable.
+- `sequential-storage` writes item data to flash straight from the scratch
+  buffer it is given, and the SoftDevice flash driver refuses a source that is
+  not word aligned in RAM (`FlashError::BufferMisaligned`), so the load, the
+  save, and the self-test pass a `FlashBuffer` (`#[repr(align(4))]`, in
+  [sd_setup.rs](../src/sd_setup.rs)) rather than a plain byte array.
 - Serialization that would exceed the item size aborts before touching flash
   (`"Device store exceeds serialization capacity; save aborted"`).
 - A write is attempted up to three times in total (two retries), 20 ms apart,

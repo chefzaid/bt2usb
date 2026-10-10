@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 27 | 0 | 0 |
+| [FIXME](#fixme) | 28 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **112** | **73** | **21** |
+| **Total** | **113** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -297,6 +297,18 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   Found while reading the schema rules for the storage migration item; fixed:
   the In-Memory Cache and Legacy Format sections describe `DeviceList`, its
   `resolve` function, the `AddOutcome` log lines, and the legacy tests.
+- [x] **P1** **Pairing saves could fail on buffer alignment.** `save_to_flash`
+  and `load_from_flash` in `src/storage.rs`, and the self-test flash stage in
+  `src/selftest.rs`, gave `sequential-storage` a plain `[u8; N]` scratch
+  buffer. The map writes item data to flash straight from that buffer
+  (its `ItemHeader::write_raw`, also when garbage collection moves items),
+  and `nrf_softdevice::Flash::write` returns `FlashError::BufferMisaligned`
+  for a source that is not 4-byte aligned in RAM. A byte array has alignment
+  1, so whether a save, and with it every pairing, succeeded depended on where
+  the compiler placed the buffer; no board record shows a save yet. Found by
+  the fact-check of ADR 0019. Fixed: all three use `FlashBuffer`, a
+  `#[repr(align(4))]` wrapper in `src/sd_setup.rs`
+  ([write rules](docs/data-model.md#write-rules)).
 
 ## Needs Your Input
 

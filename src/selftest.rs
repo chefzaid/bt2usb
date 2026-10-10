@@ -236,10 +236,11 @@ async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
     let flash = nrf_softdevice::Flash::take(sd);
     let mut map = MapStorage::<u8, _, _>::new(flash, MapConfig::new(start..end), NoCache);
     // The scratch buffer must also fit the existing pairing blob, not just
-    // our 16-byte test record.
-    let mut buf = [0u8; 1024];
+    // our 16-byte test record, and be word aligned for the flash driver.
+    let mut flash_buffer = sd_setup::FlashBuffer::<1024>::new();
+    let buf = &mut flash_buffer.0;
 
-    match map.fetch_item::<&[u8]>(&mut buf, &0x01).await {
+    match map.fetch_item::<&[u8]>(buf, &0x01).await {
         Ok(Some(saved)) => info!(
             "flash: saved pairing record present ({} bytes)",
             saved.len()
@@ -256,7 +257,7 @@ async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
         *b = 0xA5 ^ (i as u8).wrapping_mul(37);
     }
     if map
-        .store_item::<&[u8]>(&mut buf, &SELFTEST_KEY, &&pattern[..])
+        .store_item::<&[u8]>(buf, &SELFTEST_KEY, &&pattern[..])
         .await
         .is_err()
     {
@@ -264,10 +265,10 @@ async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
         return;
     }
     let matches = matches!(
-        map.fetch_item::<&[u8]>(&mut buf, &SELFTEST_KEY).await,
+        map.fetch_item::<&[u8]>(buf, &SELFTEST_KEY).await,
         Ok(Some(read)) if read == pattern
     );
-    let removed = map.remove_item(&mut buf, &SELFTEST_KEY).await.is_ok();
+    let removed = map.remove_item(buf, &SELFTEST_KEY).await.is_ok();
     match (matches, removed) {
         (true, true) => tally.pass("flash", "write, read-back and remove OK"),
         (false, _) => tally.fail("flash", "read-back didn't match what was written"),

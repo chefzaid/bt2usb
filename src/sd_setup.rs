@@ -38,6 +38,22 @@ pub fn softdevice_config() -> nrf_softdevice::Config {
     }
 }
 
+/// Scratch buffer for `sequential-storage` on the SoftDevice flash driver.
+///
+/// The map writes item data to flash straight from the buffer it is given,
+/// including when garbage collection moves items, and `nrf_softdevice::Flash`
+/// refuses a source that is not word aligned in RAM
+/// (`FlashError::BufferMisaligned`). A plain `[u8; N]` has alignment 1, so
+/// whether a save succeeded would depend on where the compiler placed it.
+#[repr(C, align(4))]
+pub struct FlashBuffer<const N: usize>(pub [u8; N]);
+
+impl<const N: usize> FlashBuffer<N> {
+    pub const fn new() -> Self {
+        Self([0; N])
+    }
+}
+
 /// Turn on the SoftDevice's USB power SoC events and read the current USB
 /// regulator state.
 ///

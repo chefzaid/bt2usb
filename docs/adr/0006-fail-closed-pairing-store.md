@@ -196,8 +196,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 | Concern | Where |
 | --- | --- |
-| Page reservation | `STORAGE_FLASH_PAGE_START = 240`, `STORAGE_FLASH_PAGE_COUNT = 4` in [config.rs](../../src/config.rs); `FLASH : ORIGIN = 0x00027000, LENGTH = 804K` in [memory_sd.x](../../memory_sd.x) |
-| Container and limits | `FLASH_PAGE_SIZE`, `STORAGE_START`, `STORAGE_END`, `KEY_PAIRED_DEVICES`, `MAX_RECORD_SIZE`, and the compile-time size assertion in [storage.rs](../../src/storage.rs) |
+| Page reservation | `STORAGE_FLASH_PAGE_START = 240`, `STORAGE_FLASH_PAGE_COUNT = 4`, and the derived `STORAGE_FLASH_START`/`STORAGE_FLASH_END` in [config.rs](../../src/config.rs); `FLASH : ORIGIN = 0x00027000, LENGTH = 804K` and the assertion that it ends at `STORAGE_FLASH_START` in [memory_sd.x](../../memory_sd.x) |
+| Container and limits | `KEY_PAIRED_DEVICES`, `MAX_RECORD_SIZE`, and the compile-time size assertion in [storage.rs](../../src/storage.rs) |
 | Frame | `MAGIC`, `VERSION`, `has_magic`, `is_versioned`, `is_complete`, `Writer::push` (rolls back a record that does not fit), and `records` in [framing.rs](../../src/storage/framing.rs) |
 | Record validation | `ADDRESS_RECORD_SIZE = 7`, `BOND_RECORD_SIZE = 50`, `base`, and `bond` in [record.rs](../../src/storage/record.rs) |
 | Byte codec | Address-type and bond encoding in [codec.rs](../../src/storage/codec.rs) |

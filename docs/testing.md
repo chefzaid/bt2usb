@@ -384,6 +384,7 @@ The ARM builds catch failures the host crate cannot:
 | Release build of `bt2usb` and `bt2usb-selftest` | `cargo build --features embedded --release` builds both binaries | Type, linker, and size failures in the release profile (`opt-level = "s"`, fat LTO) |
 | `__sdata == ORIGIN(RAM)` and stack-at-top assertion | [memory_sd.x](../memory_sd.x) | A linker such as flip-link moving `.data`, which would make the SoftDevice claim the stack |
 | FLASH ends at `0xF0000` | [memory_sd.x](../memory_sd.x) | Code or read-only data placed on the pairing pages (240–243) that storage erases |
+| FLASH ends at `STORAGE_FLASH_START`; storage ends within flash | [memory_sd.x](../memory_sd.x), symbols from [build.rs](../build.rs) | The page constants in `config.rs` and the `FLASH` length disagreeing, or storage past `0x00100000` |
 | Feature guard | [build.rs](../build.rs) | `embedded` and `sim` enabled together, which would link firmware with the wrong memory map |
 
 ## Release Helper Tests
@@ -651,7 +652,7 @@ stale ELF also causes mismatches: `mask sim-test` rebuilds first, but a direct
 - Firmware, self-test, and simulation builds need
   `--target thumbv7em-none-eabihf`. There is no default target, so omitting it
   targets the host, which these `no_std`, `no_main` ARM binaries do not support.
-- Do not add a `memory.x` at the crate root. `build.rs` copies `memory_sd.x` or
+- Do not add a `memory.x` at the crate root. `build.rs` writes `memory_sd.x` or
   `memory_sim.x` to `OUT_DIR/memory.x`, and the linker resolves a root
   `memory.x` first, so it would silently replace the selected layout. The
   `build.rs` comment records that this once linked the simulation at the

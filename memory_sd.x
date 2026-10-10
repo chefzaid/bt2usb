@@ -13,10 +13,11 @@ MEMORY
 {
     /*
      * Flash: starts after SoftDevice (0x0002_7000) and stops at the
-     * paired-device/bond storage region (config::STORAGE_FLASH_PAGE_START =
+     * paired-device/bond storage region (config::STORAGE_FLASH_START =
      * page 240 = 0x000F_0000, 4 pages). Keeping storage outside FLASH means
      * the linker errors out instead of silently placing code or rodata on
-     * pages that `sequential-storage` erases at runtime.
+     * pages that `sequential-storage` erases at runtime. The assertion below
+     * fails the link if this length and config.rs disagree.
      * Length: 0xF0000 - 0x27000 = 804K. (0xF4000..0x100000 is left unused.)
      */
     FLASH : ORIGIN = 0x00027000, LENGTH = 804K
@@ -33,6 +34,16 @@ MEMORY
      */
     RAM : ORIGIN = 0x20006000, LENGTH = 232K
 }
+
+/* build.rs defines __bt2usb_storage_start and __bt2usb_storage_end from
+ * STORAGE_FLASH_START and STORAGE_FLASH_END in src/config.rs, ahead of this
+ * file. FLASH must end exactly where pairing storage starts: ending later puts
+ * code on pages the store erases, and ending earlier means the two files no
+ * longer describe the same layout. */
+ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == __bt2usb_storage_start,
+       "FLASH in memory_sd.x must end at STORAGE_FLASH_START in src/config.rs; change both together");
+ASSERT(__bt2usb_storage_end <= 0x00100000,
+       "pairing storage (STORAGE_FLASH_PAGE_START/COUNT in src/config.rs) must end within the 1 MB of flash");
 
 /* The application RAM base that nrf-softdevice hands to the SoftDevice
  * (APP_RAM_BASE) is `__sdata`, so .data must start right at ORIGIN(RAM) with

@@ -186,8 +186,12 @@ flowchart LR
 
 The source maps are deliberately not named `memory.x`: rust-lld resolves
 `INCLUDE memory.x` from the crate root before the search path, so a root
-`memory.x` would silently replace the selected map. `build.rs` reruns when
-either map changes or when the `sim` feature toggles. The map contents are in
+`memory.x` would silently replace the selected map. `build.rs` writes the
+selected map after two symbols, `__bt2usb_storage_start` and
+`__bt2usb_storage_end`, taken from `STORAGE_FLASH_START` and
+`STORAGE_FLASH_END` in [config.rs](../src/config.rs), which it compiles in;
+`memory_sd.x` asserts that `FLASH` ends at the first. `build.rs` reruns when
+either map or `src/config.rs` changes, or when the `sim` feature toggles. The map contents are in
 [hardware](hardware.md#memory-layout) and
 [ADR 0010](adr/0010-static-memory-layout.md).
 
@@ -798,6 +802,12 @@ debugger port; the nRF USB port must stay with the host under test.
   outgrew its 804 KiB. Do not extend `FLASH` past `0xF0000`: the four pages
   from there hold the pairing store and are erased at runtime. Reduce size
   with `mask bloat`.
+- `FLASH in memory_sd.x must end at STORAGE_FLASH_START in src/config.rs; change both together`
+  means the `FLASH` length in `memory_sd.x` and `STORAGE_FLASH_PAGE_START` in
+  `config.rs` describe different boundaries. Change both, together with the
+  [memory map](hardware.md#memory-layout).
+- `pairing storage (STORAGE_FLASH_PAGE_START/COUNT in src/config.rs) must end within the 1 MB of flash`
+  means the page constants put the store past `0x00100000`.
 - At runtime, not link time, `too little RAM for softdevice. Change your app's RAM start address to <addr>`
   is a SoftDevice panic. The address is printed in hex without a `0x` prefix.
   Set `RAM : ORIGIN` in `memory_sd.x` to that address and shrink `LENGTH` by

@@ -73,6 +73,19 @@ linker trick.
 - **Pairing pages outside `FLASH`.** `FLASH` ends at `0x000F0000`, so an image
   that would reach the pairing pages fails to link instead of being placed on
   pages that the store erases.
+- **One pairing range, checked by the linker** (2026-10-10). `config.rs`
+  derives `STORAGE_FLASH_START` and `STORAGE_FLASH_END` from the page
+  constants. `build.rs` compiles `config.rs` too and writes them ahead of the
+  layout as `__bt2usb_storage_start` and `__bt2usb_storage_end`, and
+  `memory_sd.x` asserts:
+
+  ```text
+  ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == __bt2usb_storage_start, …);
+  ASSERT(__bt2usb_storage_end <= 0x00100000, …);
+  ```
+
+  Changing the pages or the `FLASH` length alone fails the link. The
+  `FLASH` line keeps its literal length so the map stays readable.
 - **Assert the RAM layout.** `memory_sd.x` ends with:
 
   ```text
@@ -87,9 +100,10 @@ linker trick.
   and explains in a comment why flip-link is not used.
 - **A separate simulation layout.** [memory_sim.x](../../memory_sim.x) gives the
   `sim` build all of flash from `0x00000000` and all of RAM from `0x20000000`.
-  [build.rs](../../build.rs) copies `memory_sim.x` when the `sim` feature is on
-  and `memory_sd.x` otherwise to `OUT_DIR/memory.x`, adds `OUT_DIR` to the link
-  search path, and re-runs when either file or the `sim` feature changes. No
+  [build.rs](../../build.rs) writes `memory_sim.x` when the `sim` feature is on
+  and `memory_sd.x` otherwise to `OUT_DIR/memory.x`, after the two storage
+  symbols, adds `OUT_DIR` to the link search path, and re-runs when either
+  file, `src/config.rs`, or the `sim` feature changes. No
   file in the crate root is named `memory.x`. The build script also refuses
   to build with both features:
   ``features `embedded` and `sim` are mutually exclusive; build each separately``.
@@ -153,8 +167,9 @@ impossible for a stale or shadowing `memory.x` to decide which map is used.
 
 Positive:
 
-- Overlapping the pairing pages, moving `.data` off the RAM origin, or moving
-  the stack off the top of RAM fails the link with a specific message.
+- Overlapping the pairing pages, changing the pairing range in `config.rs` or
+  `memory_sd.x` alone, moving `.data` off the RAM origin, or moving the stack
+  off the top of RAM fails the link with a specific message.
 - The bridge and the self-test report stack use on every board, and the
   self-test turns it into a pass or fail.
 - The simulation and the firmware cannot be linked with each other's map.
@@ -164,10 +179,12 @@ Negative:
 - A stack overflow is not detected. The stack grows down toward `.bss`, and an
   overflow corrupts statics silently. No MPU guard region is configured. The
   high-water mark is evidence after the fact, not protection.
-- The pairing range is defined twice: as page constants in `config.rs` and as
-  the end of `FLASH` in `memory_sd.x`. Nothing checks that they agree. Change
-  them together with [hardware](../hardware.md#memory-layout) and the
-  [data model](../data-model.md#pairing-store).
+- The pairing boundary is still written twice, as page constants in
+  `config.rs` and as the `FLASH` length in `memory_sd.x`, so a change edits
+  both; the link fails until they agree. Generating the `FLASH` line instead
+  would remove the second copy but leave `memory_sd.x` unreadable on its own.
+  Update [hardware](../hardware.md#memory-layout) and the
+  [data model](../data-model.md#pairing-store) with them.
 - The SoftDevice RAM requirement and worst-case stack depth have not been
   measured on a board. If a configuration change (a third link, a larger ATT
   MTU) needs more RAM, `Softdevice::enable` panics at boot with the address to
@@ -183,8 +200,6 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   persistence, and record reviewed margins before changing `memory_sd.x`.
 - "Stack overflow detection": evaluate a guard compatible with the SoftDevice
   RAM layout, so an overflow faults with a diagnosable message.
-- "Single source for the pairing flash range": make a change to either the
-  page constants or the end of `FLASH` alone fail the build or a CI check.
 - "Automated documentation checks": catch disagreement between the storage
   constants, the linker map, and the documented memory map.
 - "Signed USB/BLE DFU": choose a bootloader and flash partition layout around
@@ -194,16 +209,16 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 | Concern | Where |
 | --- | --- |
-| SoftDevice memory map and RAM assertion | [memory_sd.x](../../memory_sd.x) |
+| SoftDevice memory map, RAM assertion, and pairing-boundary assertions | [memory_sd.x](../../memory_sd.x) |
 | Simulation memory map | [memory_sim.x](../../memory_sim.x) |
-| Layout selection and feature guard | [build.rs](../../build.rs) |
+| Layout selection, storage symbols, and feature guard | [build.rs](../../build.rs) |
 | Link arguments and the flip-link note | [.cargo/config.toml](../../.cargo/config.toml) |
-| Pairing page constants | `STORAGE_FLASH_PAGE_START` and `STORAGE_FLASH_PAGE_COUNT` in [config.rs](../../src/config.rs); `STORAGE_START` and `STORAGE_END` in [storage.rs](../../src/storage.rs) |
+| Pairing page constants | `FLASH_PAGE_SIZE`, `STORAGE_FLASH_PAGE_START`, `STORAGE_FLASH_PAGE_COUNT`, and the derived `STORAGE_FLASH_START` and `STORAGE_FLASH_END` in [config.rs](../../src/config.rs), used by [storage.rs](../../src/storage.rs), `selftest.rs`, and `build.rs` |
 | `APP_RAM_BASE` source | `get_app_ram_base()` in [softdevice.rs](../../vendor/nrf-softdevice/src/softdevice.rs) |
 | SoftDevice configuration that sets the RAM need | `softdevice_config()` in [sd_setup.rs](../../src/sd_setup.rs) |
 | Stack painting | `cortex-m-rt/paint-stack` in the `embedded` feature of [Cargo.toml](../../Cargo.toml) |
 | Stack measurement | `high_water()` in [stack.rs](../../src/stack.rs); logged from the housekeeping tick in [main.rs](../../src/main.rs) and stage 7 of [selftest.rs](../../src/selftest.rs) |
-| Pairing-region round trip on a board | `check_flash` in `selftest.rs`, using the same page constants |
+| Pairing-region round trip on a board | `check_flash` in `selftest.rs`, using `STORAGE_FLASH_START` and `STORAGE_FLASH_END` |
 
 ### Verification Status
 

@@ -31,7 +31,7 @@ probe, or USB host to close.
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
 | [UI, Display And Power](#ui-display-and-power) | 8 | 3 | 1 |
-| [Platform, Memory And Recovery](#platform-memory-and-recovery) | 6 | 6 | 3 |
+| [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 6 | 10 | 0 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **74** | **85** | **22** |
+| **Total** | **75** | **84** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -546,6 +546,15 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   it to `OUT_DIR/memory.x`. Neither source is named `memory.x`, so no layout in
   the crate root shadows the copied one (rust-lld searches the current directory
   first), and the script reruns when the `sim` feature toggles (`build.rs`).
+- [x] Single source for the pairing flash range. `config.rs` derives
+  `STORAGE_FLASH_START` and `STORAGE_FLASH_END` from the page constants and
+  `FLASH_PAGE_SIZE`, which the store and the self-test now use. `build.rs`
+  compiles `config.rs` and writes the range ahead of the linker script, and
+  `memory_sd.x` asserts that `FLASH` ends at `STORAGE_FLASH_START` and that
+  storage ends within flash. Changing the start page, the page count past the
+  end of flash, or the `FLASH` length alone was shown to fail the link, and
+  changing the start page and the length together links (2026-10-10;
+  [hardware](docs/hardware.md#memory-layout)).
 - [ ] **P0** **ADR: watchdog and progress-based recovery.** Decide which tasks
   must prove progress before the watchdog is fed, the timeout, what state
   survives a reset, and how reset causes are recorded. Accept when the ADR is
@@ -573,11 +582,6 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   Evaluate a guard compatible with the SoftDevice RAM layout. Accept when a
   deliberate overflow in a test build faults with a diagnosable message instead
   of corrupting memory ([ADR 0010](docs/adr/0010-static-memory-layout.md)).
-- [ ] **P1** **Single source for the pairing flash range.**
-  `STORAGE_FLASH_PAGE_START`/`STORAGE_FLASH_PAGE_COUNT` in `src/config.rs` and
-  the end of `FLASH` in `memory_sd.x` define the same boundary twice, and
-  nothing checks that they agree. Accept when changing either one alone fails
-  the build or a CI check ([hardware](docs/hardware.md#memory-layout)).
 - [ ] **P1** **Diagnostics without sensitive input.** Add firmware/build
   identification, reset reasons, bounded counters for reconnect/queue/write
   failures, and a documented collection method. Log each peripheral's Device

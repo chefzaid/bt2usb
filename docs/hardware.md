@@ -308,7 +308,9 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `BLE_MAX_PERIPHERAL_LATENCY` | 20 | Largest peripheral latency granted to a peripheral's request |
 | `BLE_MIN_SUP_TIMEOUT` | 100 | Shortest supervision timeout granted to a peripheral's request (1 s); the longest is `BLE_SUP_TIMEOUT` |
 | `MAX_PAIRED_DEVICES` | 4 | Stored peers; active slots are separately limited to two |
+| `FLASH_PAGE_SIZE` | 4096 | nRF52840 flash page (erase unit) in bytes |
 | `STORAGE_FLASH_PAGE_START` / `COUNT` | 240 / 4 | Pairing storage reservation |
+| `STORAGE_FLASH_START` / `END` | `0x000F0000` / `0x000F4000` | Pairing storage byte range, derived from the pages; the linker checks `FLASH` against it |
 | `USB_VID` / `USB_PID` | `0x1209` / `0x0001` | Development IDs; obtain an assigned production identity |
 | `USB_MANUFACTURER` / `USB_PRODUCT` | `bt2usb` / `BT-to-USB HID Bridge` | USB string descriptors |
 | `USB_HID_POLL_MS` | 1 | USB interrupt endpoint polling interval |
@@ -356,19 +358,29 @@ when SoftDevice is enabled before changing its reservation. No bootloader or DFU
 region is currently allocated.
 
 The linker excludes the pairing pages from application flash; their contents
-are defined in the [data model](data-model.md#pairing-store). Keep the storage
-constants and linker map consistent when changing either. SoftDevice uses
+are defined in the [data model](data-model.md#pairing-store). The storage
+constants and the linker map change together, and the link fails when only one
+of them changes. SoftDevice uses
 `__sdata` as its application RAM boundary, so `.data` must begin at the RAM origin
 and the stack must remain at the top; the linker asserts this relationship.
 
 The memory decisions are recorded in
 [ADR 0010](adr/0010-static-memory-layout.md). Further details:
 
-- [build.rs](../build.rs) copies `memory_sd.x` (bridge and self-test) or
-  `memory_sim.x` (simulation) to `OUT_DIR/memory.x`. The sources are
+- [build.rs](../build.rs) writes `memory_sd.x` (bridge and self-test) or
+  `memory_sim.x` (simulation) to `OUT_DIR/memory.x`, preceded by two symbols,
+  `__bt2usb_storage_start` and `__bt2usb_storage_end`, which it computes from
+  `STORAGE_FLASH_START` and `STORAGE_FLASH_END` by compiling
+  [config.rs](../src/config.rs) into the build script. The sources are
   deliberately not named `memory.x`, so a stray root file cannot shadow the
   selected layout, and the build refuses `embedded` and `sim` together.
-- The assertion in `memory_sd.x` is
+- `memory_sd.x` asserts `ORIGIN(FLASH) + LENGTH(FLASH) == __bt2usb_storage_start`
+  and `__bt2usb_storage_end <= 0x00100000`. Changing the page constants or the
+  `FLASH` length alone fails the link with
+  `FLASH in memory_sd.x must end at STORAGE_FLASH_START in src/config.rs; change both together`,
+  and storage that runs past the end of flash fails with
+  `pairing storage (STORAGE_FLASH_PAGE_START/COUNT in src/config.rs) must end within the 1 MB of flash`.
+- The RAM assertion in `memory_sd.x` is
   `__sdata == ORIGIN(RAM) && _stack_start == ORIGIN(RAM) + LENGTH(RAM)`.
   `flip-link` would break it, so [.cargo/config.toml](../.cargo/config.toml)
   links with `link.x`, `defmt.x` and `--nmagic`, without `flip-link`.
@@ -427,8 +439,9 @@ another board yet.
 - [ ] **SoftDevice and flash map.** Use S140 v7.3.0, or update `memory_sd.x`
       to the other version's flash and RAM requirements. Check that nothing on
       the board, such as a factory bootloader or settings page, uses
-      `0x000F0000–0x000F4000` or the rest of the application range. Keep
-      `STORAGE_FLASH_PAGE_START`/`COUNT` and `memory_sd.x` in step.
+      `0x000F0000–0x000F4000` or the rest of the application range. Change
+      `STORAGE_FLASH_PAGE_START`/`COUNT` and `memory_sd.x` together; the link
+      fails if they disagree.
 - [ ] **Chip variant.** The build and `probe-rs` target `nRF52840_xxAA` with
       1 MiB flash and 256 KiB RAM. A different memory size needs new linker
       values.

@@ -1122,8 +1122,8 @@ Panics that can occur at runtime:
 - `unreachable!()` after the `join4` in `hid_writer_task` and for a quiescence
   acknowledgement already filtered out in `manage_devices`.
 
-The memory-layout check in `memory_sd.x` is a link-time `ASSERT`, not a runtime
-panic.
+The memory-layout checks in `memory_sd.x` (RAM placement and the end of
+`FLASH` at the pairing store) are link-time `ASSERT`s, not runtime panics.
 
 ### Not Yet Handled
 
@@ -1184,7 +1184,8 @@ setting means rebuilding and reflashing.
   [development](development.md#build-configurations); the toolchain is pinned
   ([ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)).
 - **Storage reservation.** `STORAGE_FLASH_PAGE_START`/`COUNT`, `memory_sd.x`,
-  and the [memory map](hardware.md#memory-layout) change together
+  and the [memory map](hardware.md#memory-layout) change together; the link
+  fails when the first two disagree
   ([ADR 0010](adr/0010-static-memory-layout.md)).
 
 ## Architecture Constraints
@@ -1205,7 +1206,8 @@ setting means rebuilding and reflashing.
 - No lock is held across an await except the `GAP_PROCEDURE` and
   `DEVICE_STORE` async mutexes.
 - `memory_sd.x`, `STORAGE_FLASH_PAGE_START`/`COUNT`, and the
-  [memory map](hardware.md#memory-layout) change together.
+  [memory map](hardware.md#memory-layout) change together; the linker enforces
+  the first two.
 - Documentation separates implemented, software-verified, and hardware-verified
   behavior.
 

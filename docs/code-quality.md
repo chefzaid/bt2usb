@@ -493,6 +493,7 @@ These limits fail the build when they are exceeded:
 | Application flash | `FLASH : ORIGIN = 0x00027000, LENGTH = 804K`, ending at the pairing store (page 240, `0xF0000`) | Linker: code or read-only data that does not fit fails the link |
 | Application RAM | `RAM : ORIGIN = 0x20006000, LENGTH = 232K`, after the SoftDevice's 24 KiB | Linker: static data that does not fit fails the link |
 | RAM placement | `ASSERT(__sdata == ORIGIN(RAM) && _stack_start == ORIGIN(RAM) + LENGTH(RAM), …)` | Linker assert in [memory_sd.x](../memory_sd.x) |
+| Pairing boundary | `ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == __bt2usb_storage_start, …)` and `ASSERT(__bt2usb_storage_end <= 0x00100000, …)`, with the symbols written by [build.rs](../build.rs) from `STORAGE_FLASH_START`/`END` in [config.rs](../src/config.rs) | Linker assert in [memory_sd.x](../memory_sd.x): changing the page constants or the `FLASH` length alone fails the link |
 | Pairing record | `3 + MAX_PAIRED_DEVICES * (1 + 9 + 32 + 1 + BOND_RECORD_SIZE) <= MAX_RECORD_SIZE`, that is 375 ≤ 512 bytes | `const` assert in [storage.rs](../src/storage.rs) |
 
 The simulation build uses [memory_sim.x](../memory_sim.x), which gives the
@@ -601,7 +602,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The connection workers, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
-| The pairing flash range is defined in both `config.rs` and `memory_sd.x`, with no check that they agree | [Single source for the pairing flash range](../TODO.md#platform-memory-and-recovery) (P1) |
 | The two-connection count is written as separate literals (`MAX_CONNECTIONS`, `SOURCES`, `LED_CONSUMERS`, the `sd_setup.rs` role counts), and the `UiState` capacities 8 and 4 repeat `BLE_MAX_DISCOVERED` and `MAX_PAIRED_DEVICES`, with no compile-time check that they agree | [Single source for the link count and UI capacities](../TODO.md#verification-and-code-quality) (P1) |
 | `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |

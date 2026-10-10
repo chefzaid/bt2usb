@@ -84,7 +84,7 @@ pairing region with a scratch key, not this record format.
 
 | Property | Value | Source |
 | --- | --- | --- |
-| Flash pages | 240–243 (`0x000F0000–0x000F4000`), 4 KiB each | `STORAGE_FLASH_PAGE_START` / `COUNT` in [config.rs](../src/config.rs); `FLASH_PAGE_SIZE` in [storage.rs](../src/storage.rs) |
+| Flash pages | 240–243 (`0x000F0000–0x000F4000`), 4 KiB each | `STORAGE_FLASH_PAGE_START` / `COUNT`, `FLASH_PAGE_SIZE`, and the derived `STORAGE_FLASH_START` / `END` in [config.rs](../src/config.rs); `memory_sd.x` fails the link unless `FLASH` ends at `STORAGE_FLASH_START` |
 | Container | One `sequential-storage` map item, key `0x01`, no cache (`NoCache`) | `KEY_PAIRED_DEVICES` in [storage.rs](../src/storage.rs) |
 | Flash access | SoftDevice flash API (`nrf_softdevice::Flash`), so writes wait for radio-idle time | [ble/multi_conn.rs](../src/ble/multi_conn.rs) |
 | Maximum item size | 512 bytes, checked at compile time against four bonded records with 32-byte names | `MAX_RECORD_SIZE` |

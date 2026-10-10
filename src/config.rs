@@ -121,8 +121,23 @@ pub const SCREEN_AUTO_OFF_TIMEOUT_SECS: u64 = 120;
 /// Maximum number of paired devices tracked in storage.
 pub const MAX_PAIRED_DEVICES: usize = 4;
 
-/// Flash page index where pairing storage starts (4 KB per page on nRF52840).
+/// Flash page size on the nRF52840 (4 KB), the unit the flash erases in.
+pub const FLASH_PAGE_SIZE: u32 = 4096;
+
+/// Flash page index where pairing storage starts.
 pub const STORAGE_FLASH_PAGE_START: u32 = 240;
 
 /// Number of flash pages reserved for pairing storage.
 pub const STORAGE_FLASH_PAGE_COUNT: u32 = 4;
+
+/// First byte of pairing storage (`0x000F_0000`).
+///
+/// `build.rs` compiles this file too and hands this address and
+/// [`STORAGE_FLASH_END`] to the linker. `memory_sd.x` fails the link unless its
+/// `FLASH` region ends exactly here, so code and constants can never be placed
+/// on pages the store erases. Change the pages above and the `FLASH` length in
+/// `memory_sd.x` together.
+pub const STORAGE_FLASH_START: u32 = STORAGE_FLASH_PAGE_START * FLASH_PAGE_SIZE;
+
+/// First byte after pairing storage (`0x000F_4000`, exclusive).
+pub const STORAGE_FLASH_END: u32 = STORAGE_FLASH_START + STORAGE_FLASH_PAGE_COUNT * FLASH_PAGE_SIZE;

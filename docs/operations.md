@@ -878,7 +878,8 @@ investigate, not as headroom.
   measurements with two links, scanning, display, and persistence.
 - `memory_sd.x`, `STORAGE_FLASH_PAGE_START`/`COUNT` in
   [config.rs](../src/config.rs), and the hardware guide change together. The
-  linker refuses code in the pairing pages and asserts the stack and `.data`
+  linker refuses code in the pairing pages, fails when `FLASH` does not end
+  where the page constants put the store, and asserts the stack and `.data`
   placement.
 
 ## Saved Devices And Storage

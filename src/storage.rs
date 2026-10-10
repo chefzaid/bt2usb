@@ -21,7 +21,7 @@ use codec::{
     BOND_RECORD_SIZE,
 };
 
-use crate::config::{MAX_PAIRED_DEVICES, STORAGE_FLASH_PAGE_COUNT, STORAGE_FLASH_PAGE_START};
+use crate::config::{MAX_PAIRED_DEVICES, STORAGE_FLASH_END, STORAGE_FLASH_START};
 use defmt::{debug, error, info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
@@ -29,15 +29,6 @@ use embassy_time::{Duration, Timer};
 use heapless::Vec;
 use nrf_softdevice::ble::{Address, EncryptionInfo, IdentityKey, MasterId};
 use sequential_storage::cache::NoCache;
-
-/// Flash page size for nRF52840 (4 KB).
-const FLASH_PAGE_SIZE: u32 = 4096;
-
-/// Start address of our storage region.
-const STORAGE_START: u32 = STORAGE_FLASH_PAGE_START * FLASH_PAGE_SIZE;
-
-/// End address (exclusive) of our storage region.
-const STORAGE_END: u32 = (STORAGE_FLASH_PAGE_START + STORAGE_FLASH_PAGE_COUNT) * FLASH_PAGE_SIZE;
 
 /// Key for the paired devices list in the map storage.
 const KEY_PAIRED_DEVICES: u8 = 0x01;
@@ -205,7 +196,8 @@ impl DeviceStore {
         // sequential-storage 7 exposes a stateful `MapStorage` (the standalone
         // `map::fetch_item` free function was removed). It borrows the flash for
         // the duration of the access and is dropped before we return.
-        let config = sequential_storage::map::MapConfig::new(STORAGE_START..STORAGE_END);
+        let config =
+            sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END);
         let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
 
         match map.fetch_item::<&[u8]>(&mut buf, &KEY_PAIRED_DEVICES).await {
@@ -255,7 +247,8 @@ impl DeviceStore {
         };
         let item: &[u8] = &data_buf[..len];
 
-        let config = sequential_storage::map::MapConfig::new(STORAGE_START..STORAGE_END);
+        let config =
+            sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END);
         let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
 
         // SoftDevice flash operations need radio-idle timeslots and can fail with
@@ -337,7 +330,7 @@ impl DeviceStore {
         crate::ble::management::commit(self, candidate, async |next| {
             if recover {
                 flash
-                    .erase(STORAGE_START, STORAGE_END)
+                    .erase(STORAGE_FLASH_START, STORAGE_FLASH_END)
                     .await
                     .map_err(|_| StoreError::Flash)?;
             }

@@ -228,9 +228,8 @@ async fn main(spawner: Spawner) {
 /// the same `sequential-storage` map the firmware uses. Saved pairings (key
 /// 0x01) are only read.
 async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
-    const PAGE: u32 = 4096;
-    let start = config::STORAGE_FLASH_PAGE_START * PAGE;
-    let end = start + config::STORAGE_FLASH_PAGE_COUNT * PAGE;
+    let start = config::STORAGE_FLASH_START;
+    let end = config::STORAGE_FLASH_END;
 
     // Own the flash driver: MultiwriteNorFlash is not implemented for &mut
     // Flash, and record removal requires that trait.

@@ -410,6 +410,20 @@ like the crate's other event handlers. The patch's changes are recorded in the
 [ADR 0007](adr/0007-vendored-softdevice-patch.md). Review every change to the
 vendored sources with the same rules as application `unsafe`.
 
+The crate keeps each connection's state in a static `UnsafeCell`, and
+`Connection::with_state` hands its closure a `&mut ConnectionState` with no
+borrow check, so nothing stops the closure from reaching the same state again
+through a `Connection` method. Code inside a `with_state` closure must not
+call a `Connection` method, `Connection::from_handle`, drop a `Connection`,
+or call a `SecurityHandler` method, whose implementation may do any of those.
+Upstream called the security handler inside the closure in nine places, and
+bt2usb's `Bonder` reads `Connection::peer_address` in `on_bonded`, `get_key`,
+and `get_peripheral_key`, which made two live `&mut` references to one state.
+Since 2026-10-10 the six places bt2usb compiles call the handler after the
+closure returns; the three left, in the `ble-peripheral` and
+`ble-gatt-server` code, are not compiled
+([vendor notes](../vendor/nrf-softdevice/README.bt2usb.md)).
+
 ### Review Rule
 
 **Partly enforced.** Clippy's `undocumented_unsafe_blocks` lint, set in the

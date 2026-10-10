@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 38 | 1 | 0 |
+| [FIXME](#fixme) | 39 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **125** | **72** | **21** |
+| **Total** | **126** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -466,17 +466,28 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
   embedded builds and Clippy; hardware evidence needs a peripheral that sends
   its own MTU exchange.
-- [ ] **P2** **Bonder callbacks re-enter the vendored connection state.**
-  The vendored crate calls `SecurityHandler::on_bonded` (in `gap::on_evt`,
+- [x] **P2** **Bonder callbacks re-entered the vendored connection state.**
+  The vendored crate called `SecurityHandler::on_bonded` (in `gap::on_evt`,
   `BLE_GAP_EVT_AUTH_STATUS`) and `get_peripheral_key` (in
   `Connection::encrypt`) inside `Connection::with_state`, which holds a
   `&mut ConnectionState`. bt2usb's `Bonder` calls `conn.peer_address()` in
-  both, which takes a second `&mut` to the same state through the
+  both, which took a second `&mut` to the same state through the
   `UnsafeCell`. Two live mutable references are undefined behavior even
-  though both accesses only read, so today's builds behave as intended.
-  Found by the panic inventory. Accept when the vendored crate copies what the
-  handler needs out of the state and calls the handler after `with_state`
-  returns, and the unsafe-code inventory notes it.
+  though both accesses only read, so the builds behaved as intended.
+  Found by the panic inventory. Fixed: every security handler call in the
+  compiled modules now runs after `with_state` returns, with the handler and
+  its data copied out: `on_bonded`, `on_security_update`, `display_passkey`,
+  `enter_passkey` and `recv_out_of_band` (whose `Connection::from_handle`
+  also re-entered the state) in `gap::on_evt`, `get_peripheral_key` in
+  `Connection::encrypt`, and `security_params` in
+  `Connection::request_pairing`, each marked `bt2usb patch:`
+  (`vendor/nrf-softdevice/src/ble/`;
+  [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
+  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). The
+  [unsafe-code inventory](docs/code-quality.md#vendored-unsafe) states the
+  rule for `with_state` closures and lists the three sites left in code
+  bt2usb does not compile. Checked by the embedded builds and Clippy; the
+  vendored code has no tests.
 
 ## Needs Your Input
 

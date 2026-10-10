@@ -235,12 +235,14 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
             );
             #[cfg(not(feature = "log-sensitive-data"))]
             trace!("on_passkey_display");
+            // bt2usb patch: call the handler after `with_state` returns (see
+            // the AUTH_STATUS arm).
             #[cfg(feature = "ble-sec")]
-            connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| {
-                if let Some(handler) = state.security.handler {
-                    handler.display_passkey(&params.passkey)
-                }
-            });
+            if let Some(handler) =
+                connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| state.security.handler)
+            {
+                handler.display_passkey(&params.passkey)
+            }
         }
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_AUTH_KEY_REQUEST => {
             let params = &gap_evt.params.auth_key_request;
@@ -248,20 +250,19 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
 
             #[cfg(not(feature = "ble-sec"))]
             let handled = false;
+            // bt2usb patch: take the handler out of the state, then create the
+            // `Connection` and call the handler after `with_state` returns
+            // (see the AUTH_STATUS arm).
             #[cfg(feature = "ble-sec")]
-            let handled = connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| {
-                state
-                    .security
-                    .handler
-                    .and_then(|handler| match u32::from(params.key_type) {
-                        raw::BLE_GAP_AUTH_KEY_TYPE_PASSKEY => Connection::from_handle(gap_evt.conn_handle)
-                            .map(|conn| handler.enter_passkey(PasskeyReply::new(conn))),
-                        raw::BLE_GAP_AUTH_KEY_TYPE_OOB => Connection::from_handle(gap_evt.conn_handle)
-                            .map(|conn| handler.recv_out_of_band(OutOfBandReply::new(conn))),
-                        _ => None,
-                    })
-            })
-            .is_some();
+            let handled = connection::with_state_by_conn_handle(gap_evt.conn_handle, |state| state.security.handler)
+                .and_then(|handler| match u32::from(params.key_type) {
+                    raw::BLE_GAP_AUTH_KEY_TYPE_PASSKEY => Connection::from_handle(gap_evt.conn_handle)
+                        .map(|conn| handler.enter_passkey(PasskeyReply::new(conn))),
+                    raw::BLE_GAP_AUTH_KEY_TYPE_OOB => Connection::from_handle(gap_evt.conn_handle)
+                        .map(|conn| handler.recv_out_of_band(OutOfBandReply::new(conn))),
+                    _ => None,
+                })
+                .is_some();
 
             if !handled {
                 let ret = raw::sd_ble_gap_auth_key_reply(
@@ -312,13 +313,14 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
                 params.conn_sec.encr_key_size
             );
             if let Some(conn) = Connection::from_handle(gap_evt.conn_handle) {
-                conn.with_state(|state| {
-                    state.security_mode = SecurityMode::try_from_raw(params.conn_sec.sec_mode).unwrap_or_default();
-                    #[cfg(feature = "ble-sec")]
-                    if let Some(handler) = state.security.handler {
-                        handler.on_security_update(&conn, state.security_mode);
-                    }
-                });
+                let security_mode = SecurityMode::try_from_raw(params.conn_sec.sec_mode).unwrap_or_default();
+                conn.with_state(|state| state.security_mode = security_mode);
+                // bt2usb patch: call the handler after `with_state` returns (see
+                // the AUTH_STATUS arm).
+                #[cfg(feature = "ble-sec")]
+                if let Some(handler) = conn.security_handler() {
+                    handler.on_security_update(&conn, security_mode);
+                }
             }
         }
         raw::BLE_GAP_EVTS_BLE_GAP_EVT_AUTH_STATUS => {
@@ -334,30 +336,37 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
             #[cfg(feature = "ble-sec")]
             if u32::from(params.auth_status) == raw::BLE_GAP_SEC_STATUS_SUCCESS && params.bonded() != 0 {
                 if let Some(conn) = Connection::from_handle(gap_evt.conn_handle) {
-                    conn.with_state(|state| {
-                        if let Some(handler) = state.security.handler {
-                            let peer_id = if params.kdist_peer.id() != 0 {
-                                IdentityKey::from_raw(state.security.peer_id)
-                            } else {
-                                debug!("Peer identity key not distributed; falling back to address");
-                                IdentityKey::from_addr(state.peer_address)
-                            };
+                    // bt2usb patch: copy what `on_bonded` needs out of the state
+                    // and call it after `with_state` returns. Called inside, a
+                    // handler that reads the connection (bt2usb's `Bonder` calls
+                    // `Connection::peer_address`) took a second
+                    // `&mut ConnectionState` while the first was live.
+                    let bonded = conn.with_state(|state| {
+                        let handler = state.security.handler?;
+                        let peer_id = if params.kdist_peer.id() != 0 {
+                            IdentityKey::from_raw(state.security.peer_id)
+                        } else {
+                            debug!("Peer identity key not distributed; falling back to address");
+                            IdentityKey::from_addr(state.peer_address)
+                        };
 
-                            let enc_key = match state.role {
-                                #[cfg(feature = "ble-central")]
-                                Role::Central => &state.security.peer_enc_key,
-                                #[cfg(feature = "ble-peripheral")]
-                                Role::Peripheral => &state.security.own_enc_key,
-                            };
+                        let enc_key = match state.role {
+                            #[cfg(feature = "ble-central")]
+                            Role::Central => &state.security.peer_enc_key,
+                            #[cfg(feature = "ble-peripheral")]
+                            Role::Peripheral => &state.security.own_enc_key,
+                        };
 
-                            handler.on_bonded(
-                                &conn,
-                                MasterId::from_raw(enc_key.master_id),
-                                EncryptionInfo::from_raw(enc_key.enc_info),
-                                peer_id,
-                            );
-                        }
+                        Some((
+                            handler,
+                            MasterId::from_raw(enc_key.master_id),
+                            EncryptionInfo::from_raw(enc_key.enc_info),
+                            peer_id,
+                        ))
                     });
+                    if let Some((handler, master_id, key, peer_id)) = bonded {
+                        handler.on_bonded(&conn, master_id, key, peer_id);
+                    }
                 }
             }
         }

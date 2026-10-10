@@ -102,12 +102,34 @@ nrf-softdevice"), each with why it does not fire. One of them,
 one; bt2usb never calls it on the identity address a peer sends during
 pairing, and decodes that type itself in `src/storage.rs`.
 
+Security handler calls outside the connection state (2026-10-10): upstream
+calls `SecurityHandler` methods inside `Connection::with_state`, which holds
+a `&mut ConnectionState` for the closure's duration: `on_bonded` in the
+`AUTH_STATUS` arm of `gap::on_evt`, `on_security_update` in
+`CONN_SEC_UPDATE`, `display_passkey`, `enter_passkey`, and
+`recv_out_of_band` (whose `Connection::from_handle` also re-entered the state)
+in `PASSKEY_DISPLAY` and `AUTH_KEY_REQUEST`, `get_peripheral_key` in
+`Connection::encrypt`, and `security_params` in `Connection::request_pairing`.
+A handler that reads the connection, as bt2usb's `Bonder` does with
+`Connection::peer_address` in `on_bonded`, `get_key`, and
+`get_peripheral_key`, then took a second `&mut` to the same state through
+its `UnsafeCell` while the first was live, which is undefined behavior even
+when both only read. Each site now copies what the handler needs (the handler
+reference, the keys, the identity, the security mode) out of `with_state` and
+calls the handler after it returns. Three such sites remain in code bt2usb
+does not compile: `security_params` in the peripheral `SEC_PARAMS_REQUEST`
+arm and `can_bond` and `request_mitm_protection` in
+`Connection::request_security` (feature `ble-peripheral`), and
+`save_sys_attrs` in `ConnectionState::on_disconnected` (feature
+`ble-gatt-server`).
+
 Remove this patch only when the pinned upstream provides equivalent offset
 reads, timeout errors, bounded discovery, a way for the application to
 answer connection parameter requests, a way to keep peer addresses,
 passkeys, and notification bytes out of debug and trace logs, no panic
 on an unexpected timeout source or a disconnect error, an ATT MTU that
 matches the one the SoftDevice uses, a connect that survives a refused
-MTU exchange, and answers to a peer's Exchange MTU Request and system
-attribute access without the GATT server feature. Do not edit the Cargo checkout to deploy this change; the root Cargo
+MTU exchange, answers to a peer's Exchange MTU Request and system
+attribute access without the GATT server feature, and security handler
+calls made outside the connection state. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

@@ -53,7 +53,8 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
   [ADR 0016](0016-bounded-peer-connection-parameters.md), one more change adds
   `SecurityHandler::conn_param_update_request` in `security.rs` and calls it
   from `gap.rs`; since [ADR 0025](0025-panic-lints-and-inventory.md), the
-  panic fixes below touch `gap.rs` and `connection.rs`):
+  panic fixes below touch `gap.rs` and `connection.rs`, and since 2026-10-10
+  the security handler calls move out of the connection state there):
   - add `read_by_offset`, which issues one ATT Read or Read Blob at a given
     offset, checks that the response handle and offset match the request
     (`ReadError::InvalidResponse` otherwise), and keeps upstream's
@@ -90,6 +91,12 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
   panicking; and `ConnectionState::disconnect_with_reason` returns
   `DisconnectedError` for any SoftDevice error, which `Connection::drop`
   accepts.
+- Since 2026-10-10, call every `SecurityHandler` method in the compiled
+  modules after `Connection::with_state` returns, with the handler reference
+  and the data it needs copied out of the state, so a handler that reads the
+  connection (bt2usb's `Bonder` calls `Connection::peer_address`) never takes
+  a second `&mut ConnectionState` while the first is live (`gap::on_evt`,
+  `Connection::encrypt`, and `Connection::request_pairing`).
 - Assemble and bound long values in bt2usb, not in the vendored crate.
 - Since 2026-10-10, print a peer address, a displayed passkey, or notification
   bytes only with the vendored crate's `log-sensitive-data` feature, which
@@ -101,8 +108,9 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
   [vendor/nrf-softdevice/README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md).
 - Remove the patch only when the pinned upstream provides equivalent offset
   reads, timeout errors, bounded discovery, the panic fixes above, the
-  negotiated ATT MTU, a connect that survives a refused MTU exchange, and
-  answers to the GATT server events a central-only build still receives.
+  negotiated ATT MTU, a connect that survives a refused MTU exchange,
+  answers to the GATT server events a central-only build still receives, and
+  security handler calls made outside the connection state.
   Never
   deploy a change by editing Cargo's git checkout.
 
@@ -191,6 +199,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Report Map read | `read_report_map` in [hid_client.rs](../../src/ble/hid_client.rs) maps failures to `BleErrorTag::ReportMapReadFailed`, `ReportMapTooLarge`, or `ReportMapInvalid`, shown as "HID map read failed", "HID map too large", and "Unsupported HID map" |
 | Absent map | Only a missing Report Map characteristic allows legacy classification, logged as `HID report map absent; using legacy report classification` |
 | Discovery failures | `HID discovery failed: {:?}` in `hid_client.rs` |
+| Security handler calls | The `PASSKEY_DISPLAY`, `AUTH_KEY_REQUEST`, `CONN_SEC_UPDATE`, and `AUTH_STATUS` arms of `gap::on_evt`, and `Connection::encrypt` and `Connection::request_pairing` in `connection.rs` (since 2026-10-10), each marked `bt2usb patch:` |
 | Connection parameter hook ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `SecurityHandler::conn_param_update_request` (default: grant unchanged) in `vendor/nrf-softdevice/src/ble/security.rs`, called from the `CONN_PARAM_UPDATE_REQUEST` arm in `vendor/nrf-softdevice/src/ble/gap.rs` |
 | Sensitive log gate | `#[cfg(feature = "log-sensitive-data")]` pairs on the connect line in `vendor/nrf-softdevice/src/ble/central.rs`, the passkey-display line in `gap.rs`, and the notification line in `gatt_client.rs`; the root feature in [Cargo.toml](../../Cargo.toml); a Clippy run with the feature in the CI "Embedded build & clippy" job |
 | ATT MTU | `ATT_MTU = 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |

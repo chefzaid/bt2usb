@@ -701,25 +701,24 @@ impl Connection {
     #[cfg(feature = "ble-central")]
     /// Send a pairing request to the peripheral.
     pub fn request_pairing(&self) -> Result<(), AuthenticateError> {
-        let (conn_handle, sec_params) = self.with_state(|state| {
+        let conn_handle = self.with_state(|state| {
             assert!(
                 state.role == Role::Central,
                 "Connection::request_pairing may only be called for connections in the central role"
             );
 
-            let conn_handle = state.check_connected()?;
-
-            #[cfg(not(feature = "ble-sec"))]
-            let sec_params = default_security_params();
-            #[cfg(feature = "ble-sec")]
-            let sec_params = state
-                .security
-                .handler
-                .map(|h| h.security_params(self))
-                .unwrap_or_else(default_security_params);
-
-            Ok::<_, AuthenticateError>((conn_handle, sec_params))
+            state.check_connected()
         })?;
+
+        #[cfg(not(feature = "ble-sec"))]
+        let sec_params = default_security_params();
+        // bt2usb patch: call the handler after `with_state` returns (see
+        // `encrypt`).
+        #[cfg(feature = "ble-sec")]
+        let sec_params = self
+            .security_handler()
+            .map(|h| h.security_params(self))
+            .unwrap_or_else(default_security_params);
 
         let ret = unsafe { raw::sd_ble_gap_authenticate(conn_handle, &sec_params) };
         if let Err(err) = RawError::convert(ret) {
@@ -770,15 +769,15 @@ impl Connection {
     #[cfg(all(feature = "ble-central", feature = "ble-sec"))]
     /// Initiate GAP encryption with the peripheral using stored keys
     pub fn encrypt(&self) -> Result<(), EncryptError> {
-        let (conn_handle, (master_id, ltk)) = self.with_state(|state| {
+        // bt2usb patch: call the handler after `with_state` returns, so a
+        // handler that reads the connection does not take a second
+        // `&mut ConnectionState` (see `gap::on_evt`, AUTH_STATUS).
+        let (conn_handle, handler) = self.with_state(|state| {
             let conn_handle = state.check_connected()?;
-            state
-                .security
-                .handler
-                .ok_or(EncryptError::NoSecurityHandler)
-                .and_then(|handler| handler.get_peripheral_key(self).ok_or(EncryptError::PeerKeysNotFound))
-                .map(|keys| (conn_handle, keys))
+            let handler = state.security.handler.ok_or(EncryptError::NoSecurityHandler)?;
+            Ok::<_, EncryptError>((conn_handle, handler))
         })?;
+        let (master_id, ltk) = handler.get_peripheral_key(self).ok_or(EncryptError::PeerKeysNotFound)?;
 
         let ret = unsafe { raw::sd_ble_gap_encrypt(conn_handle, master_id.as_raw(), ltk.as_raw()) };
         if let Err(err) = RawError::convert(ret) {

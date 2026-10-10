@@ -192,7 +192,9 @@ Follow-ups, tracked in [TODO.md](../../TODO.md#fixme) (the last one under
 - "Bonder callbacks re-enter the vendored connection state": `on_bonded` and
   `get_peripheral_key` call `Connection::peer_address` while the vendored
   crate holds a mutable reference to the same state, which is undefined
-  behavior.
+  behavior. Fixed on 2026-10-10: the vendored crate calls every security
+  handler method after the state is released
+  ([ADR 0007](0007-vendored-softdevice-patch.md)).
 - "Parser fuzzing and property tests" (P1) would exercise the rewritten
   parsers with generated input.
 

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 8 | 11 | 0 |
+| [FIXME](#fixme) | 10 | 9 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **84** | **93** | **22** |
+| **Total** | **86** | **91** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -186,17 +186,20 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the reconnect table and inline boot reconnect. Close when no guide names
   either.
 
-- [ ] **P3** **The test map misdescribes two `conn_params` tests.** The
-  [testing guide](docs/testing.md#test-map) says "a faster request gets
+- [x] **P3** **The test map misdescribed two `conn_params` tests.** The
+  [testing guide](docs/testing.md#test-map) said "a faster request gets
   7.5 ms" and "latency is lowered when 4 s cannot cover it", but those tests
-  raise the floor to 15 ms and cap the timeout at 1 s. Close when the row says
-  what the tests check.
-- [ ] **P3** **ADR 0016 and the architecture guide misstate when the
-  out-of-range warning fires.** They say only a peripheral that wants nothing
+  raise the floor to 15 ms and cap the timeout at 1 s. Fixed with the next
+  entry: the faster-request test now also checks the production 7.5 ms floor,
+  and the row names the floors and the 1 s cap the tests use.
+- [x] **P3** **ADR 0016 and the architecture guide misstated when the
+  out-of-range warning fires.** They said only a peripheral that wants nothing
   faster than 30 ms is granted an interval outside its range. A request
-  entirely below 7.5 ms, which the Core forbids, is granted 7.5 ms and gets the
-  warning too, while one whose fastest interval is exactly 30 ms is granted it
-  inside its range. Close when both name the two cases precisely.
+  entirely below 7.5 ms, which the SoftDevice cannot grant, is granted 7.5 ms
+  and gets the warning too, while one whose fastest interval is exactly 30 ms
+  is granted it inside its range. Fixed: both name the two cases, and host
+  tests now pin the 7.5 ms case as flagged and the 30 ms case as inside its
+  range.
 - [ ] **P3** **The recorded firmware size omits `DEFMT_LOG` and is stale.**
   The [2026-10-09 validation record](docs/testing.md#validation-record--2026-10-09) gives
   `.text` and `.bss` for the release build without the log level, which

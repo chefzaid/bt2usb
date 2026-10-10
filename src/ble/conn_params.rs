@@ -206,6 +206,12 @@ mod tests {
         assert_eq!((answer.min_interval, answer.max_interval), (24, 24));
         assert!(!interval_within_request(asked, answer));
         assert_valid(answer);
+        // A request whose fastest interval is the cap itself gets it, inside
+        // its range.
+        let asked = request(24, 40, 0, 400);
+        let answer = bound_request(asked, &LIMITS);
+        assert_eq!((answer.min_interval, answer.max_interval), (24, 24));
+        assert!(interval_within_request(asked, answer));
     }
 
     #[test]
@@ -258,6 +264,14 @@ mod tests {
 
     #[test]
     fn a_request_faster_than_allowed_gets_the_shortest_interval() {
+        // Below 7.5 ms, which the SoftDevice cannot grant: 7.5 ms, outside the
+        // requested range.
+        let asked = request(4, 5, 0, 400);
+        let answer = bound_request(asked, &LIMITS);
+        assert_eq!((answer.min_interval, answer.max_interval), (6, 6));
+        assert!(!interval_within_request(asked, answer));
+        assert_valid(answer);
+        // The same rule with a raised 15 ms floor.
         let limits = ConnParamLimits {
             min_interval: 12,
             ..LIMITS

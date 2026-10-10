@@ -59,10 +59,13 @@ A request inside the bounds is granted as asked and logged as
 `peer connection parameters granted: {}`; any other is logged with both values
 as `peer asked for connection parameters {}; granting {}`. When the granted
 interval lies outside the requested range (`conn_params::interval_within_request`
-is false), which happens only for a peripheral that wants nothing faster than
-30 ms, the line is a warning and ends in `, outside its interval range`, so the
-hardware compatibility baseline can name the peripheral if it then
-disconnects.
+is false), the line is a warning and ends in `, outside its interval range`.
+That happens in two cases only: the peripheral's fastest requested interval is
+slower than 30 ms, so it is granted 30 ms, or its whole range is below 7.5 ms,
+the shortest interval the SoftDevice supports, so it is granted 7.5 ms. A
+peripheral whose fastest requested interval is 30 ms exactly is granted it
+inside its range. The warning lets the hardware compatibility baseline name
+the peripheral if it then disconnects.
 
 ## Alternatives Considered
 
@@ -140,9 +143,10 @@ Negative:
 - A peripheral whose requested range includes 15 ms or less gets at most
   15 ms and may use more power than it planned for.
 - A peripheral that refuses anything faster than 20 ms gets 20 ms, so its
-  input waits up to 20 ms rather than 15 ms; one that wants nothing faster
-  than 30 ms gets 30 ms, outside its range, and may still disconnect. The
-  warning log line names it.
+  input waits up to 20 ms rather than 15 ms; one whose fastest requested
+  interval is slower than 30 ms gets 30 ms, outside its range, and may still
+  disconnect. So may one whose whole range is below 7.5 ms, which gets 7.5 ms.
+  The warning log line names either.
 - A peripheral that insists on its own values may ask again after each answer;
   the bridge answers each request the same way and does not rate-limit them.
 - The hook and the event handler have no host tests, and no peripheral's
@@ -171,10 +175,12 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - **Implemented:** everything in the table above.
 - **Software-verified:** 13 host tests in `conn_params.rs` cover a request
   granted unchanged, a 20–40 ms request granted 20 ms, a 50–100 ms request
-  granted 30 ms and flagged as outside its range, an overlapping range
+  granted 30 ms and flagged as outside its range, a request whose fastest
+  interval is 30 ms granted it inside its range, an overlapping range
   narrowed to the overlap, a 32-second timeout capped at 4 seconds, a short
   timeout raised to 1 second, latency capped at 20, reversed interval bounds
-  (also in `interval_within_request`), a request faster than allowed, latency
+  (also in `interval_within_request`), a request entirely below 7.5 ms
+  granted 7.5 ms and flagged, a request below a raised floor, latency
   lowered when the timeout cap cannot cover it, and the timeout raised to meet
   the Core rule. A sweep of 18,000 requests, over every boundary of the policy
   and over values outside the Core's legal ranges (interval 0 and 0xFFFF,

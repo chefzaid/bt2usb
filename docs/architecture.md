@@ -559,7 +559,8 @@ for the central to answer.
    changed, and, at warning level,
    `"peer asked for connection parameters {}; granting {}, outside its interval range"`
    when the interval is outside the requested range (only for a peripheral
-   that wants nothing faster than 30 ms). The event handler then answers with
+   whose fastest requested interval is slower than 30 ms, or whose whole range
+   is below 7.5 ms). The event handler then answers with
    `sd_ble_gap_conn_param_update`.
 
 The bounds hold for the life of every link. A held key is released at most

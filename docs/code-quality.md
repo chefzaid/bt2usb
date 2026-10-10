@@ -155,7 +155,7 @@ each configuration lists different binaries.
 
 ### Lint Allowances
 
-**Review rule.** Six allowances exist in `src/`, counted with
+**Review rule.** Five allowances exist in `src/`, counted with
 `grep -rn 'allow(' src` over attribute lines:
 
 | Location | Allowance | Reason |
@@ -165,7 +165,11 @@ each configuration lists different binaries.
 | [display.rs](../src/ui/display.rs) `init` | `dead_code` | Used only by the self-test (`ui::display::init` in `selftest.rs`) |
 | [display.rs](../src/ui/display.rs) `draw_home` | `dead_code` | Used only by the self-test; no comment at the attribute |
 | [hid_device.rs](../src/usb/hid_device.rs) `is_configured` | `dead_code` | Used only by the self-test (comment at the attribute) |
-| [multi_conn.rs](../src/ble/multi_conn.rs) `manage_devices` | `clippy::too_many_arguments` | Eight parameters: target, request token, connection manager, four channel ends, and the flash handle; no comment at the attribute |
+
+A `clippy::too_many_arguments` allowance on `multi_conn::manage_devices` was
+removed on 2026-10-10, when the per-slot command senders became one array and
+the function dropped to seven parameters; an `#[expect]` would have reported
+the stale allowance by itself.
 
 The bridge binary has no crate-level allowance, so an unused item in its
 module tree fails embedded Clippy. The two crate-level allowances mean that
@@ -177,7 +181,7 @@ Rules for a new allowance:
 - Scope it to the item, not the module or crate.
 - Say why on the same line or the line above.
 - Prefer `#[expect(lint, reason = "…")]`, stable since Rust 1.81, so the
-  attribute itself warns once the lint no longer fires. The existing six use
+  attribute itself warns once the lint no longer fires. The existing five use
   `#[allow]`.
 - Never allow a lint to silence a correctness finding; fix the code.
 
@@ -376,8 +380,9 @@ Coverage measures only the code that host tests compile:
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
 workers, GATT HID client, scanner, storage shell and codec, USB device,
-display driver, buttons, power shell, stack monitor, SoftDevice setup,
-`config.rs`, and the three entry points. The
+display driver, buttons, power shell, stack monitor, SoftDevice setup, and the
+three entry points. `config.rs` is compiled into the host library but holds
+only constants, so it adds no lines to the report. The
 [host library composition](testing.md#host-library-composition) table lists
 the files. Renode runs, the self-test, and hardware sessions produce no
 coverage data.
@@ -573,8 +578,8 @@ for pairing, storage, and input handling.
 - [ ] New lint allowances are item-scoped and say why.
 - [ ] Buffers and channels are bounded, and the behavior when one is full is
       defined and tested.
-- [ ] Values that are repeated as literals outside `config.rs` changed
-      together ([development](development.md#add-a-configuration-constant)).
+- [ ] Shared capacities and limits are derived from `config.rs`, not repeated
+      as literals ([development](development.md#add-a-configuration-constant)).
 - [ ] Logs contain no key material, raw flash, or keystroke content, and new
       log strings are quoted correctly in the
       [operations guide](operations.md#log-message-reference).
@@ -608,7 +613,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 | No automated check of documentation links or documented constants | [Automated documentation checks](../TODO.md#documentation) (P1) |
 | No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
-| Four source files are over 500 lines again after the split in commit `e3bc620` (`wc -l`: `multi_conn.rs`, `ui_logic.rs`, `hid_device.rs`, `lib_tests.rs`); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |
+| Four source files are over 500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10: `multi_conn.rs`, `hid_descriptor_tests.rs`, `hid_device.rs`, `lib_tests.rs`); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |
 
 ## Related Guides
 

@@ -318,6 +318,7 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `BUTTON_DEBOUNCE_MS` | 50 | Button debounce interval |
 | `SCREEN_AUTO_OFF_ENABLED` | `true` | Enable OLED inactivity power-off |
 | `SCREEN_AUTO_OFF_TIMEOUT_SECS` | 120 | OLED inactivity timeout |
+| `UI_MANAGEMENT_TIMEOUT_SECS` | 30 | How long the UI waits for a saved-device list, Forget, or reset reply before showing **No reply** |
 
 The USB serial is generated from the two factory `FICR.DEVICEID` words as a
 16-character uppercase hexadecimal value in `usb/hid_device.rs`. It is stable

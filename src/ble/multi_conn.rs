@@ -427,7 +427,6 @@ async fn publish_paired_devices(
 /// Stop workers before changing persistent identities. Suppress their queued
 /// Connected/LinkLost events until a command-specific barrier confirms that the
 /// BLE link, USB source state and retry target have all been released.
-#[allow(clippy::too_many_arguments)]
 async fn manage_devices(
     address: Option<Address>,
     token: u32,

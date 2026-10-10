@@ -29,6 +29,8 @@ pub enum Screen {
     ConfirmReset,
     Managing,
     Notice,
+    /// A management request got no reply in time; its outcome is unknown.
+    NoReply,
 }
 
 /// Physical button events (after debouncing).
@@ -52,20 +54,34 @@ pub enum UiCommand {
     Dismiss,
 }
 
-/// One management operation at a time, with stale replies rejected by identity.
+/// One management operation at a time, with stale replies rejected by identity
+/// and a deadline after which the UI stops waiting for the reply.
 #[derive(Default)]
 pub struct ManagementRequests {
     next_id: u32,
-    pending: Option<(u32, UiCommand)>,
+    pending: Option<PendingRequest>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingRequest {
+    id: u32,
+    command: UiCommand,
+    deadline_ms: u64,
 }
 
 impl ManagementRequests {
-    pub fn begin(&mut self, command: UiCommand) -> Option<u32> {
+    /// Start `command` and return its request ID, or `None` while another
+    /// request is pending. The UI waits for the reply until `deadline_ms`.
+    pub fn begin(&mut self, command: UiCommand, deadline_ms: u64) -> Option<u32> {
         if self.pending.is_some() {
             return None;
         }
         self.next_id = self.next_id.wrapping_add(1);
-        self.pending = Some((self.next_id, command));
+        self.pending = Some(PendingRequest {
+            id: self.next_id,
+            command,
+            deadline_ms,
+        });
         Some(self.next_id)
     }
 
@@ -73,11 +89,27 @@ impl ManagementRequests {
         self.pending.is_some()
     }
 
+    /// Accept the reply to the pending request, identified by its ID. Any
+    /// other ID, including that of a request that already timed out, is
+    /// ignored.
     pub fn complete(&mut self, id: u32) -> Option<UiCommand> {
-        if self.pending.is_some_and(|(pending_id, _)| pending_id == id) {
-            self.pending.take().map(|(_, command)| command)
+        if self.pending.is_some_and(|pending| pending.id == id) {
+            self.pending.take().map(|pending| pending.command)
         } else {
             None
+        }
+    }
+
+    /// Stop waiting once the deadline has passed, and return the abandoned
+    /// command. A reply that still arrives carries the abandoned ID, so
+    /// [`complete`](Self::complete) ignores it.
+    pub fn expire(&mut self, now_ms: u64) -> Option<UiCommand> {
+        match self.pending {
+            Some(pending) if now_ms >= pending.deadline_ms => {
+                self.pending = None;
+                Some(pending.command)
+            }
+            _ => None,
         }
     }
 }
@@ -136,13 +168,17 @@ pub fn on_button(
     };
 
     match (screen, btn) {
-        (Screen::Home | Screen::Connected | Screen::Error | Screen::Notice, ButtonEvent::Up) => {
+        (
+            Screen::Home | Screen::Connected | Screen::Error | Screen::Notice | Screen::NoReply,
+            ButtonEvent::Up,
+        ) => {
             out.screen = Screen::Managing;
             out.selected = 0;
             out.command = Some(UiCommand::ListPaired);
             out.redraw = Redraw::Current;
         }
-        (Screen::Error, ButtonEvent::Down) | (Screen::Notice, ButtonEvent::Select) => {
+        (Screen::Error, ButtonEvent::Down)
+        | (Screen::Notice | Screen::NoReply, ButtonEvent::Select) => {
             out.screen = Screen::Home;
             out.command = Some(UiCommand::Dismiss);
             out.redraw = Redraw::Current;
@@ -366,6 +402,23 @@ impl UiState {
         }
     }
 
+    /// The coordinator did not answer a management request in time. Claim no
+    /// outcome that was not observed: drop the saved-device list so it is read
+    /// again, keep an error that is already showing, and otherwise say the
+    /// result is unknown.
+    pub fn management_timed_out(&mut self, command: UiCommand) {
+        self.paired_names.clear();
+        if self.screen != Screen::Error {
+            self.screen = Screen::NoReply;
+            self.selected = 0;
+            self.set_message(match command {
+                UiCommand::Forget(_) => "Forget result unknown",
+                UiCommand::FactoryReset => "Reset result unknown",
+                _ => "List not loaded",
+            });
+        }
+    }
+
     pub fn scan_started(&mut self) {
         // Only Home or Scanning moves to Scanning; menus and dialogs are kept.
         if matches!(self.screen, Screen::Home | Screen::Scanning) {
@@ -389,208 +442,5 @@ impl UiState {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn home_select_starts_scan() {
-        let out = on_button(Screen::Home, ButtonEvent::Select, 0, 0);
-        assert_eq!(out.screen, Screen::Scanning);
-        assert_eq!(out.command, Some(UiCommand::StartScan));
-        assert!(out.reset_devices);
-        assert_eq!(out.redraw, Redraw::Scanning);
-    }
-
-    #[test]
-    fn error_select_starts_scan() {
-        let out = on_button(Screen::Error, ButtonEvent::Select, 3, 5);
-        assert_eq!(out.screen, Screen::Scanning);
-        assert_eq!(out.selected, 0);
-        assert_eq!(out.command, Some(UiCommand::StartScan));
-    }
-
-    #[test]
-    fn device_list_up_moves_selection_and_redraws() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Up, 2, 4);
-        assert_eq!(out.selected, 1);
-        assert_eq!(out.redraw, Redraw::DeviceList);
-        assert_eq!(out.command, None);
-    }
-
-    #[test]
-    fn device_list_up_at_top_clamps() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Up, 0, 4);
-        assert_eq!(out.selected, 0);
-        // Original redraws unconditionally on Up.
-        assert_eq!(out.redraw, Redraw::DeviceList);
-    }
-
-    #[test]
-    fn device_list_down_advances_within_bounds() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Down, 1, 4);
-        assert_eq!(out.selected, 2);
-        assert_eq!(out.redraw, Redraw::DeviceList);
-    }
-
-    #[test]
-    fn device_list_down_at_end_is_noop() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Down, 3, 4);
-        assert_eq!(out.selected, 3);
-        assert_eq!(
-            out.redraw,
-            Redraw::None,
-            "no redraw when selection unchanged"
-        );
-        assert_eq!(out.command, None);
-    }
-
-    #[test]
-    fn device_list_select_connects_highlighted() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Select, 2, 4);
-        assert_eq!(out.screen, Screen::Connecting);
-        assert_eq!(out.command, Some(UiCommand::Connect(2)));
-        assert!(!out.reset_devices, "keep device list for the connect");
-    }
-
-    #[test]
-    fn empty_list_cannot_dispatch_connection() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Select, 0, 0);
-        assert_eq!(out.command, None);
-        assert_eq!(out.screen, Screen::DeviceList);
-    }
-
-    #[test]
-    fn stale_selection_is_clamped_before_navigation_and_connect() {
-        let out = on_button(Screen::DeviceList, ButtonEvent::Down, usize::MAX, 8);
-        assert_eq!(out.selected, 7);
-        let out = on_button(Screen::DeviceList, ButtonEvent::Select, usize::MAX, 2);
-        assert_eq!(out.command, Some(UiCommand::Connect(1)));
-    }
-
-    #[test]
-    fn connected_select_rescans() {
-        let out = on_button(Screen::Connected, ButtonEvent::Select, 0, 0);
-        assert_eq!(out.screen, Screen::Scanning);
-        assert_eq!(out.command, Some(UiCommand::StartScan));
-        assert!(out.reset_devices);
-    }
-
-    #[test]
-    fn connected_down_disconnects_home() {
-        let out = on_button(Screen::Connected, ButtonEvent::Down, 0, 0);
-        assert_eq!(out.screen, Screen::Home);
-        assert_eq!(out.command, Some(UiCommand::Disconnect));
-        assert_eq!(out.redraw, Redraw::Home);
-    }
-
-    #[test]
-    fn ignored_combinations_are_noops() {
-        // e.g. Up on Home, Down on Home, Select already handled elsewhere.
-        let out = on_button(Screen::Scanning, ButtonEvent::Up, 0, 0);
-        assert_eq!(out.screen, Screen::Scanning);
-        assert_eq!(out.command, None);
-        assert_eq!(out.redraw, Redraw::None);
-
-        let out = on_button(Screen::Home, ButtonEvent::Down, 0, 0);
-        assert_eq!(out.command, None);
-    }
-
-    #[test]
-    fn scan_complete_picks_list_or_error() {
-        assert_eq!(on_scan_complete(0), Screen::Error);
-        assert_eq!(on_scan_complete(3), Screen::DeviceList);
-    }
-
-    #[test]
-    fn management_requires_explicit_confirmation_and_defaults_to_cancel() {
-        let out = on_button(Screen::Home, ButtonEvent::Up, 0, 0);
-        assert_eq!(out.command, Some(UiCommand::ListPaired));
-        let out = on_button(Screen::SavedDevices, ButtonEvent::Select, 1, 2);
-        assert_eq!(out.screen, Screen::ConfirmForget(1));
-        assert_eq!(out.selected, 0);
-        let cancelled = on_button(out.screen, ButtonEvent::Select, out.selected, 2);
-        assert_eq!(cancelled.screen, Screen::SavedDevices);
-        assert_eq!(cancelled.command, None);
-        let armed = on_button(out.screen, ButtonEvent::Down, 0, 2);
-        let confirmed = on_button(armed.screen, ButtonEvent::Select, armed.selected, 2);
-        assert_eq!(confirmed.command, Some(UiCommand::Forget(1)));
-        assert_eq!(confirmed.screen, Screen::Managing);
-        assert_eq!(
-            on_button(confirmed.screen, ButtonEvent::Select, 0, 2).command,
-            None
-        );
-    }
-
-    #[test]
-    fn management_requests_are_exclusive_and_reject_stale_replies() {
-        let mut requests = ManagementRequests::default();
-        assert!(!requests.is_pending());
-        let first = requests.begin(UiCommand::ListPaired).unwrap();
-        assert!(requests.is_pending());
-        assert_eq!(requests.begin(UiCommand::FactoryReset), None);
-        assert_eq!(requests.complete(first.wrapping_add(1)), None);
-        assert!(requests.is_pending());
-        assert_eq!(requests.complete(first), Some(UiCommand::ListPaired));
-        assert!(!requests.is_pending());
-        // A late duplicate of the finished reply cannot complete a newer request.
-        let second = requests.begin(UiCommand::Forget(0)).unwrap();
-        assert_ne!(second, first);
-        assert_eq!(requests.complete(first), None);
-        assert_eq!(requests.complete(second), Some(UiCommand::Forget(0)));
-    }
-
-    #[test]
-    fn management_request_ids_stay_unique_across_wraparound() {
-        let mut requests = ManagementRequests {
-            next_id: u32::MAX,
-            pending: None,
-        };
-        let wrapped = requests.begin(UiCommand::ListPaired).unwrap();
-        assert_eq!(requests.complete(u32::MAX), None);
-        assert_eq!(requests.complete(wrapped), Some(UiCommand::ListPaired));
-        assert_ne!(requests.begin(UiCommand::ListPaired), Some(wrapped));
-    }
-
-    #[test]
-    fn empty_store_still_offers_deliberate_factory_reset() {
-        let confirm = on_button(Screen::SavedDevices, ButtonEvent::Select, 0, 0);
-        assert_eq!(confirm.screen, Screen::ConfirmReset);
-        assert_eq!(confirm.selected, 0);
-        assert_eq!(
-            on_button(confirm.screen, ButtonEvent::Select, 0, 0).command,
-            None
-        );
-        assert_eq!(
-            on_button(confirm.screen, ButtonEvent::Select, 1, 0).command,
-            Some(UiCommand::FactoryReset)
-        );
-    }
-
-    #[test]
-    fn error_survives_followup_status_and_acknowledges_to_current_link() {
-        let mut state = UiState::new();
-        state.error("Connect failed");
-        state.connection_status(Some(heapless::String::try_from("Keyboard").unwrap()));
-        assert_eq!(state.screen, Screen::Error);
-        assert_eq!(state.message, "Connect failed");
-        assert_eq!(state.button(ButtonEvent::Down), Some(UiCommand::Dismiss));
-        assert_eq!(state.screen, Screen::Connected);
-        state.error("Flash write failed");
-        state.connection_status(None);
-        assert_eq!(state.screen, Screen::Error);
-        state.button(ButtonEvent::Down);
-        assert_eq!(state.screen, Screen::Home);
-    }
-
-    #[test]
-    fn background_status_and_scan_do_not_dismiss_confirmation() {
-        let mut state = UiState::new();
-        state.screen = Screen::ConfirmReset;
-        state.selected = 1;
-        state.connection_status(None);
-        state.scan_started();
-        state.scan_complete();
-        assert_eq!(state.screen, Screen::ConfirmReset);
-        assert_eq!(state.selected, 1);
-    }
-}
+#[path = "ui_logic_tests.rs"]
+mod tests;

@@ -82,10 +82,11 @@ Three rules apply before any screen sees a press:
   on and is otherwise ignored, so waking never triggers a menu action.
 - **USB suspend wins.** While the PC has suspended the USB bus, the OLED stays
   off and presses are ignored until the host resumes the bus.
-- **A pending management request blocks input.** While the bridge waits for a
-  saved-device list, Forget, or Factory reset to finish (the *Please wait...*
-  screen), every press is ignored. There is no deadline yet; a coordinator that
-  never answers needs a power cycle (open work in [TODO.md](../TODO.md)).
+- **A pending management request blocks input, for at most 30 seconds.** While
+  the bridge waits for a saved-device list, Forget, or Factory reset to finish
+  (the *Please wait...* screen), every press is ignored. With no answer after
+  30 seconds (`UI_MANAGEMENT_TIMEOUT_SECS`), the bridge shows **No reply** and
+  the buttons work again.
 
 ### Screens And Buttons
 
@@ -109,6 +110,7 @@ state behind these screens is in the
 | Forget device? | `ConfirmForget(i)` | The device name, `> Cancel`, `  Forget` | Highlight Cancel | Highlight Forget | Run the highlighted choice |
 | Reset all pairings? | `ConfirmReset` | `Disconnect all`, `> Cancel`, `  Reset` | Highlight Cancel | Highlight Reset | Run the highlighted choice |
 | Complete | `Notice` | `Complete`, `Device forgotten` or `Pairings reset`, `SELECT: back` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
+| No reply | `NoReply` | `No reply`, `Forget result unknown`, `Reset result unknown`, or `List not loaded`, `SELECT: back`, `UP:saved devices` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
 
 Lists show four rows at a time and scroll to keep the highlighted row visible.
 A highlighted row that a newer list no longer contains is clamped to the last
@@ -134,6 +136,7 @@ stateDiagram-v2
     state "Reset all pairings?" as ConfirmReset
     state "ERROR" as Error
     state "Complete" as Notice
+    state "No reply" as NoReply
     [*] --> Home
     Home --> Scanning: SELECT
     Connected --> Scanning: SELECT
@@ -161,11 +164,15 @@ stateDiagram-v2
     ConfirmReset --> Managing: SELECT on Reset
     Managing --> Notice: change committed
     Managing --> Error: change failed
+    Managing --> NoReply: no answer in 30 s
+    NoReply --> Managing: UP
+    NoReply --> Home: SELECT
     Notice --> Home: SELECT
 ```
 
 Where the diagram returns to Home after a list or notice, the bridge shows
-Connected instead when a link is up.
+Connected instead when a link is up. An error that arrives while a request is
+pending stays on screen when the request times out.
 
 ### Pair and connect
 
@@ -299,6 +306,16 @@ If another error is showing when a management request finishes, that error
 stays on screen and the completion notice is not shown; reopen saved devices to
 check the result.
 
+If the bridge gets no answer within 30 seconds, it stops waiting and shows
+**No reply** with `Forget result unknown`, `Reset result unknown`, or
+`List not loaded`. It does not guess: a Forget or reset may still have been
+written, so press UP to reopen saved devices and see what is stored. An answer
+that arrives later is ignored, because it carries the abandoned request's ID.
+A reply normally takes a few seconds; it waits behind a scan in progress (up to
+10 seconds) and a connection attempt that must end first (up to 6 seconds), so
+**No reply** means the BLE task is stuck, and a reset of the board is the
+remaining recovery ([operations](operations.md#a-management-action-stays-pending)).
+
 ### Notices And Errors
 
 Errors and completion notices stay on screen until acknowledged, and background
@@ -323,6 +340,7 @@ otherwise Home. SELECT on an error starts a new scan instead.
 | `Busy; try again` | Wait a moment and retry |
 | `Device changed; retry` | Reopen saved devices |
 | `Device forgotten`, `Pairings reset` | Press SELECT |
+| `Forget result unknown`, `Reset result unknown`, `List not loaded` | Press UP to reopen saved devices and check what is stored; if it happens again, reset the board |
 
 Every cause that raises each message, and the error tag behind it, is listed
 in the [data model](data-model.md#error-tags-and-ui-messages).
@@ -733,7 +751,8 @@ sequenceDiagram
 - **Request IDs.** The UI tags each saved-device list, Forget, and Factory reset
   request with a new 32-bit ID and allows one at a time. A reply completes the
   request only if its ID matches, so a late or duplicate reply cannot finish a
-  newer request; IDs stay distinct across wraparound
+  newer request; IDs stay distinct across wraparound. The UI gives up on a
+  request after 30 seconds, so a reply to it that arrives later is ignored too
   ([`ui/ui_logic.rs`](../src/ui/ui_logic.rs) `ManagementRequests`).
 - **Stable targets.** Forget carries the device's address from the list
   snapshot, never a list index. The coordinator targets any slot holding that
@@ -835,8 +854,8 @@ are open work.
   connection parameter policy, long-read assembly, management primitives,
   advertisement parser, storage framing and record validation, power policy,
   and UI logic.
-- The source contains 267 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 264 unit tests and the 3
+- The source contains 279 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 276 unit tests and the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), all
   of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
@@ -1006,9 +1025,10 @@ implemented, so do not describe them as features.
 - **Errors are coarse and some events are silent.** A link that cannot be
   secured shows only `Connect failed`, a failed save only `Storage failed`, a
   fifth saved device replaces the oldest without a prompt, and an unsupported
-  report is dropped without a message. *Please wait...* has no deadline, so a
-  coordinator that never answers needs a power cycle
-  ([visible errors and the management wait](../TODO.md#ui-display-and-power)).
+  report is dropped without a message. After a **No reply** timeout the BLE
+  task may still be stuck; only a board reset recovers it until a watchdog
+  exists ([visible errors](../TODO.md#ui-display-and-power),
+  [watchdog](../TODO.md#platform-memory-and-recovery)).
 - **Power use is not measured.** The bridge keeps its radio and links active
   while the PC sleeps; whether a given hub accepts that current is untested
   ([power budget](../TODO.md#ui-display-and-power)).

@@ -288,6 +288,12 @@ fn draw_view<I2C: embedded_hal_async::i2c::I2c>(display: &mut Display<I2C>, stat
             text(display, &state.message, 28);
             text(display, "SELECT: back", 48);
         }
+        Screen::NoReply => {
+            text(display, "No reply", 10);
+            text(display, &state.message, 26);
+            text(display, "SELECT: back", 44);
+            text(display, "UP:saved devices", 58);
+        }
     }
 }
 

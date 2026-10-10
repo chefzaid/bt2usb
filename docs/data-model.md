@@ -596,16 +596,24 @@ The UI raises three error messages without a tag: `Busy; try again` when
 chosen saved device is no longer in the UI's snapshot (both in
 [main.rs](../src/main.rs)), and `No devices found` when a scan ends with an
 empty list ([ui/ui_logic.rs](../src/ui/ui_logic.rs)). The completion notices
-`Device forgotten` and `Pairings reset` also come from `ui_logic.rs`.
+`Device forgotten` and `Pairings reset`, and the timeout messages
+`Forget result unknown`, `Reset result unknown`, and `List not loaded`, also
+come from `ui_logic.rs`.
 
 ### Management Request Lifecycle
 
 `ManagementRequests` in [ui/ui_logic.rs](../src/ui/ui_logic.rs) allows one
 request at a time. IDs increase with wrapping arithmetic; a reply whose ID does
-not match the pending request is ignored. While a request is pending the UI
-ignores every button, so a coordinator that never replies leaves the UI on
-**Please wait...** until power is cycled; a bounded wait is open in
-[TODO.md](../TODO.md).
+not match the pending request is ignored. Each request also carries a deadline,
+`UI_MANAGEMENT_TIMEOUT_SECS` (30 s) after it starts. While a request is
+pending the UI ignores every button. Once the deadline passes, `expire` drops
+the request on the next 1 s tick, the UI clears its saved-device snapshot and
+shows **No reply**, and the abandoned ID can never complete a later request.
+
+| State | Enters when | Leaves when |
+| --- | --- | --- |
+| Idle | Boot, a matching reply, or a timeout | `begin` starts a request with the next ID and a deadline |
+| Pending | `begin` | `complete` with the matching ID (reply handled), or `expire` at or after the deadline (No reply shown) |
 
 ```mermaid
 sequenceDiagram
@@ -656,7 +664,7 @@ and a `PowerManager`. RSSI and addresses are never rendered.
 
 `Screen` has the variants `Home`, `Scanning`, `DeviceList`, `Connecting`,
 `Connected`, `Error`, `SavedDevices`, `ConfirmForget(usize)`, `ConfirmReset`,
-`Managing`, and `Notice`. The text each one shows and what UP, DOWN, and
+`Managing`, `Notice`, and `NoReply`. The text each one shows and what UP, DOWN, and
 SELECT do on it are listed once, in
 [features: screens and buttons](features.md#screens-and-buttons).
 

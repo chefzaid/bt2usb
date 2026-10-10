@@ -50,7 +50,7 @@ mod storage;
 mod ui;
 mod usb;
 
-use defmt::{info, unwrap};
+use defmt::{info, unwrap, warn};
 use defmt_rtt as _; // global logger
 use panic_probe as _; // panic handler → defmt
 
@@ -71,7 +71,7 @@ use crate::hid::delivery::HidEvent;
 use crate::power::PowerManager;
 use crate::ui::{ButtonEvent, Screen};
 use crate::usb::hid_device;
-use embassy_time::{Duration, Ticker};
+use embassy_time::{Duration, Instant, Ticker};
 use heapless::Vec;
 
 /// BLE HID reports → USB HID writer.
@@ -264,6 +264,12 @@ async fn main(spawner: Spawner) {
                 if state.screen == Screen::Scanning && power.display_on() {
                     state.scan_dots = ui::input_logic::next_scan_dots(state.scan_dots);
                 }
+                // A coordinator that never answers must not lock the buttons.
+                if let Some(command) = management.expire(Instant::now().as_millis()) {
+                    warn!("management request got no reply; result unknown");
+                    paired.clear();
+                    state.management_timed_out(command);
+                }
             }
             embassy_futures::select::Either4::Third(button) => {
                 let was_off = !power.display_on();
@@ -276,7 +282,11 @@ async fn main(spawner: Spawner) {
                             command,
                             UiCommand::ListPaired | UiCommand::Forget(_) | UiCommand::FactoryReset
                         ) {
-                            management.begin(command)
+                            management.begin(
+                                command,
+                                Instant::now().as_millis()
+                                    + config::UI_MANAGEMENT_TIMEOUT_SECS * 1000,
+                            )
                         } else {
                             None
                         };

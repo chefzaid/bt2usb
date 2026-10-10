@@ -123,6 +123,12 @@ pub const SCREEN_AUTO_OFF_ENABLED: bool = true;
 /// Inactivity timeout before OLED is turned off (seconds).
 pub const SCREEN_AUTO_OFF_TIMEOUT_SECS: u64 = 120;
 
+/// How long the UI waits for the BLE coordinator to answer a saved-device list,
+/// Forget, or Factory reset request before it shows **No reply** (seconds).
+/// The buttons are ignored while it waits. A reply normally arrives within a
+/// few seconds: the affected links close, then the store is written to flash.
+pub const UI_MANAGEMENT_TIMEOUT_SECS: u64 = 30;
+
 // Paired-device storage
 
 /// Maximum number of paired devices tracked in storage.

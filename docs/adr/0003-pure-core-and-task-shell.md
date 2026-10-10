@@ -187,12 +187,12 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 267 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 264 unit and 3 integration tests, which
+  finds 279 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 276 unit and 3 integration tests, which
   passed on 2026-10-10 (the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09)
   ran 260 unit tests, before four advertisement tests moved out of the
-  firmware-only `scanner.rs`).
+  firmware-only `scanner.rs` and twelve UI tests were added).
   The CI host-test jobs on Linux and Windows passed on GitHub-hosted runners
   in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
   (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The

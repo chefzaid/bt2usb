@@ -109,10 +109,10 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs`, `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`, `src/config.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs`, `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
-Apart from `config.rs`, which holds plain constants, and `ui/mod.rs`, which
-only declares modules, everything in the right-hand column depends on
+Apart from `ui/mod.rs`, which only declares modules, everything in the
+right-hand column depends on
 SoftDevice, Embassy, or peripheral types. It is
 checked by the embedded build and Clippy, partly by
 Renode (`ui/buttons.rs`), by the board self-test, and by hardware acceptance;
@@ -131,20 +131,22 @@ see [Modules Without Host Tests](#modules-without-host-tests).
 Both tools run with `--lib --tests`, so both include `tests/integration.rs`;
 their percentages still differ because they instrument differently (see
 [code quality](code-quality.md#coverage)). These output paths are ignored by
-Git. CI does not run coverage. The latest local llvm-cov figure is 96.16% host
+Git. CI does not run coverage. The latest local llvm-cov figure is 97.48% host
 line coverage on 2026-10-10.
 
 ## Test Map
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
-2026-10-10, in the commit that moves the scanner's advertisement tests to
-`ble/adv_parser.rs`. The tree holds 267 `#[test]` functions: 264 in files
-compiled into the host library and 3 in `tests/integration.rs`, and every one
-of them runs under `cargo test --locked --lib --tests` (see
+2026-10-10, in the commit that bounds the UI's management wait. The tree holds
+279 `#[test]` functions: 276 in files compiled into the host library and 3 in
+`tests/integration.rs`, and every one of them runs under
+`cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
-tests, before four advertisement tests moved into the host library; the 264
-passed with `cargo test` on 2026-10-10. There are no `#[ignore]` or
+tests, before four advertisement tests moved into the host library and twelve
+UI tests (the management deadline, the saved-device list, scans, and
+`UiState` updates) were added; the 276 passed with `cargo test` on
+2026-10-10. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -188,7 +190,7 @@ protect.
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [ui/ui_logic.rs](../src/ui/ui_logic.rs) | 19 | `on_button` transitions: SELECT scans from Home and Error, list navigation clamps, SELECT connects the highlighted entry, an empty list cannot connect, stale selections are clamped, SELECT on Connected rescans and DOWN disconnects, ignored combinations are no-ops. `on_scan_complete`. Management confirmations default to Cancel, one request runs at a time, stale replies are rejected, request IDs stay unique across wraparound, an empty store still offers Factory reset, errors survive later status, and background status or scans do not dismiss a confirmation. |
+| [ui/ui_logic_tests.rs](../src/ui/ui_logic_tests.rs), for [ui_logic.rs](../src/ui/ui_logic.rs) | 31 | `on_button` transitions: SELECT scans from Home and Error, list navigation clamps, SELECT connects the highlighted entry, an empty list cannot connect, stale selections are clamped, SELECT on Connected rescans and DOWN disconnects, ignored combinations are no-ops. `on_scan_complete`. Management confirmations default to Cancel, one request runs at a time, stale replies are rejected, request IDs stay unique across wraparound, an unanswered request expires at its deadline and its late reply is ignored, an answered request never expires, a timeout shows **No reply** without claiming an outcome, drops the saved list, survives link updates, reopens saved devices with UP and is acknowledged with SELECT, and keeps an error already showing, an empty store still offers Factory reset, errors survive later status, and background status or scans do not dismiss a confirmation. Saved-device navigation reaches every entry and backs out, `UiState` counts saved devices on management screens, a completed change shows its notice and drops the saved list (an error stays), a scan lists results, reports none, or ignores a stray completion, a button scan clears old results, a new link clears the list, and long messages are cut to 32 bytes. |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | 2 | OLED retry backoff of 1, 2, 4, 8, 16, then 30 s (capped) without blocking new frames, reset on recovery, and saturating deadlines. |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | 3 | The device-list window keeps the selection visible, handles an empty list and a stale selection, and the scan spinner recovers from an out-of-range state. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |

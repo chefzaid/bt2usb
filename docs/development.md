@@ -649,8 +649,8 @@ Files:
   32 bytes.
 - [main.rs](../src/main.rs): the button arm maps each `UiCommand` to a
   `BleCommand` in an exhaustive `match`. Management commands go through
-  `ManagementRequests`, which allows one at a time and ignores buttons while
-  one is pending. The first press while the display is off only wakes it.
+  `ManagementRequests`, which allows one at a time, ignores buttons while
+  one is pending, and gives up after `UI_MANAGEMENT_TIMEOUT_SECS`. The first press while the display is off only wakes it.
 - [sim.rs](../src/sim.rs): the simulation matches `UiCommand` exhaustively and
   logs each command, so the `sim` build fails until the new variant is handled.
 

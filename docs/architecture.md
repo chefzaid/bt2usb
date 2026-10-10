@@ -760,10 +760,14 @@ sequenceDiagram
 ```
 
 1. UP on Home, Connected, an error, or a notice shows "Please wait..." and sends
-   `ListPaired`. `ManagementRequests::begin` assigns the next request ID and
-   allows one outstanding request. While it is pending, `main` ignores button
-   actions; there is no timeout yet (see
-   [error handling](#error-handling-and-recovery-strategy)).
+   `ListPaired`. `ManagementRequests::begin` assigns the next request ID and a
+   deadline `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) away, and allows one
+   outstanding request. While it is pending, `main` ignores button actions.
+   The 1 s housekeeping tick calls `ManagementRequests::expire`; past the
+   deadline it drops the request and its saved-device snapshot, and
+   `UiState::management_timed_out` shows **No reply** with a message that names
+   no outcome (or keeps an error already showing). A later reply carries the
+   dropped ID and is ignored.
 2. The coordinator replies with `PairedDevices`, most recently added first.
    `main` accepts only the reply whose ID matches, keeps the list with its
    addresses, and shows Saved devices unless an error is visible.
@@ -1132,12 +1136,11 @@ The memory-layout checks in `memory_sd.x` (RAM placement and the end of
 ### Not Yet Handled
 
 - No watchdog. The nRF52840 WDT is not configured and reset causes are not
-  recorded. A task stuck forever, for example in `close_connection`, or a
-  management reply that never arrives (the UI then ignores every button),
-  needs a reset or power cycle. This is the P0 "Watchdog and
+  recorded. A task stuck forever, for example in `close_connection`, needs a
+  reset or power cycle; when it is the BLE task, the UI shows **No reply** 30
+  seconds after a management request and stays usable, but nothing restarts
+  the BLE task. This is the P0 "Watchdog and
   recoverable failures" item in [TODO.md](../TODO.md) and needs an ADR first.
-- The UI waits for a management reply without a deadline (P1 "Bounded
-  management wait in the UI").
 - A background reconnect to a peer that has lost its keys retries without
   telling the user.
 - Power loss during a flash write, during garbage collection, or during the

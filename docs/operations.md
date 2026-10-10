@@ -341,6 +341,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `OLED I2C stalled; requesting STOP, display task degraded until DMA completes` | An operation passed its 500 ms deadline | [OLED incident](#oled-is-dark-or-the-i2c-bus-is-stuck) |
 | warn | `OLED I2C error: STOP not complete; requesting again` | The bus has not stopped after an error | Likely a stuck bus; power off and check wiring |
 | info | `Button: {}` | A debounced press (`Up`, `Down`, or `Select`) | None |
+| warn | `management request got no reply; result unknown` | A saved-device list, Forget, or reset got no answer within `UI_MANAGEMENT_TIMEOUT_SECS` | [Pending incident](#a-management-action-stays-pending) |
 
 ### OLED Messages
 
@@ -361,6 +362,7 @@ message:
 | `No devices found` | [Scan incident](#scan-finds-no-devices) |
 | `Complete` / `Device forgotten` or `Pairings reset` | A management change was stored; SELECT to dismiss |
 | `Please wait...` | A management request is pending; see [pending incident](#a-management-action-stays-pending) |
+| `No reply` / `Forget result unknown`, `Reset result unknown`, or `List not loaded` | The BLE task did not answer within 30 s; see [pending incident](#a-management-action-stays-pending) |
 
 ## Common Incidents
 
@@ -742,14 +744,19 @@ and replug the native USB cable.
 
 ### A Management Action Stays Pending
 
-**Symptoms:** the OLED shows `Please wait...` and ignores every button.
+**Symptoms:** the OLED shows `Please wait...` and ignores every button, then
+after 30 seconds **No reply** with `Forget result unknown`,
+`Reset result unknown`, or `List not loaded`.
 
 **Likely causes:** while a saved-device list, Forget, or Factory reset request
 is pending, the UI ignores all buttons until the BLE task replies. The BLE task
 handles one thing at a time: a user scan (8 seconds, plus waiting for the
 radio), or a Forget or reset that first waits for each affected slot to
 stop. A slot in the middle of a connection attempt stops only after the
-attempt ends (up to 6 seconds). There is no timeout in the UI.
+attempt ends (up to 6 seconds). After `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) the
+UI stops waiting, logs `management request got no reply; result unknown`, and
+shows **No reply**. That is far longer than any of these waits, so a timeout
+means the BLE task is stuck, for example in `close_connection`.
 
 **Confirm:** watch the log for the scan or connection lines that are in
 progress, then for `Saved N devices to flash` or an error. The
@@ -757,11 +764,13 @@ progress, then for `Saved N devices to flash` or an error. The
 request IDs.
 
 **Fix:** wait for the operation in progress to finish: a scan takes 8 to 10
-seconds, and a connection attempt or reconnect scan up to 6 seconds. If the
-screen never changes, reset the board, then reopen the saved-device list to see
-what was stored. A reset during a flash write is not covered by tested
-power-loss behavior. A bounded wait with a "result unknown" screen is open work
-in [TODO.md](../TODO.md#ui-display-and-power).
+seconds, and a connection attempt or reconnect scan up to 6 seconds. On
+**No reply**, press UP to reopen saved devices: a list that loads shows what
+was stored, and a Forget or reset may have been written even though no answer
+came. If the list does not load either, the BLE task is stuck; reset the board,
+then reopen the list. A reset during a flash write is not covered by tested
+power-loss behavior. A late answer to the abandoned request is ignored by its
+request ID.
 
 ### Connect Fails With An HID Error
 

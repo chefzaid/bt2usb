@@ -24,13 +24,13 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 1 | 0 | 0 |
+| [FIXME](#fixme) | 2 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
-| [UI, Display And Power](#ui-display-and-power) | 8 | 3 | 1 |
+| [UI, Display And Power](#ui-display-and-power) | 9 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **76** | **83** | **22** |
+| **Total** | **78** | **82** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -66,6 +66,15 @@ fixed it.
   on 2026-10-10). CI was unaffected because it calls Cargo directly. Fixed by
   committing both scripts as `100755`; `mask coverage` then ran and reported
   96.16% host line coverage ([testing](docs/testing.md#troubleshooting)).
+- [x] **P3** **Stale notes after the link-count change.** Commit `63d458d`
+  compiled `config.rs` into the host library, but the
+  [host library composition](docs/testing.md#host-library-composition) table
+  and the [coverage scope](docs/code-quality.md#coverage) still listed it as
+  firmware-only, and `manage_devices` kept a `clippy::too_many_arguments`
+  allowance it no longer needed (seven parameters once the slot senders became
+  one array). Found while bounding the management wait; fixed in the same
+  commit, which also removed the allowance from the
+  [lint inventory](docs/code-quality.md#lint-allowances).
 
 ## Needs Your Input
 
@@ -477,6 +486,16 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   `src/power_logic.rs`;
   [ADR 0012](docs/adr/0012-bus-powered-no-system-off.md)).
   *(hardware evidence pending)*
+- [x] Bounded management wait in the UI. Each saved-device list, Forget, or
+  reset request carries a deadline `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) away;
+  the 1 s housekeeping tick expires it, the UI drops its saved-device snapshot
+  and shows **No reply** with `Forget result unknown`, `Reset result unknown`,
+  or `List not loaded` (an error already showing stays), UP reopens saved
+  devices, and a late reply is rejected by its request ID. Reducer tests cover
+  the lost reply, the late reply before and after a new request, and the
+  screen; seven more `UiState` tests raised `ui_logic.rs` from 81% to 97% line
+  coverage, and its tests moved to `ui_logic_tests.rs` (2026-10-10;
+  [features](docs/features.md#manage-saved-devices)).
 - [ ] **P0** **Power budget and USB suspend current.** *(hardware)* Measure
   supply current while idle, scanning (at the default duty cycle and at the
   fast reconnect duty cycle of a 50 ms window every 100 ms), with two links, with the OLED on and off,
@@ -486,13 +505,6 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   margins are recorded and either meet those limits or a reviewed exception
   updates [ADR 0012](docs/adr/0012-bus-powered-no-system-off.md)
   ([release gates](docs/deployment.md#release-gates)).
-- [ ] **P1** **Bounded management wait in the UI.** While a saved-devices list,
-  Forget, or reset request is pending, the UI ignores every button until the BLE
-  coordinator replies. A hung coordinator therefore needs a power cycle. Define
-  a deadline and a "result unknown, reopen saved devices" state that never
-  claims success or failure it did not observe. Accept when reducer tests cover
-  the lost-reply path and a late reply is rejected by its request ID
-  ([features](docs/features.md#manage-saved-devices)).
 - [ ] **P1** **Visible storage/security errors.** Surface pairing persistence
   failure, bond replacement, full-store eviction, unsupported reports, and
   security failures with useful user actions. Today a failed save shows only
@@ -802,10 +814,11 @@ Host tests, simulation, and code-health work. Context:
   `maskfile.md` recipes. Accept when a lint finding in any of them fails CI
   ([code quality](docs/code-quality.md#other-files)).
 - [ ] **P2** **Keep source files within a size limit.** Four files are over
-  500 lines again after the split in commit `e3bc620` (`wc -l` at `802bbf1`:
-  `src/ble/multi_conn.rs` 821, `src/ui/ui_logic.rs` 603,
-  `src/usb/hid_device.rs` 521, `src/lib_tests.rs` 503), and no tool limits file
-  length. Accept when each is split below the limit, or a recorded limit with
+  500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10:
+  `src/ble/multi_conn.rs` 844, `src/hid_descriptor_tests.rs` 551,
+  `src/usb/hid_device.rs` 536, `src/lib_tests.rs` 503; `src/ui/ui_logic.rs`
+  dropped to 446 when its tests moved to `ui_logic_tests.rs`), and no tool
+  limits file length. Accept when each is split below the limit, or a recorded limit with
   named exceptions is checked in CI
   ([code quality](docs/code-quality.md#known-gaps)).
 
@@ -1395,7 +1408,7 @@ The checklist, adapted to this firmware:
 | Static analysis | `cargo fmt`, and host, firmware, and simulation Clippy with `-D warnings`, rustdoc with warnings denied |
 | Security | Every peer-, host-, or flash-controlled value bounded and validated; no key material or keystrokes logged; no unreviewed dependency |
 | Robustness | No lost wakeups, unbounded waits, or panics reachable from outside input; bounded work in callbacks |
-| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 96.1% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
+| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 97.5% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
 | Documentation | The owning guide, ADRs, and this plan match the code; dependencies pinned and current |
 
 ## Updating This Checklist

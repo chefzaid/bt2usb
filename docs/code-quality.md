@@ -129,10 +129,13 @@ how to spot and discard that.
 
 ### Clippy
 
-**Enforced.** Clippy runs with its default lint groups and `-D warnings`.
-There is no `clippy.toml`, no `[lints]` table in `Cargo.toml`, and no
-crate-level `#![deny]` or `#![warn]` attribute, so the default set is the
-whole policy. Pedantic, restriction, and nursery lints are not enabled.
+**Enforced.** Clippy runs with its default lint groups and `-D warnings`,
+plus one restriction lint: the `[lints.clippy]` table in `Cargo.toml` turns
+on `undocumented_unsafe_blocks` for every target, so an `unsafe` block
+without a `// SAFETY:` comment fails each Clippy configuration below. The
+host library also carries `#![forbid(unsafe_code)]` in
+[lib.rs](../src/lib.rs). There is no `clippy.toml`, and no other pedantic,
+restriction, or nursery lint is enabled.
 
 Clippy runs in three configurations because `cfg` gating means each one sees
 different code:
@@ -217,7 +220,7 @@ There are no `unsafe fn`, `unsafe impl`, `static mut`, `transmute`,
 | # | Location | Operation | Purpose | Invariant the code relies on | `SAFETY` comment | Compiled into |
 | --- | --- | --- | --- | --- | --- | --- |
 | 1 | [stack.rs](../src/stack.rs) `high_water` | `core::ptr::read_volatile` of a `u32` | Find the first overwritten word of the painted stack | Each address is word-aligned and lies between the linker symbols `_stack_end` and `_stack_start`, which is RAM owned by the program; the read is volatile so the compiler cannot assume the contents | Yes | Bridge, self-test |
-| 2 | [scanner.rs](../src/ble/scanner.rs) `scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | View advertisement bytes from a SoftDevice scan report | `p_data` and `len` describe the report inside the scan buffer, and the slice does not outlive the callback | **No** | Bridge |
+| 2 | [scanner.rs](../src/ble/scanner.rs) `scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | View advertisement bytes from a SoftDevice scan report | `p_data` and `len` describe the report inside the scan buffer, and the slice does not outlive the callback | Yes | Bridge |
 | 3 | [multi_conn.rs](../src/ble/multi_conn.rs) `bonder`, first branch | `&*ptr` | Return the shared `&'static Bonder` | The pointer came from `StaticCell::try_init`, so it is non-null, aligned, initialized, and lives forever; after initialization the `Bonder` is only reached through shared references | Yes | Bridge |
 | 4 | [multi_conn.rs](../src/ble/multi_conn.rs) `bonder`, spin fallback | `&*ptr` | Same as 3, after waiting for another caller's initialization | Same as 3 | Yes ("as above") | Bridge |
 | 5 | [sd_setup.rs](../src/sd_setup.rs) `enable_usb_power_events` | `sd_power_usbdetected_enable`, `sd_power_usbremoved_enable`, `sd_power_usbpwrrdy_enable`, `sd_power_usbregstatus_get` | Turn on the SoftDevice's USB power events and read the USB regulator state | The SoftDevice is enabled before the call (the function's doc comment says it must run after `Softdevice::enable`); `status` is a valid local the SVC writes | Yes | Bridge, self-test |
@@ -241,8 +244,9 @@ feature and `sim.rs` does not declare `stack` or `sd_setup`.
   pass the slice to functions that parse it and return owned values.
   `from_raw_parts` also requires a non-null pointer even when `len` is 0; the
   code relies on the SoftDevice always pointing `p_data` into the buffer that
-  `central::scan` supplied. Block 2 has no `SAFETY` comment; block 6 states
-  the pointer and length guarantee.
+  `central::scan` supplied. Both comments state the pointer and length
+  guarantee; block 2's also says the bytes are copied before the callback
+  returns.
 - **Blocks 3 and 4.** `Bonder` holds a `RefCell`, so it is `!Sync` and cannot
   be a plain `static`. The function's doc comment explains why a
   `StaticCell` plus an `AtomicPtr` cache is used and why the spin fallback
@@ -269,14 +273,17 @@ that file with the same rules as application `unsafe`.
 
 ### Review Rule
 
-**Review rule; not enforced by a lint.** Clippy's
-`undocumented_unsafe_blocks` lint and `#![forbid(unsafe_code)]` are not
-enabled; enabling the lint is the open item
-[Enforce SAFETY comments on unsafe blocks](../TODO.md#verification-and-code-quality).
+**Partly enforced.** Clippy's `undocumented_unsafe_blocks` lint, set in the
+`[lints.clippy]` table of `Cargo.toml`, fails every Clippy run in CI and
+`mask ci` when an `unsafe` block has no `// SAFETY:` comment, and
+`#![forbid(unsafe_code)]` in [lib.rs](../src/lib.rs) rejects `unsafe` in any
+module the host library compiles (rule 2). Whether the comment is correct,
+and the rest of the rules below, stay with the reviewer.
 
 1. Use `unsafe` only where no safe API does the job. Prefer `StaticCell`,
    Embassy channels and signals, and the safe wrappers in `nrf-softdevice`.
-2. Keep pure, host-compiled modules free of `unsafe`. Today none has any.
+2. Keep pure, host-compiled modules free of `unsafe`; `#![forbid(unsafe_code)]`
+   in `lib.rs` enforces this for every module the host library compiles.
 3. Put a `// SAFETY:` comment directly above the block. Name each
    precondition of the operation (non-null, alignment, initialization,
    lifetime, aliasing, and which execution context may touch the data) and
@@ -592,7 +599,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
 | The ten `scanner.rs` tests never compile | [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality) (P1) |
 | The connection workers, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
-| No lint enforces `SAFETY` comments, and block 2 in the [unsafe inventory](#inventory) has none | [Enforce SAFETY comments on unsafe blocks](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The pairing flash range is defined in both `config.rs` and `memory_sd.x`, with no check that they agree | [Single source for the pairing flash range](../TODO.md#platform-memory-and-recovery) (P1) |

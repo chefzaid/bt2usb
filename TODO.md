@@ -33,12 +33,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 6 | 6 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 4 | 12 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 5 | 11 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 7 | 2 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **70** | **88** | **22** |
+| **Total** | **71** | **87** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -672,6 +672,16 @@ Host tests, simulation, and code-health work. Context:
   `BUTTON_CHANNEL` (`renode/nrf52840_sense_gpio.cs`,
   `renode/nrf52840-sense-gpio.repl`;
   [ADR 0014](docs/adr/0014-renode-gpio-models.md)).
+- [x] Enforce `// SAFETY:` comments on `unsafe` blocks: the `[lints.clippy]`
+  table in `Cargo.toml` turns on `undocumented_unsafe_blocks` for every
+  target, so the host, firmware, self-test, and simulation Clippy steps, which
+  run with `-D warnings`, fail on an undocumented block; `#![forbid(unsafe_code)]`
+  in `src/lib.rs` keeps every module the host library compiles free of
+  `unsafe` (`Cargo.toml`, `src/lib.rs`;
+  [code quality](docs/code-quality.md#unsafe-code-policy)). Checked by removing
+  the comment in `src/stack.rs` (embedded Clippy failed with "unsafe block
+  missing a safety comment") and adding an `unsafe` block to `src/hid/wake.rs`
+  (host Clippy failed on `forbid(unsafe_code)`).
 - [ ] **P1** **Parser fuzzing and property tests.** Add bounded fuzz targets for
   HID descriptors, advertisements, report classification, and persistence
   framing. Accept when CI runs a seed corpus and scheduled fuzzing records no
@@ -724,13 +734,6 @@ Host tests, simulation, and code-health work. Context:
   recorded, and build firmware rustdoc with warnings denied. Accept when a
   coverage drop below the threshold or a firmware rustdoc warning fails CI
   ([code quality](docs/code-quality.md)).
-- [ ] **P1** **Enforce SAFETY comments on unsafe blocks.** The rule that every
-  `unsafe` block carries a `// SAFETY:` comment is a review rule only; the
-  scan-closure block in `src/ble/scanner.rs` was the last of the six without
-  one. Enable Clippy's `undocumented_unsafe_blocks` lint for the firmware,
-  self-test, and simulation builds, which CI already runs with `-D warnings`.
-  Accept when an `unsafe` block without a `SAFETY` comment fails the CI Clippy
-  steps ([code quality](docs/code-quality.md#unsafe-code-policy)).
 - [ ] **P1** **Single source for the link count and UI capacities.** The
   two-link limit is written separately as `MAX_CONNECTIONS` in
   `src/ble/coordinator.rs`, `SOURCES` in `src/hid/aggregate.rs`,

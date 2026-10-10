@@ -13,6 +13,8 @@
 //! `ui::{display, buttons}`) and `config` are *not* included here.
 
 #![cfg_attr(not(test), no_std)]
+// The shared pure modules stay free of `unsafe` (docs/code-quality.md).
+#![forbid(unsafe_code)]
 
 // The HID module is entirely hardware-free, so it is shared verbatim with the
 // firmware (`defmt::Format` is feature-gated inside it).

@@ -101,6 +101,12 @@ heapless          = { version = "0.8" }
 
 [dev-dependencies]
 
+# Every `unsafe` block needs a `// SAFETY:` comment. CI runs Clippy with
+# `-D warnings` for the host, firmware, self-test, and simulation builds, so a
+# block without one fails it (docs/code-quality.md#unsafe-code-policy).
+[lints.clippy]
+undocumented_unsafe_blocks = "warn"
+
 [patch.'https://github.com/embassy-rs/nrf-softdevice']
 # Minimal audited extension for bounded offset reads of long GATT values.
 nrf-softdevice = { path = "vendor/nrf-softdevice" }

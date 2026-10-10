@@ -171,19 +171,20 @@ and the largest Python file was `scripts/check_docs_test.py` (436).
 ### Clippy
 
 **Enforced.** Clippy runs with its default lint groups and `-D warnings`,
-plus one restriction lint: the `[lints.clippy]` table in `Cargo.toml` turns
-on `undocumented_unsafe_blocks` for every target, so an `unsafe` block
-without a `// SAFETY:` comment fails each Clippy configuration below. The
-host library also carries `#![forbid(unsafe_code)]` in
-[lib.rs](../src/lib.rs). There is no `clippy.toml`, and no other pedantic,
-restriction, or nursery lint is enabled.
+plus nine restriction lints that the `[lints.clippy]` table in `Cargo.toml`
+turns on for every target. `undocumented_unsafe_blocks` fails an `unsafe`
+block without a `// SAFETY:` comment, and the host library also carries
+`#![forbid(unsafe_code)]` in [lib.rs](../src/lib.rs). The other eight reject
+constructs that can panic, such as unchecked indexing and `unwrap`, outside
+tests ([panic lints](#panic-lints)); [clippy.toml](../clippy.toml) only allows
+four of them in test code. No pedantic or nursery lint is enabled.
 
 Clippy runs in four configurations because `cfg` gating means each one sees
 different code:
 
 | Configuration | Targets checked | Code only this configuration sees |
 | --- | --- | --- |
-| Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs` | `#[cfg(test)]` modules and test files |
+| Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs` and `tests/oled_font.rs` | `#[cfg(test)]` modules and test files |
 | Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, and GATT HID client modules |
 | Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs`, `src/sim_ble.rs`, and their UART output path |
 | Embedded with the opt-in (`--features embedded,log-sensitive-data`) | Library; `bt2usb`; `bt2usb-selftest` | No bt2usb code. It compiles the opt-in branches of three log lines in the vendored `nrf-softdevice` ([dependency logs](security.md#dependency-logs)); Clippy does not lint that crate, which is a path dependency rather than a workspace member |
@@ -193,7 +194,8 @@ embedded and the simulation configurations (`sim.rs` declares `mod ui`), but
 not by the host one.
 
 A binary whose `required-features` are not enabled is skipped, which is why
-each configuration lists different binaries.
+each configuration lists different binaries. Every configuration also lints
+`build.rs`, the package's build script.
 
 ### Lint Allowances
 
@@ -224,7 +226,8 @@ Rules for a new allowance:
 - Say why on the same line or the line above.
 - Prefer `#[expect(lint, reason = "…")]`, stable since Rust 1.81, so the
   attribute itself warns once the lint no longer fires. The existing five use
-  `#[allow]`.
+  `#[allow]`; the three panic-lint sites use `#[expect]` and are listed under
+  [Panic Lints](#panic-lints).
 - Never allow a lint to silence a correctness finding; fix the code.
 
 ### Documentation Comments
@@ -442,31 +445,185 @@ buffer is a case the code must handle, not a crash. See
 
 **Panics stop the device.** All three binaries link `panic-probe`, which
 prints the panic over RTT and stops the core; nothing resets the chip
-afterwards ([architecture](architecture.md#what-is-fatal)). The macro-based
-panic sites outside test code were listed with a script that stops at each
-file's `#[cfg(test)] mod`:
-
-| Site | Count | Why it cannot fire at runtime, or when it would |
-| --- | --- | --- |
-| `unwrap!(…)` on task spawns | 9 in `main.rs`, 2 in `selftest.rs`, 4 in `sim.rs` | Each spawn happens once at boot and fits the task's pool: one instance per task in `main.rs` and `selftest.rs` (the `ble_slot_task` pool holds one per link), `pool_size = 3` for the simulation's `button_task`, and one `ui::display::task`, spawned by either the bridge or the simulation. A spawn beyond the pool would panic |
-| `.expect("two u32 hex words fit in 16 characters")` | 1 in `usb/hid_device.rs` | Formatting two `{:08X}` words always yields 16 characters |
-| `unreachable!()` after `join4` | 1 in `usb/hid_device.rs` | The four joined futures never complete |
-| `unreachable!()` for `SlotEvent::Quiesced` | 1 in `ble/multi_conn.rs` | The loop handles `Quiesced` and continues before this match |
-| `const _: () = assert!(…)` on the pairing record size | 1 in `storage/devices.rs` | Compile time only: the build fails if four records with bonds exceed `MAX_RECORD_SIZE` |
-
-That table covers the panic macros only. Slice indexing, `RefCell` borrows,
-and `StaticCell` initialization can also panic; Clippy's `indexing_slicing`,
-`unwrap_used`, and `panic` lints are not enabled, so no tool lists those
-sites; listing them is the open item
-[Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality).
+afterwards ([architecture](architecture.md#what-is-fatal)). Since 2026-10-10
+([ADR 0025](adr/0025-panic-lints-and-inventory.md)) Clippy rejects the
+panic-prone constructs it can see, and the two lists below cover the rest: the
+application's in [Panic Paths No Lint Flags](#panic-paths-no-lint-flags) and
+the vendored crate's in [Vendored nrf-softdevice](#vendored-nrf-softdevice).
 
 **Review rule.** Data from a BLE peer, the USB host, or flash must never reach
 a panic. Validate lengths and bounds first and return an error or drop the
 input; the [security guide](security.md#input-validation-boundaries) lists
 the boundaries. A panic is acceptable only for a programming error that is
-caught at boot, and its message says what was violated.
+caught at compile time or at every boot, and its message says what was
+violated.
 
-**Arithmetic.** The release profile keeps Cargo's default
+### Panic Lints
+
+**Enforced.** `[lints.clippy]` in [Cargo.toml](../Cargo.toml) sets eight
+restriction lints to `warn` for every target, and each
+[Clippy configuration](#clippy) denies warnings:
+
+| Lint | What it rejects |
+| --- | --- |
+| `indexing_slicing` | `a[i]` and `a[i..j]` that may be out of bounds. A constant index into a fixed-size array that Clippy can see is in bounds passes |
+| `string_slice` | `&s[i..j]` on a `str`, which panics off a character boundary |
+| `unwrap_used`, `expect_used` | `.unwrap()` and `.expect()` on an `Option` or a `Result` |
+| `panic`, `unreachable`, `todo`, `unimplemented` | The four `core` macros |
+
+[clippy.toml](../clippy.toml) allows `unwrap_used`, `expect_used`,
+`indexing_slicing`, and `panic` in `#[test]` functions and `#[cfg(test)]`
+modules, where a panic is a failed test. `tests/oled_font.rs` and `build.rs`
+allow the lints they use at crate level, with a reason: a panic there fails a
+test or stops a build, never the device.
+
+When the lints were turned on they flagged 112 sites outside tests in 20
+files: 80 indexes, 29 slices, 2 `unreachable!`, and 1 `expect`. Each had a
+bound check somewhere before it, so none was a live defect, but the check and
+the access were separate. 109 were rewritten with the same behavior and no
+panic path:
+
+- `get` and `get_mut`, returning the function's existing `None` or error: a
+  Report Map item whose data runs past the end (`HidDescriptor::parse`), a
+  flash record shorter than its declared length (`record.rs`), a GATT read
+  longer than its buffer (`hid_client.rs`);
+- `first_chunk`, `split_first_chunk_mut`, and `split_at_checked` for fixed
+  layouts: the keyboard, mouse, and consumer decoders and the record codec;
+- slice patterns, such as `let &[byte] = data else { … }` for the host's LED
+  report in `set_report`;
+- iterators instead of index loops, such as `ad_structures`, which walks the
+  advertising data and stops at a zero-length or overrunning structure;
+- types that carry the bound: `encode_address` and `encode_bond` return
+  fixed-size arrays, and `ble_slot_task` takes its command channel instead of
+  an index into the array of channels;
+- matching instead of `unreachable!()`: `hid_writer_task` returns the
+  never-type result of its `join4`, and `handle_slot_event` returns on
+  `SlotEvent::Quiesced` inside its own match.
+
+Three sites keep the construct under `#[expect(lint, reason = "…")]`. Each
+bound is a constant or a type, so a rewrite would only add a fallback that no
+input can reach:
+
+| Site | Lint | Bound stated in the reason |
+| --- | --- | --- |
+| `InputAggregator::keyboard` in [aggregate.rs](../src/hid/aggregate.rs) | `indexing_slicing` | `keys` is `[bool; 256]` and is indexed only by a `u8` keycode |
+| The serial-number `write!` in `hid_device::init` ([hid_device.rs](../src/usb/hid_device.rs)) | `expect_used` | Two `{:08X}` words are exactly the 16 characters `serial` holds |
+| `SimBle::scenario_step` in [sim_ble.rs](../src/sim_ble.rs), simulation only | `indexing_slicing` | The arm makes `index` 0 or 1, and `peripherals` is `[_; 2]` |
+
+Rules for a new site:
+
+- Data from a peer, the host, or flash takes a rewrite unless its type alone
+  bounds the access, as a `u8` keycode indexing the 256-entry `keys` array
+  does; a bound that rests on a length check never takes an `#[expect]`.
+- Put the `#[expect]` on the narrowest item, the statement where Rust allows
+  it, and state the bound in `reason`.
+- Use `#[expect]`, not `#[allow]`: when a later change removes the construct,
+  the stale attribute fails the build.
+
+### Panic Paths No Lint Flags
+
+**Review rule.** Some constructs panic without any enabled lint flagging them:
+defmt's `unwrap!` and `assert!`, `RefCell` borrows, `StaticCell`
+initialization, calls into dependencies that panic when their contract is
+broken, and division by zero (overflow panics only in debug builds; see
+[Arithmetic](#arithmetic)). This list was made on 2026-10-10 by reading every
+non-test source file of the four crate roots and the dependency code each call
+reaches, and a second reviewer, told to refute each entry, checked it. A change
+that adds such a construct adds it here, and a change that breaks a reason
+fixes the code.
+
+Each entry has one of three classes:
+
+- **Compile time:** the compiler evaluates it, so a violation fails the build.
+- **Boot only:** it runs once per boot with constant inputs, so a violation
+  stops every boot of a bad build, where the self-test, Renode, or the
+  [first-flash checklist](first-flash.md) shows it, and never a good one.
+- **Cannot fire:** an invariant in the code rules it out; the reason names it.
+
+| Construct | Where | Class | Why it does not fire |
+| --- | --- | --- | --- |
+| `unwrap!` on task spawns | 9 in `main.rs`, 2 in `selftest.rs`, 4 in `sim.rs` | Boot only | Each task's pool fits its spawns: one per task, `pool_size = MAX_CONNECTIONS` for `ble_slot_task` (spawned once per slot), and `pool_size = 3` for the simulation's `button_task`. Every task returns `!`, so no pool slot is freed and no task is spawned twice |
+| `StaticCell::init` and `init_with` | 10 in `hid_device::init`; `keyboard_handler` and `mouse_handler` in `host_requests.rs`; `TX_BUF` in `display::new_twim` | Boot only | `hid_device::init` runs once in the bridge and once in the self-test, and it is the only caller of the two handlers; `new_twim` runs once in each binary. `bonder()` uses `try_init` and caches the result, so it cannot panic |
+| One-time peripheral setup | `embassy_nrf::init` (all three binaries), `Softdevice::enable` (bridge and self-test), `Flash::take` (`ble_task` and the self-test's `check_flash`), `Uarte::new` (simulation), `Twim::new` (`new_twim`) | Boot only | Each runs once per boot with a constant configuration. `Softdevice::enable` panics when `memory_sd.x` reserves too little RAM, which the self-test's first stage checks |
+| embassy-usb builder checks | `hid_device::init` | Boot only | `max_power` is 100 mA (limit 500), endpoint 0 takes 64-byte packets, four handlers fill the four that `MAX_HANDLER_COUNT` allows (a comment at `builder.handler` says so), three interfaces use three of four, the configuration descriptor uses about 108 of its 256 bytes, and three of seven IN endpoints are taken |
+| Compile-time assertions | `LINKS` and the event-size check in `sd_setup.rs`; the record-size check in `storage/devices.rs`; `MapConfig::new` in `const` blocks in `storage.rs` and `selftest.rs` | Compile time | A violation is a build error. `MapConfig::new` is a `const fn` that panics on a misaligned or empty flash range |
+| `RefCell` borrows | `Bonder` (seven); the report coalescer in `run_notification_loop` (two); the reconnect table in `scanner.rs` (two); `EndpointMailbox` in `hid_device.rs` (six) | Cannot fire | Everything runs on the one thread-mode executor. No borrow is held across an `.await`, and nothing inside a borrow re-enters the same cell or dispatches SoftDevice events (a SoftDevice call never delivers an event synchronously). The scanner and mailbox borrows also sit inside a blocking-mutex closure |
+| heapless capacity | `Vec::remove` in `DeviceList::without`, `DeviceList::add`, and `Bonder::on_bonded`; `collect()` into a fixed `Vec` in `DeviceStore::bonds`, `ble_task`, `handle_slot_event` (two), `publish_paired_devices`, and `SimBle::command` | Cannot fire | Each `remove` takes an index found by `position` on the same `Vec`, or index 0 of a full one. Each `collect` reads a source no longer than its target: `take(MAX_CONNECTIONS)` or `take(MAX_PAIRED_DEVICES)`, a `Vec` of capacity 1 collected into one of capacity 2, or a device list whose capacity is the target's |
+| `copy_from_slice` | `decode_address`, `encode_bond`, `decode_bond`, and `write_device` in `codec.rs`; the simulation's `Flash::save` in `sim_ble.rs` | Cannot fire | Both sides have the same length by construction: fixed ranges of fixed-size arrays, or parts split off to exactly the length copied |
+| Division by a runtime value | `max_latency_for` in `conn_params.rs`, while bounding a peer's connection parameter request | Cannot fire | It divides by the granted maximum interval, which `bound_request` keeps at or above the configured minimum interval, and it also returns early when that interval is 0, and when its timeout argument (the configured maximum supervision timeout) is 0, so `4 * timeout - 1` cannot underflow either. Every other `/` and `%` has a constant divisor |
+| embassy-time arithmetic | `Instant` plus `Duration`, including the one inside every `Timer::after`, `Ticker`, and `with_timeout`; `Duration::from_secs` and `from_millis`; and `Instant::elapsed`. In `scanner.rs`, `slot_worker.rs`, `buttons.rs`, `power.rs`, `display.rs`, the flash retry in `storage.rs`, the USB retry clock, the main loop's `Ticker`, the simulation loop, and the self-test | Cannot fire | The operands are small constants or capped values (delivery retries wait at most 1 s, display recovery at most 30 s). `elapsed` subtracts an earlier `Instant::now()` on a monotonic clock, and the 64-bit tick counter would take millions of years to overflow |
+| embassy-usb control handling | `UsbDevice::run_until_suspend`, `wait_resume`, and `remote_wakeup` in `run_usb_device`, which answer host requests; `HidWriter::write` in `UsbReportSink::write` | Cannot fire | The host chooses only a string index, and the longest string descriptor (42 bytes) fits the 128-byte control buffer. Out-of-range interfaces and OUT stages longer than the buffer are rejected. Reports are at most 8 bytes, the size each writer holds |
+| TWIM and SSD1306 drivers | `Twim::transaction` through `StopSafeI2c`; the ssd1306 flush | Cannot fire | The display sends single, non-empty writes and never reads. The TWIM raises its error event only together with an `ERRORSRC` bit, a rule the Renode model `renode/nrf52840_twim.cs` follows too. The panel driver drops pixels outside 128 by 64 |
+| Flash futures | `MapStorage::fetch_item` and `store_item` in `storage.rs`, the Factory reset `erase`, and `check_flash` | Cannot fire | The vendored `Flash::write` and `Flash::erase` arm a `DropBomb` that panics when the future is dropped before the SoftDevice reports completion. Every flash future is awaited directly; never put one in `select` or `with_timeout` |
+
+### Vendored nrf-softdevice
+
+Clippy does not lint the vendored crate, a path dependency outside the
+workspace. This list covers the modules bt2usb's features compile (`ble-central`,
+`ble-gatt-client`, `ble-sec`, `critical-section-impl`, `defmt`, `s140`,
+`nrf52840`, and `evt-max-size-256`, plus the default `macros`): `fmt`, `util`,
+`critical_section_impl`, `events`, `flash`, `raw_error`, `softdevice`,
+`temperature`, `random`, and `ble/{mod, central, common, connection, gap,
+gatt_client, gatt_traits, replies, security, types}`.
+`advertisement_builder.rs`, `peripheral.rs`, `gatt_server.rs` with
+`gatt_server/`, and `l2cap.rs` are not compiled.
+With `defmt` on, the crate's `unwrap!`, `assert!`, `panic!`, and
+`unreachable!` are defmt's, and its `debug_assert!` runs only in debug builds.
+
+Four panics a peer could reach were removed on 2026-10-10, amending the patch
+of [ADR 0007](adr/0007-vendored-softdevice-patch.md). Each change is marked
+`bt2usb patch:` in the source, except the feature, which is in bt2usb's
+`Cargo.toml`:
+
+| Panic | Where | How a peer reached it | Now |
+| --- | --- | --- | --- |
+| `BLE_EVT_MAX_SIZE is too low, use larger evt-max-size feature` | `events::run_ble` | At ATT MTU 64, a primary-service discovery response with 15 handle ranges is a 132-byte event, over the default 128-byte buffer. The chip halts, and after a power cycle a bonded device sends the same response to the next discovery | The `evt-max-size-256` feature, and a compile-time check in `sd_setup.rs` that computes Nordic's `BLE_EVT_LEN_MAX(ATT_MTU)` from the S140 bindings and fails the build if the result exceeds the buffer. The panic arm stays and cannot fire |
+| `unknown timeout src {:?}` | `gap::on_evt`, `BLE_GAP_EVT_TIMEOUT` arm | S140 reports source 3, the authenticated payload timeout, when an encrypted link carries no packet with a valid MIC for 480 s. A peer that ignores LE Ping and sends only empty packets causes it (not reproduced) | Logs `unhandled timeout src {:?}` and keeps the link: every report that does arrive is still authenticated |
+| `unwrap!(state.disconnect())` | `Connection::drop` | `connect_inner` drops its only `Connection` when the MTU exchange fails. If the peer ended the link at that moment, before `softdevice_task` pulled the DISCONNECTED event, the disconnect returned `DisconnectedError` | Treats the error as "already going down", which is what a drop wants, and logs at trace |
+| `unwrap!(RawError::convert(ret), "sd_ble_gap_disconnect")` | `ConnectionState::disconnect_with_reason` | Any SoftDevice error other than `NRF_ERROR_INVALID_STATE`, such as an invalid handle once the link is gone | Logs `sd_ble_gap_disconnect err {:?}` and returns the `DisconnectedError` callers already handle |
+
+The same change hardens four waiters that no peer can reach today. On an event
+other than their response, a GATT timeout, or a disconnect, the waiters in
+`discover_service`, `discover_characteristics`, `discover_descriptors`, and
+`att_mtu_exchange` panicked with `unexpected event {}`. The SoftDevice sends
+nothing else while one procedure is outstanding, and bt2usb runs one procedure
+per link at a time, so the panic could not fire; they now log the event at
+trace and keep waiting. `read_by_offset` and `write` already kept waiting,
+without logging.
+
+The remaining panic paths, and why each does not fire:
+
+| Group | Sites | Why it does not fire |
+| --- | --- | --- |
+| Boot only | `Softdevice::enable` and `cfg_set` (configuration, RAM, a second enable); `Flash::take` (a second take) | Each runs once per boot with a constant configuration (see the application table) |
+| SoftDevice fault handler | `fault_handler`: an internal SoftDevice assertion, an application access to SoftDevice-protected memory or peripherals, an unknown fault | bt2usb touches TWIM0, USBD, GPIOTE, and RTC1 (the embassy-time driver) through embassy-nrf, plus GPIO and FICR, never POWER, CLOCK, or other SoftDevice-owned blocks directly, and runs the interrupts it uses at priority 2 |
+| Event fetch | `run_soc`, `run_ble`, `on_soc_evt` | With a valid buffer the SoftDevice returns only "no event", "BLE not enabled", or "data size", and the buffer covers the largest event. SoC event IDs come from the same S140 bindings |
+| Connection bookkeeping | Reference-count `checked_add` and `checked_sub`, `with_state_by_conn_handle`, `index_by_handle`, `gatt_client::portal` and `hvx_portal` (which index by connection handle), `Connection::new`, `on_disconnected` | A link has a few `Connection` clones at most (the slot worker, the HID client, the LED forwarder) against a `u8` count. The SoftDevice sends one DISCONNECTED per handle and every other event for a handle after its CONNECTED, and the 20-entry state and portal tables cover the 2 links, whose handles S140 numbers from 0 |
+| Event portals | `Multiple tasks waiting on same portal`; each portal's `RefCell` and thread-mode mutex; `unreachable!()` in `wait_many` | `GAP_PROCEDURE` serializes scans and connects, the GATT procedures on one link run one after another, and notifications and the LED write wait on different portals. Every portal call runs in thread mode, and no waiter closure re-enters a portal |
+| Connect waiter | `unexpected event {}` in `central::connect_inner` | The connect portal receives only CONNECTED or the connect timeout |
+| Notification loop | `unwrap!(Connection::from_handle(..))` in `gatt_client::run` | The notification portal receives events only while the link has an index, DISCONNECTED clears it, and the loop returns on DISCONNECTED |
+| Security callbacks | The `SecurityHandler` defaults `display_passkey`, `enter_passkey`, and `recv_out_of_band`, and the passkey arm's `debug_assert_eq!` | `Bonder` declares no input, no output, and no out-of-band data, so pairing is Just Works and the SoftDevice never asks for a passkey or out-of-band data. `Bonder` implements `on_bonded` |
+| Conversions and lengths | `Role::from_raw`, `IoCapabilities::to_raw`, `IdentityKey::is_match`, the whitelist-length `assert!` in `ScanConfig::to_raw`, the `u16` length asserts in `write` | The role comes from the CONNECTED event and every link is central; `Bonder`'s I/O capabilities are a constant; `is_match` converts fixed 16-byte and 6-byte slices; the whitelist holds one address; GATT writes are 1 or 2 bytes |
+| Role check | The central-role `assert!` in `request_pairing` | Every link comes from `central::connect_with_security`, and the build has no peripheral role |
+| Discovery buffers | The `collect` of at most `DISC_CHARS_MAX` declarations; `no size in descriptors` | The source is cut to the target's capacity, and a descriptor overflow returns `TooManyAttributes` first |
+| Flash | `DropBomb` in `Flash::write` and `Flash::erase` | See flash futures in the application table |
+| Never called | `ble::get_address` and `ble::set_address` (in `ble/mod.rs`), `gap::set_whitelist`, `gap::set_device_identities_list`, `Uuid::new_128`, and the `gatt_traits` conversions | bt2usb does not call them |
+
+One vendored panic stays open: `Address::address_type` unwraps the 7-bit
+address type, whose conversion accepts only the four defined types and 0x7F.
+During pairing the peer sends its own identity address, and `Bonder::on_bonded`
+keeps it unchecked. The bond is saved when `bond_for_address` matches it to the
+connection's address, which for a peer connecting from a resolvable private
+address means only that its IRK resolves that address; the save then calls
+`address_type` on the identity and panics on a reserved type, unless the
+SoftDevice rejects such a type first, which its documentation does not say.
+Only a crafted or faulty peer the user pairs with sends one. The FIXME
+"A bond with a private or reserved identity address breaks the store" in
+[TODO.md](../TODO.md#fixme) tracks it with a related storage defect.
+
+### Arithmetic
+
+The release profile keeps Cargo's default
 `overflow-checks = false`, so integer overflow wraps silently in release
 firmware (the CI build, release artifacts, and `mask run --release`). The dev
 profile keeps the default `true`, so overflow panics in host tests and in
@@ -474,6 +631,14 @@ debug firmware builds (`mask build`, `mask run`, `mask sim-build`). A host test
 that overflows is a real defect even though the release firmware would not
 stop. Use `saturating_*`,
 `wrapping_*`, or `checked_*` where the intended behavior at the limit matters.
+
+Arithmetic on peer and flash data cannot overflow in either profile, as the
+2026-10-10 inventory checked: offsets into a Report Map, advertising data, or a
+flash record stay below the buffer length (at most 512 bytes) and the Report
+Map's long-item end uses `checked_add`; record counters stop at `u8::MAX` or
+zero before stepping; `LongRead::new` rejects an MTU below 23 before computing
+`mtu - 1`; and the connection-parameter formulas fit `u32` for every `u16`
+input. Mouse deltas are combined with `saturating_add` (`MouseReport::merged_with`).
 
 ## Coverage
 
@@ -768,9 +933,13 @@ for pairing, storage, and input handling.
 - [ ] No new `unsafe`, or the block follows the
       [review rule](#review-rule) and is added to the inventory here and in
       [security](security.md#unsafe-code).
-- [ ] No new panic path on data from a peer, the host, or flash; new
-      `unwrap!`, `expect`, or `unreachable!` sites are boot-time programming
-      checks with a message.
+- [ ] No new panic path on data from a peer, the host, or flash. A kept
+      lint site has an `#[expect]` whose reason states the bound, and a new
+      construct no lint flags (`unwrap!`, a `RefCell` borrow, a `StaticCell`,
+      a dependency call that can panic, a runtime divisor, a flash future
+      inside `select` or a timeout) is added to the
+      [panic list](#panic-paths-no-lint-flags) with its reason, as is a new
+      panic path in the vendored crate ([vendored list](#vendored-nrf-softdevice)).
 - [ ] New lint allowances are item-scoped and say why.
 - [ ] Buffers and channels are bounded, and the behavior when one is full is
       defined and tested.
@@ -800,7 +969,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | --- | --- |
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
 | The connection workers, security handler, GATT HID client, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
-| Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
+| The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) for the parsers; the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |

@@ -128,28 +128,37 @@ pub(crate) async fn discover_service(conn: &Connection, uuid: Uuid) -> Result<ra
     })?;
 
     portal(conn_handle)
-        .wait_once(|ble_evt| unsafe {
+        .wait_many(|ble_evt| unsafe {
             match (*ble_evt).header.evt_id as u32 {
-                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => return Err(DiscoverError::Disconnected),
-                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => return Err(DiscoverError::Timeout),
+                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => Some(Err(DiscoverError::Disconnected)),
+                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => Some(Err(DiscoverError::Timeout)),
                 raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_PRIM_SRVC_DISC_RSP => {
-                    let gattc_evt = check_status(ble_evt)?;
+                    let gattc_evt = match check_status(ble_evt) {
+                        Ok(evt) => evt,
+                        Err(e) => return Some(Err(e.into())),
+                    };
                     let params = get_union_field(ble_evt, &gattc_evt.params.prim_srvc_disc_rsp);
                     let v = get_flexarray(ble_evt, &params.services, params.count as usize);
 
-                    match v.len() {
-                        0 => Err(DiscoverError::ServiceNotFound),
-                        1 => Ok(v[0]),
-                        _n => {
-                            warn!(
-                                "Found {:?} services with the same UUID, using the first one",
-                                params.count
-                            );
-                            Ok(v[0])
+                    Some(match v.first() {
+                        None => Err(DiscoverError::ServiceNotFound),
+                        Some(&service) => {
+                            if v.len() > 1 {
+                                warn!(
+                                    "Found {:?} services with the same UUID, using the first one",
+                                    params.count
+                                );
+                            }
+                            Ok(service)
                         }
-                    }
+                    })
                 }
-                e => panic!("unexpected event {}", e),
+                // bt2usb patch: skip any other event, such as a stray response,
+                // and keep waiting instead of panicking.
+                _e => {
+                    trace!("discover_service ignores event {}", _e);
+                    None
+                }
             }
         })
         .await
@@ -179,20 +188,27 @@ async fn discover_characteristics(
     })?;
 
     portal(conn_handle)
-        .wait_once(|ble_evt| unsafe {
+        .wait_many(|ble_evt| unsafe {
             match (*ble_evt).header.evt_id as u32 {
-                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => return Err(DiscoverError::Disconnected),
-                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => return Err(DiscoverError::Timeout),
+                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => Some(Err(DiscoverError::Disconnected)),
+                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => Some(Err(DiscoverError::Timeout)),
                 raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_CHAR_DISC_RSP => {
-                    let gattc_evt = check_status(ble_evt)?;
+                    let gattc_evt = match check_status(ble_evt) {
+                        Ok(evt) => evt,
+                        Err(e) => return Some(Err(e.into())),
+                    };
                     let params = get_union_field(ble_evt, &gattc_evt.params.char_disc_rsp);
                     let v = get_flexarray(ble_evt, &params.chars, params.count as usize);
                     // A larger ATT MTU lets one response exceed the buffer. Keep
                     // a prefix: `discover` resumes after the last kept handle.
-                    let kept = core::cmp::min(v.len(), DISC_CHARS_MAX);
-                    Ok(unwrap!(Vec::from_slice(&v[..kept])))
+                    Some(Ok(v.iter().take(DISC_CHARS_MAX).copied().collect()))
                 }
-                e => panic!("unexpected event {}", e),
+                // bt2usb patch: skip any other event, such as a stray response,
+                // and keep waiting instead of panicking.
+                _e => {
+                    trace!("discover_characteristics ignores event {}", _e);
+                    None
+                }
             }
         })
         .await
@@ -222,18 +238,26 @@ async fn discover_descriptors(
     })?;
 
     portal(conn_handle)
-        .wait_once(|ble_evt| unsafe {
+        .wait_many(|ble_evt| unsafe {
             match (*ble_evt).header.evt_id as u32 {
-                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => return Err(DiscoverError::Disconnected),
-                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => return Err(DiscoverError::Timeout),
+                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => Some(Err(DiscoverError::Disconnected)),
+                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => Some(Err(DiscoverError::Timeout)),
                 raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_DESC_DISC_RSP => {
-                    let gattc_evt = check_status(ble_evt)?;
+                    let gattc_evt = match check_status(ble_evt) {
+                        Ok(evt) => evt,
+                        Err(e) => return Some(Err(e.into())),
+                    };
                     let params = get_union_field(ble_evt, &gattc_evt.params.desc_disc_rsp);
                     let v = get_flexarray(ble_evt, &params.descs, params.count as usize);
                     // Peer-controlled count: reject rather than panic.
-                    Vec::from_slice(v).map_err(|_| DiscoverError::TooManyAttributes)
+                    Some(Vec::from_slice(v).map_err(|_| DiscoverError::TooManyAttributes))
                 }
-                e => panic!("unexpected event {}", e),
+                // bt2usb patch: skip any other event, such as a stray response,
+                // and keep waiting instead of panicking.
+                _e => {
+                    trace!("discover_descriptors ignores event {}", _e);
+                    None
+                }
             }
         })
         .await
@@ -634,23 +658,28 @@ pub(crate) async fn att_mtu_exchange(conn: &Connection, mtu: u16) -> Result<(), 
     }
 
     portal(conn_handle)
-        .wait_once(|ble_evt| unsafe {
+        .wait_many(|ble_evt| unsafe {
             match (*ble_evt).header.evt_id as u32 {
-                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => return Err(MtuExchangeError::Disconnected),
-                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => return Err(MtuExchangeError::Timeout),
+                raw::BLE_GAP_EVTS_BLE_GAP_EVT_DISCONNECTED => Some(Err(MtuExchangeError::Disconnected)),
+                raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_TIMEOUT => Some(Err(MtuExchangeError::Timeout)),
                 raw::BLE_GATTC_EVTS_BLE_GATTC_EVT_EXCHANGE_MTU_RSP => {
                     let gattc_evt = match check_status(ble_evt) {
                         Ok(evt) => evt,
-                        Err(e) => return Err(e.into()),
+                        Err(e) => return Some(Err(e.into())),
                     };
                     let params = get_union_field(ble_evt, &gattc_evt.params.exchange_mtu_rsp);
                     let mtu = params.server_rx_mtu;
                     debug!("att mtu exchange: got mtu {:?}", mtu);
                     conn.with_state(|state| state.att_mtu = mtu);
 
-                    Ok(())
+                    Some(Ok(()))
                 }
-                e => panic!("unexpected event {}", e),
+                // bt2usb patch: skip any other event, such as a stray response,
+                // and keep waiting instead of panicking.
+                _e => {
+                    trace!("att_mtu_exchange ignores event {}", _e);
+                    None
+                }
             }
         })
         .await

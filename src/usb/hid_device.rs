@@ -144,11 +144,14 @@ impl ReportSink for UsbReportSink {
             }
             _ => report.serialize(&mut buf),
         };
+        // `serialize` and `serialize_boot` never report more than `buf` holds;
+        // a longer length would fail the write.
+        let bytes = buf.get(..len).ok_or(())?;
         // Cancellation is safe for these single-packet reports with the pinned
         // embassy-nrf 0.7 HAL: EndpointIn::write only awaits wait_data_ready;
         // afterwards DMA copies synchronously and returns without another
         // suspension point. Recheck this invariant when upgrading the driver.
-        self.writer.write(&buf[..len]).await.map_err(|_| ())
+        self.writer.write(bytes).await.map_err(|_| ())
     }
 }
 
@@ -276,6 +279,10 @@ pub fn init(
     // physical unit consistently across firmware updates and USB ports.
     let serial = USB_SERIAL.init_with(|| {
         let mut serial = heapless::String::<16>::new();
+        #[expect(
+            clippy::expect_used,
+            reason = "`{:08X}` prints a u32 as exactly 8 hex digits, so two fill the 16 bytes of `serial`"
+        )]
         write!(
             serial,
             "{:08X}{:08X}",
@@ -308,6 +315,10 @@ pub fn init(
         ctrl_buf,
     );
 
+    // embassy-usb 0.6 holds at most four handlers (its default
+    // `MAX_HANDLER_COUNT`) and panics at boot on a fifth. This one and the
+    // control handler each `HidWriter::new` below adds fill all four, so a new
+    // class or handler needs a `max-handler-count-*` feature on embassy-usb.
     let usb_handler = USB_POWER_HANDLER.init(UsbPowerHandler);
     builder.handler(usb_handler);
 
@@ -393,14 +404,16 @@ pub async fn hid_writer_task(
     report_rx: &Receiver<'static, CriticalSectionRawMutex, HidEvent, 16>,
 ) -> ! {
     info!("HID dispatcher and three endpoint workers started");
-    join4(
+    // Every future is `-> !`, so the join never completes; its first output
+    // has type `!` and serves as this function's result.
+    let (never, ..) = join4(
         dispatch_reports(report_rx),
         endpoint_worker(keyboard, &KEYBOARD_DELIVERY, false),
         endpoint_worker(mouse, &MOUSE_DELIVERY, true),
         endpoint_worker(consumer, &CONSUMER_DELIVERY, false),
     )
     .await;
-    unreachable!()
+    never
 }
 
 async fn dispatch_reports(

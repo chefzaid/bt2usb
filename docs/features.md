@@ -489,7 +489,11 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   empty responses, saturates handle arithmetic, and returns timeout errors
   instead of panicking
   ([`vendor/nrf-softdevice/README.bt2usb.md`](../vendor/nrf-softdevice/README.bt2usb.md),
-  [ADR 0007](adr/0007-vendored-softdevice-patch.md)).
+  [ADR 0007](adr/0007-vendored-softdevice-patch.md)). Since 2026-10-10 its
+  event buffer holds the largest discovery response the 64-byte ATT MTU
+  allows, and an authenticated-payload timeout or a link that ends while the
+  bridge is dropping it is logged instead of stopping the bridge
+  ([ADR 0025](adr/0025-panic-lints-and-inventory.md)).
 
 ### Reconnect And Link Loss
 

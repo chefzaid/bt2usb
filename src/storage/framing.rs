@@ -22,7 +22,16 @@ const VERSION: u8 = 0x01;
 
 /// `true` if `data` carries the versioned framing (vs. a legacy/blank blob).
 pub fn is_versioned(data: &[u8]) -> bool {
-    data.len() >= 3 && data[0] == MAGIC && data[1] == VERSION
+    declared_count(data).is_some()
+}
+
+/// The record count in the header of a versioned blob, `None` for a
+/// legacy/blank blob.
+pub fn declared_count(data: &[u8]) -> Option<u8> {
+    match *data {
+        [MAGIC, VERSION, count, ..] => Some(count),
+        _ => None,
+    }
 }
 
 /// Identify the versioned format even when the header is truncated or uses a
@@ -54,11 +63,11 @@ impl<'a> Writer<'a> {
     /// Start a blob (writes magic + version; reserves the count byte). Returns
     /// `None` if the buffer can't even hold the 3-byte header.
     pub fn new(buf: &'a mut [u8]) -> Option<Self> {
-        if buf.len() < 3 {
+        let [magic, version, _count, ..] = buf else {
             return None;
-        }
-        buf[0] = MAGIC;
-        buf[1] = VERSION;
+        };
+        *magic = MAGIC;
+        *version = VERSION;
         Some(Self {
             buf,
             offset: 3,
@@ -74,23 +83,32 @@ impl<'a> Writer<'a> {
     /// rather than corrupting the blob.
     pub fn push(&mut self, serialize: impl FnOnce(&mut [u8]) -> usize) -> bool {
         // Need room for at least the length prefix plus one body byte.
-        if self.count == u8::MAX || self.offset + 1 >= self.buf.len() {
+        let Some((prefix, body)) = self
+            .buf
+            .get_mut(self.offset..)
+            .and_then(<[u8]>::split_first_mut)
+        else {
+            return false;
+        };
+        if self.count == u8::MAX || body.is_empty() {
             return false;
         }
-        let body = self.offset + 1;
-        let written = serialize(&mut self.buf[body..]);
-        if written == 0 || written > u8::MAX as usize || body + written > self.buf.len() {
+        let written = serialize(body);
+        if written == 0 || written > u8::MAX as usize || written > body.len() {
             return false; // offset unchanged → record rolled back
         }
-        self.buf[self.offset] = written as u8;
-        self.offset = body + written;
+        *prefix = written as u8;
+        self.offset += 1 + written;
         self.count += 1;
         true
     }
 
     /// Finalize: write the record count and return the total blob length.
     pub fn finish(self) -> usize {
-        self.buf[2] = self.count;
+        // `new` refused a buffer without room for the header.
+        if let [_, _, count, ..] = self.buf {
+            *count = self.count;
+        }
         self.offset
     }
 }
@@ -101,11 +119,10 @@ impl<'a> Writer<'a> {
 /// length prefix, so a corrupt blob yields a prefix of valid records rather
 /// than reading out of bounds.
 pub fn records(data: &[u8]) -> Records<'_> {
-    let remaining = if is_versioned(data) { data[2] } else { 0 };
     Records {
         data,
         offset: 3,
-        remaining,
+        remaining: declared_count(data).unwrap_or(0),
     }
 }
 
@@ -120,19 +137,20 @@ impl<'a> Iterator for Records<'a> {
     type Item = &'a [u8];
 
     fn next(&mut self) -> Option<&'a [u8]> {
-        if self.remaining == 0 || self.offset >= self.data.len() {
+        if self.remaining == 0 {
             return None;
         }
-        let len = self.data[self.offset] as usize;
-        let body = self.offset + 1;
-        if len == 0 || body + len > self.data.len() {
+        let (&len, after) = self.data.get(self.offset..)?.split_first()?;
+        let Some(record) = after
+            .get(..len as usize)
+            .filter(|record| !record.is_empty())
+        else {
             // Keep a nonzero remaining count to expose malformed framing to
             // `is_complete`, but make the iterator permanently exhausted.
             self.offset = self.data.len();
             return None;
-        }
-        let record = &self.data[body..body + len];
-        self.offset = body + len;
+        };
+        self.offset += 1 + record.len();
         self.remaining -= 1;
         Some(record)
     }
@@ -207,6 +225,18 @@ mod tests {
         let recs: heapless::Vec<&[u8], 4> = records(&buf[..len]).collect();
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0], &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn writer_needs_room_for_the_header_and_a_record_body() {
+        assert!(Writer::new(&mut [0u8; 2]).is_none());
+        // One byte after the header fits a length prefix but no body, so the
+        // record is refused without calling `serialize`.
+        let mut buf = [0u8; 4];
+        let mut w = Writer::new(&mut buf).unwrap();
+        assert!(!w.push(|_| panic!("serialize must not run without a body byte")));
+        assert_eq!(w.finish(), 3);
+        assert_eq!(buf, [MAGIC, VERSION, 0, 0]);
     }
 
     #[test]

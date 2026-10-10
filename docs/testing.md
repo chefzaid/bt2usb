@@ -881,6 +881,32 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-10, Panic Lints And Inventory
+
+This record covers the commit that turns on Clippy's panic lints, rewrites the
+flagged sites, checks the flash range and the BLE event buffer at compile
+time, removes four vendored panics a peer could reach, and lists the remaining
+panic paths ([ADR 0025](adr/0025-panic-lints-and-inventory.md)). The checks
+ran locally on Linux in a container, on the working tree just before that
+commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 361 unit tests, 3 integration tests, and 3 glyph-table tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.88% of lines (from 98.16%), 98.79% of regions, 98.99% of functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation, each after `cargo clean -p bt2usb` | Passed. An added `.unwrap()` in `LongRead::offset` failed the host run with `unwrap_used`, so the lints are live |
+| Compile-time checks | Embedded build with a changed constant | A 131-byte event buffer in `sd_setup.rs` fails the build and 132 bytes passes, so the computed worst case at ATT MTU 64 is 132 bytes; a misaligned flash range in `selftest.rs` fails the build |
+| Mutation checks | Host tests | The two new descriptor tests fail when the size checks they cover are removed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five ([commands](code-quality.md#documentation-comments)) |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A` on the release ELF: with `DEFMT_LOG=debug` (the `.cargo/config.toml` default), `.text` 112,912 bytes (+64), `.rodata` 11,488 (−220), `.data` 1,640, `.bss` 23,252 (+16), `.uninit` 1,024; with `DEFMT_LOG=info`, the release setting, `.text` 112,180 bytes and the other sections unchanged. The 128 extra bytes of the event buffer are on `softdevice_task`'s stack, not in `.bss` |
+| Release helper policy/integrity tests | Python 3.13, Linux | Passed: 17 tests |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 18.00 s and the model checks in 1.30 s. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
+| Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change (enabling a feature of an existing dependency does not change the lock file) |
+| Vendored panic fixes | Review | Reviewed, not tested: no test reaches the vendored crate, and exercising the fixed paths needs a peer that misbehaves on purpose |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the change needs the pairing, reconnect, and device-management checks in the first-flash checklist ([4. Pairing and daily use](first-flash.md#4-pairing-and-daily-use)) |
+
 ## Validation Record — 2026-10-10, OLED In Renode
 
 This record covers the commit that moves each screen's text into

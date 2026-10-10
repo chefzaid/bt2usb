@@ -111,12 +111,16 @@ impl Flash {
         let Some(len) = list.pending_item(&mut buf)? else {
             return Ok(());
         };
-        self.item[..len].copy_from_slice(&buf[..len]);
+        // Both buffers hold MAX_RECORD_SIZE bytes, the most `pending_item` writes.
+        let (Some(item), Some(stored)) = (buf.get(..len), self.item.get_mut(..len)) else {
+            return Err(StoreError::Serialization);
+        };
+        stored.copy_from_slice(item);
         self.len = len;
         list.mark_saved();
         let mut reloaded = DeviceList::new();
-        let matches = reloaded.load(&self.item[..len], &no_irk)
-            && reloaded.iter_recent().eq(list.iter_recent());
+        let matches =
+            reloaded.load(stored, &no_irk) && reloaded.iter_recent().eq(list.iter_recent());
         slog!(
             console,
             "  store: item of {} bytes holds {} device(s); reload {}",
@@ -221,11 +225,16 @@ impl SimBle {
         match step {
             0 | 1 => {
                 let index = step as usize;
+                #[expect(
+                    clippy::indexing_slicing,
+                    reason = "this arm makes `index` 0 or 1, and `peripherals` is [_; 2]"
+                )]
+                let device = &self.peripherals[index];
                 slog!(
                     console,
                     "scenario: connect device {} ({})",
                     index,
-                    self.peripherals[index].name
+                    device.name
                 );
                 let peripherals = self.peripherals.clone();
                 for action in coordinator::plan_connect(&mut self.manager, &peripherals, index) {
@@ -370,8 +379,8 @@ impl SimBle {
             }
         };
         let mut barrier = Quiescence::new(targets, token);
-        for slot in (0..MAX_CONNECTIONS).filter(|&slot| targets[slot]) {
-            if barrier.acknowledge(slot, token) {
+        for (slot, &target) in targets.iter().enumerate() {
+            if target && barrier.acknowledge(slot, token) {
                 self.manager.disconnect_slot(slot);
                 slog!(console, "  quiesce: slot {} released", slot);
             }

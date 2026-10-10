@@ -307,7 +307,12 @@ impl ConnectionState {
         if ret == raw::NRF_ERROR_INVALID_STATE {
             return Err(DisconnectedError);
         }
-        unwrap!(RawError::convert(ret), "sd_ble_gap_disconnect");
+        // bt2usb patch: an invalid handle means the link is already gone (its
+        // DISCONNECTED event is still queued); report that instead of panicking.
+        if let Err(_err) = RawError::convert(ret) {
+            warn!("sd_ble_gap_disconnect err {:?}", _err);
+            return Err(DisconnectedError);
+        }
 
         self.disconnecting = true;
         Ok(())
@@ -406,7 +411,12 @@ impl Drop for Connection {
                     trace!("conn {:?}: dropped, disconnecting", self.index);
                     // We still leave conn_handle set, because the connection is
                     // not really disconnected until we get GAP_DISCONNECTED event.
-                    unwrap!(state.disconnect());
+                    // bt2usb patch: an error means the link is already going down
+                    // (the peer or a supervision timeout ended it before its
+                    // DISCONNECTED event was pulled), which is what dropping wants.
+                    if state.disconnect().is_err() {
+                        trace!("conn {:?}: dropped while already disconnecting", self.index);
+                    }
                 } else {
                     trace!("conn {:?}: dropped, already disconnected", self.index);
                 }

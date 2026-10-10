@@ -11,6 +11,11 @@
 //! sources as `memory_sd.x` / `memory_sim.x` ensures OUT_DIR/memory.x is the
 //! only `memory.x` and is always the one used.
 
+#![allow(
+    clippy::unwrap_used,
+    reason = "a build script reports failure by panicking, which stops the build"
+)]
+
 use std::env;
 use std::fs;
 use std::path::PathBuf;

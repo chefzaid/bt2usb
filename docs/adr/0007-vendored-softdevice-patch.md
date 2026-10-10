@@ -4,7 +4,10 @@
   [ADR 0016](0016-bounded-peer-connection-parameters.md) (2026-10-09), which adds
   one hook outside `gatt_client.rs`, and on 2026-10-10 by a log-only change that
   keeps peer addresses, passkeys, and notification bytes out of default logs
-  ([logging and privacy](../security.md#logging-and-privacy))
+  ([logging and privacy](../security.md#logging-and-privacy)), and on
+  2026-10-10 by [ADR 0025](0025-panic-lints-and-inventory.md), which removes
+  four panics a peer could reach in `events.rs`, `gap.rs`, and
+  `connection.rs`
 - Date: 2026-09-28
 
 ## Context
@@ -49,7 +52,8 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
   crate, and keep it minimal (since
   [ADR 0016](0016-bounded-peer-connection-parameters.md), one more change adds
   `SecurityHandler::conn_param_update_request` in `security.rs` and calls it
-  from `gap.rs`):
+  from `gap.rs`; since [ADR 0025](0025-panic-lints-and-inventory.md), the
+  panic fixes below touch `gap.rs` and `connection.rs`):
   - add `read_by_offset`, which issues one ATT Read or Read Blob at a given
     offset, checks that the response handle and offset match the request
     (`ReadError::InvalidResponse` otherwise), and keeps upstream's
@@ -62,6 +66,18 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
     `DiscoverError::TooManyAttributes` when descriptors overflow the fixed
     buffer, return `DiscoverError::InvalidResponse` for an empty, out-of-range,
     out-of-order, or non-advancing response, and saturate handle arithmetic
+  - since 2026-10-10, let the discovery and MTU-exchange waiters skip an
+    event they did not expect and keep waiting, as `read_by_offset` and
+    `write` already did, instead of panicking with `unexpected event {}`
+- Since 2026-10-10 ([ADR 0025](0025-panic-lints-and-inventory.md)), remove the
+  panics a peer could reach outside the GATT client: bt2usb enables the
+  crate's `evt-max-size-256` feature, so the event buffer holds the largest
+  discovery response the configured ATT MTU allows (a compile-time check in
+  `sd_setup.rs` keeps the two in step); `gap::on_evt` logs a GAP timeout from
+  an unexpected source, such as the authenticated payload timeout, instead of
+  panicking; and `ConnectionState::disconnect_with_reason` returns
+  `DisconnectedError` for any SoftDevice error, which `Connection::drop`
+  accepts.
 - Assemble and bound long values in bt2usb, not in the vendored crate.
 - Since 2026-10-10, print a peer address, a displayed passkey, or notification
   bytes only with the vendored crate's `log-sensitive-data` feature, which
@@ -72,8 +88,8 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
 - Record the base commit, every change, and the removal condition in
   [vendor/nrf-softdevice/README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md).
 - Remove the patch only when the pinned upstream provides equivalent offset
-  reads, timeout errors, and bounded discovery. Never deploy a change by editing
-  Cargo's git checkout.
+  reads, timeout errors, bounded discovery, and the panic fixes above. Never
+  deploy a change by editing Cargo's git checkout.
 
 ## Alternatives Considered
 
@@ -162,7 +178,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Discovery failures | `HID discovery failed: {:?}` in `hid_client.rs` |
 | Connection parameter hook ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `SecurityHandler::conn_param_update_request` (default: grant unchanged) in `vendor/nrf-softdevice/src/ble/security.rs`, called from the `CONN_PARAM_UPDATE_REQUEST` arm in `vendor/nrf-softdevice/src/ble/gap.rs` |
 | Sensitive log gate | `#[cfg(feature = "log-sensitive-data")]` pairs on the connect line in `vendor/nrf-softdevice/src/ble/central.rs`, the passkey-display line in `gap.rs`, and the notification line in `gatt_client.rs`; the root feature in [Cargo.toml](../../Cargo.toml); a Clippy run with the feature in the CI "Embedded build & clippy" job |
-| ATT MTU | `att_mtu: 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
+| ATT MTU | `ATT_MTU = 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
+| Panic fixes ([ADR 0025](0025-panic-lints-and-inventory.md)) | `evt-max-size-256` in [Cargo.toml](../../Cargo.toml) and the event-size `const` assertion in [sd_setup.rs](../../src/sd_setup.rs); the timeout arm of `gap::on_evt`; `ConnectionState::disconnect_with_reason` and `Connection::drop` in `connection.rs`; the waiters in `discover_service`, `discover_characteristics`, `discover_descriptors`, and `att_mtu_exchange`. Each source change is marked `bt2usb patch:` |
 | Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
 
 ### Verification Status
@@ -177,7 +194,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   package, and no test exercises the patched functions; they were reviewed,
   not tested. The log gate was checked on 2026-10-10 by listing the defmt
   format strings of `debug`, `trace`, and `info` builds with and without the
-  feature ([logging and privacy](../security.md#logging-and-privacy)).
+  feature ([logging and privacy](../security.md#logging-and-privacy)). The
+  event-size check was tried against a 131-byte buffer, which fails the build,
+  and a 132-byte one, which passes; the other panic fixes were reviewed, not
+  tested ([ADR 0025](0025-panic-lints-and-inventory.md#verification-status)).
 - **Hardware-verified:** not yet. The vendored functions run only on the
   board, and the repository holds no record of long Report Map reads,
   discovery, or timeouts against real peripherals.
@@ -192,3 +212,4 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - [ADR 0003: Hardware-free decision modules](0003-pure-core-and-task-shell.md)
 - [ADR 0008: Attested draft releases](0008-attested-draft-releases.md)
 - [ADR 0013: Pinned toolchain and mask tasks](0013-pinned-toolchain-and-mask-tasks.md)
+- [ADR 0025: Panic lints and inventory](0025-panic-lints-and-inventory.md)

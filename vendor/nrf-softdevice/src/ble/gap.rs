@@ -84,7 +84,14 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
                 raw::BLE_GAP_TIMEOUT_SRC_CONN => central::CONNECT_PORTAL.call(ble_evt),
                 #[cfg(feature = "ble-central")]
                 raw::BLE_GAP_TIMEOUT_SRC_SCAN => central::SCAN_PORTAL.call(ble_evt),
-                x => panic!("unknown timeout src {:?}", x),
+                // bt2usb patch: S140 also reports BLE_GAP_TIMEOUT_SRC_AUTH_PAYLOAD
+                // when an encrypted link carries no packet with a valid MIC for
+                // the authenticated payload timeout, which a peer can cause.
+                // Log it instead of panicking; the link stays up.
+                _x => {
+                    warn!("unhandled timeout src {:?}", _x);
+                    false
+                }
             };
         }
         #[cfg(feature = "ble-peripheral")]

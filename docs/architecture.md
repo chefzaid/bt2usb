@@ -1164,21 +1164,47 @@ stopped until it is reset or power-cycled. In the
 simulation the message goes to the RTT buffer, not UART0. Host tests use the
 standard test harness.
 
-Panics that can occur at runtime:
+Data from a BLE peer, the USB host, or flash must not be able to reach a
+panic. Since 2026-10-10 Clippy rejects indexing, slicing, `unwrap`, `expect`,
+and the panic macros outside tests, and the
+[code quality guide](code-quality.md#panic-paths-no-lint-flags) lists every
+remaining panic path, application and vendored, with the reason it cannot fire,
+except one open vendored panic
+([ADR 0025](adr/0025-panic-lints-and-inventory.md)). What remains:
 
 - `Softdevice::enable` when the RAM reservation is too small (`"too little RAM
   for softdevice. Change your app's RAM start address to {:x}"`) or the
-  configuration is rejected.
+  configuration is rejected. It runs once per boot with a constant
+  configuration, so it fails on every boot of a bad build or never.
 - The SoftDevice fault handler in `nrf-softdevice`, for an internal assertion or
   an access to SoftDevice-reserved memory or peripherals.
-- Unexpected errors while `nrf-softdevice` fetches events.
+- An error other than "no event" while `nrf-softdevice` fetches events, which
+  the SoftDevice's API rules out. The event buffer is 256 bytes
+  (`evt-max-size-256`), and a compile-time check in `sd_setup.rs` keeps it at
+  least the largest event the configured ATT MTU allows (132 bytes at MTU 64),
+  so a peer's discovery response cannot overflow it.
 - Programming errors guarded at startup: `unwrap!` on each task spawn, a second
-  `StaticCell` initialization, and the `expect` that formats the USB serial.
-- `unreachable!()` after the `join4` in `hid_writer_task` and for a quiescence
-  acknowledgement already filtered out in `manage_devices`.
+  `StaticCell` initialization, a full embassy-usb handler or interface list,
+  and the `expect` that formats the USB serial.
+- Contract checks inside the vendored crate and other dependencies, such as a
+  second waiter on one SoftDevice event portal or a flash write future dropped
+  before it completes; bt2usb's call patterns rule each out
+  ([vendored list](code-quality.md#vendored-nrf-softdevice)).
+- The open one: a reserved identity address type sent by a peer during
+  pairing. `Bonder::on_bonded` keeps the address unchecked, and the vendored
+  `Address::address_type` `unwrap!`s its type when the bond is saved, unless
+  the SoftDevice rejects it first, which its documentation does not say. Only
+  a crafted or faulty peer the user pairs with sends one; the FIXME "A bond with a
+  private or reserved identity address breaks the store" in
+  [TODO.md](../TODO.md#fixme) tracks it.
 
-The memory-layout checks in `memory_sd.x` (RAM placement and the end of
-`FLASH` at the pairing store) are link-time `ASSERT`s, not runtime panics.
+Configuration that Rust can check at compile time fails the build instead of
+the boot: the link count fits a `u8`, four device records with bonds fit one
+flash item, the event buffer fits the largest event, and the pairing store's
+flash range is valid for `sequential-storage` (`MapConfig::new` runs in a
+`const` block). The memory-layout checks in `memory_sd.x` (RAM placement and
+the end of `FLASH` at the pairing store) are link-time `ASSERT`s, not runtime
+panics.
 
 ### Not Yet Handled
 
@@ -1321,6 +1347,7 @@ change.
 - [ADR 0016: Bound A Peripheral's Connection Parameter Requests In The Application](adr/0016-bounded-peer-connection-parameters.md)
 - [ADR 0023: Hold Host Line Coverage At A Floor As A Regression Guard](adr/0023-host-coverage-floor.md)
 - [ADR 0024: Model The TWIM And SSD1306 In Renode And Read The Panel's Text Back](adr/0024-renode-oled-models.md)
+- [ADR 0025: Deny Panic-Prone Constructs With Clippy And List The Ones It Cannot See](adr/0025-panic-lints-and-inventory.md)
 
 ## Proposed ADRs
 

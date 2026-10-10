@@ -169,12 +169,9 @@ fn parse_by_kind(kind: ReportKind, data: &[u8], source: KindSource) -> Option<Hi
 }
 
 fn classify_report_id_prefix(data: &[u8]) -> Option<HidReport> {
-    if data.len() <= 1 {
-        return None;
-    }
-
-    let payload = &data[1..];
-    match data[0] {
+    // A lone ID byte has an empty payload, which no arm below accepts.
+    let (&report_id, payload) = data.split_first()?;
+    match report_id {
         1 if payload.len() == keyboard::KEYBOARD_REPORT_SIZE => {
             keyboard::KeyboardReport::from_ble_bytes(payload).map(HidReport::Keyboard)
         }
@@ -192,15 +189,9 @@ fn infer_from_length(data: &[u8]) -> Option<HidReport> {
     match data.len() {
         8 => keyboard::KeyboardReport::from_ble_bytes(data).map(HidReport::Keyboard),
         3..=5 => mouse::MouseReport::from_ble_bytes(data).map(HidReport::Mouse),
-        2 => {
-            let usage = u16::from_le_bytes([data[0], data[1]]);
-            // Allow usage == 0 so consumer release events (key-up) are forwarded.
-            if usage < 0x1000 {
-                consumer::ConsumerReport::from_ble_bytes(data).map(HidReport::Consumer)
-            } else {
-                None
-            }
-        }
+        // `from_ble_bytes` accepts usage 0, so consumer releases (key-up) are
+        // forwarded, and rejects usages above `MAX_CONSUMER_USAGE`.
+        2 => consumer::ConsumerReport::from_ble_bytes(data).map(HidReport::Consumer),
         _ => {
             #[cfg(feature = "defmt")]
             defmt::warn!("Unknown HID report length: {}", data.len());

@@ -46,8 +46,7 @@ fn every_address_kind_round_trips_and_unknown_kinds_are_rejected() {
         AddressKind::Anonymous,
     ];
     for (byte, kind) in kinds.into_iter().enumerate() {
-        let mut buf = [0u8; codec::ADDRESS_RECORD_SIZE];
-        codec::encode_address(address(kind, 9), &mut buf);
+        let buf = codec::encode_address(address(kind, 9));
         assert_eq!(buf[6] as usize, byte);
         assert_eq!(codec::decode_address(&buf), Some(address(kind, 9)));
     }
@@ -58,8 +57,7 @@ fn every_address_kind_round_trips_and_unknown_kinds_are_rejected() {
 #[test]
 fn bond_records_keep_every_key_field_in_place() {
     let keys = bond(3, 0x42);
-    let mut buf = [0u8; codec::BOND_RECORD_SIZE];
-    codec::encode_bond(&keys, &mut buf);
+    let buf = codec::encode_bond(&keys);
     assert_eq!(&buf[..2], &[0x34, 0x12]);
     assert_eq!(&buf[2..10], &[3; 8]);
     assert_eq!(&buf[10..26], &[0x42; 16]);
@@ -137,8 +135,7 @@ fn an_empty_flash_area_gives_a_writable_store() {
 }
 
 fn legacy_record(address: PeerAddress, rssi: i8, name: &str) -> std::vec::Vec<u8> {
-    let mut record = [0u8; codec::ADDRESS_RECORD_SIZE].to_vec();
-    codec::encode_address(address, &mut record);
+    let mut record = codec::encode_address(address).to_vec();
     record.push(rssi as u8);
     record.push(name.len() as u8);
     record.extend_from_slice(name.as_bytes());

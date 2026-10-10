@@ -174,7 +174,7 @@ impl<A: Clone + PartialEq> ConnManager<A> {
 
     /// Is the given slot index connected or mid-connect?
     pub fn is_slot_occupied(&self, slot: usize) -> bool {
-        slot < MAX_CONNECTIONS && self.slots[slot].is_occupied()
+        self.slots.get(slot).is_some_and(Slot::is_occupied)
     }
 
     /// Identity currently reserved by a slot, including background retries.
@@ -191,8 +191,8 @@ impl<A: Clone + PartialEq> ConnManager<A> {
 
     /// Mark a slot as connecting (reserved) for the given device.
     pub fn reserve_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
-        if slot < MAX_CONNECTIONS {
-            self.slots[slot] = Slot {
+        if let Some(entry) = self.slots.get_mut(slot) {
+            *entry = Slot {
                 address: Some(device.address.clone()),
                 name: device.name.clone(),
                 connected: false,
@@ -203,8 +203,8 @@ impl<A: Clone + PartialEq> ConnManager<A> {
 
     /// Mark a slot as fully connected for the given device.
     pub fn connect_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
-        if slot < MAX_CONNECTIONS {
-            self.slots[slot] = Slot {
+        if let Some(entry) = self.slots.get_mut(slot) {
+            *entry = Slot {
                 address: Some(device.address.clone()),
                 name: device.name.clone(),
                 connected: true,
@@ -215,8 +215,8 @@ impl<A: Clone + PartialEq> ConnManager<A> {
 
     /// Clear a slot.
     pub fn disconnect_slot(&mut self, slot: usize) {
-        if slot < MAX_CONNECTIONS {
-            self.slots[slot] = Slot::empty();
+        if let Some(entry) = self.slots.get_mut(slot) {
+            *entry = Slot::empty();
         }
     }
 
@@ -235,16 +235,16 @@ impl<A: Clone + PartialEq> ConnManager<A> {
 /// A short human-readable summary of the current connections for the UI.
 pub fn connection_summary<A: Clone + PartialEq>(manager: &ConnManager<A>) -> String<32> {
     let names = manager.get_connected_names();
-    match names.len() {
-        0 => {
+    match names.as_slice() {
+        [] => {
             let mut s = String::new();
             let _ = s.push_str("Connected");
             s
         }
-        1 => names[0].clone(),
-        n => {
+        [name] => name.clone(),
+        many => {
             let mut s = String::new();
-            let _ = write!(&mut s, "{} devices", n);
+            let _ = write!(&mut s, "{} devices", many.len());
             s
         }
     }

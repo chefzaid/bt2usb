@@ -50,7 +50,7 @@ byte layouts:
 - **Notification context.** `on_hvx` in
   [hid_client.rs](../../src/ble/hid_client.rs) rejects payloads over
   `MAX_REPORT_LEN` (32 bytes). [sd_setup.rs](../../src/sd_setup.rs) sets
-  `att_mtu: 64` in `softdevice_config`, and a notification carries at most
+  `ATT_MTU = 64` for `softdevice_config`, and a notification carries at most
   ATT_MTU − 3 octets (Bluetooth Core, Vol 3, Part F, 3.4.7.1): 61 bytes, or 20
   with a peer that keeps the 23-byte default. Classification runs in the
   `gatt_client::run` callback (`run_notification_loop` in hid_client.rs),

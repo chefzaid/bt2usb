@@ -45,7 +45,7 @@ impl KeyboardReport {
     /// the best sign that an 8-byte payload is some other report, so the
     /// legacy classification paths keep this check.
     pub fn from_ble_bytes(data: &[u8]) -> Option<Self> {
-        Self::from_identified_bytes(data).filter(|_| data[1] == 0)
+        Self::from_identified_bytes(data).filter(|_| data.get(1) == Some(&0))
     }
 
     /// Parse a payload that the peer's Report Reference or Report Map
@@ -56,25 +56,25 @@ impl KeyboardReport {
     /// 1.11 (appendix B.1) reserves it for OEM use and tells hosts to ignore
     /// it, so its value is discarded and the report carries zero.
     pub fn from_identified_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < KEYBOARD_REPORT_SIZE {
-            return None;
-        }
+        let [modifier, _, keycodes @ ..] = *data.first_chunk::<KEYBOARD_REPORT_SIZE>()?;
         Some(Self {
-            modifier: data[0],
+            modifier,
             reserved: 0,
-            keycodes: [data[2], data[3], data[4], data[5], data[6], data[7]],
+            keycodes,
         })
     }
 
     /// Serialise into a byte slice for USB HID transmission.
     /// Returns the number of bytes written (always 8).
     pub fn serialize(&self, buf: &mut [u8]) -> usize {
-        if buf.len() < KEYBOARD_REPORT_SIZE {
+        let Some([modifier, reserved, keycodes @ ..]) =
+            buf.first_chunk_mut::<KEYBOARD_REPORT_SIZE>()
+        else {
             return 0;
-        }
-        buf[0] = self.modifier;
-        buf[1] = self.reserved;
-        buf[2..8].copy_from_slice(&self.keycodes);
+        };
+        *modifier = self.modifier;
+        *reserved = self.reserved;
+        *keycodes = self.keycodes;
         KEYBOARD_REPORT_SIZE
     }
 

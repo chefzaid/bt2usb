@@ -187,9 +187,11 @@ impl DeviceStore {
 
         // sequential-storage 7 exposes a stateful `MapStorage` (the standalone
         // `map::fetch_item` free function was removed). It borrows the flash for
-        // the duration of the access and is dropped before we return.
-        let config =
-            sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END);
+        // the duration of the access and is dropped before we return. The
+        // range check in `MapConfig::new` runs at compile time.
+        let config = const {
+            sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END)
+        };
         let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
 
         match map
@@ -237,10 +239,14 @@ impl DeviceStore {
                 return Err(e);
             }
         };
-        let item: &[u8] = &data_buf[..len];
+        // `len` is what `pending_item` wrote into `data_buf`, so it fits.
+        let Some(item) = data_buf.get(..len) else {
+            return Err(StoreError::Serialization);
+        };
 
-        let config =
-            sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END);
+        let config = const {
+            sequential_storage::map::MapConfig::new(STORAGE_FLASH_START..STORAGE_FLASH_END)
+        };
         let mut map = sequential_storage::map::MapStorage::<u8, _, _>::new(flash, config, NoCache);
 
         // SoftDevice flash operations need radio-idle timeslots and can fail with

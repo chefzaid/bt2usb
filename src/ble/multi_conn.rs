@@ -13,6 +13,7 @@ use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
 use crate::ble::management::{self, Quiescence};
 use crate::ble::scanner::ScanResult;
 use crate::ble::{scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
+use crate::config::MAX_PAIRED_DEVICES;
 use crate::storage::{PairedDevice, DEVICE_STORE};
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -73,6 +74,8 @@ pub async fn ble_task(
     slot_txs: &SlotSenders,
     slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
 ) -> ! {
+    // `Flash::take` panics on a second call; `main` spawns this task once and it
+    // never returns.
     let mut flash = nrf_softdevice::Flash::take(sd);
     {
         let mut store = DEVICE_STORE.lock().await;
@@ -219,8 +222,11 @@ async fn publish_paired_devices(
 ) {
     let devices = {
         let store = DEVICE_STORE.lock().await;
+        // `collect` into a heapless `Vec` panics past its capacity; `take`
+        // keeps the list within it whatever the store holds.
         store
             .iter_recent()
+            .take(MAX_PAIRED_DEVICES)
             .map(|paired| DiscoveredDevice {
                 address: paired.address,
                 name: paired.name,
@@ -267,18 +273,17 @@ async fn manage_devices(
     let mut barrier = Quiescence::new(targets, token);
     while !barrier.complete() {
         let event = slot_event_rx.receive().await;
-        if let SlotEvent::Quiesced { slot, token } = event {
-            if barrier.acknowledge(slot, token) {
-                manager.disconnect_slot(slot);
-            }
-            continue;
-        }
         let slot = match &event {
+            SlotEvent::Quiesced { slot, token } => {
+                if barrier.acknowledge(*slot, *token) {
+                    manager.disconnect_slot(*slot);
+                }
+                continue;
+            }
             SlotEvent::Connected { slot, .. }
             | SlotEvent::Disconnected { slot }
             | SlotEvent::LinkLost { slot, .. }
             | SlotEvent::Error { slot, .. } => *slot,
-            SlotEvent::Quiesced { .. } => unreachable!(),
         };
         if !barrier.suppresses(slot) {
             handle_slot_event(event, manager, event_tx, slot_txs, flash).await;

@@ -335,11 +335,8 @@ impl DeviceList {
     }
 
     fn decode(&mut self, data: &[u8], resolve: &impl Resolve) -> bool {
-        if data.is_empty() {
-            return false;
-        }
         let valid = if framing::has_magic(data) {
-            framing::is_complete(data) && self.decode_versioned(data, resolve)
+            self.decode_versioned(data, resolve)
         } else {
             self.decode_legacy(data, resolve)
         };
@@ -349,8 +346,12 @@ impl DeviceList {
         valid
     }
 
+    /// The versioned format: a complete frame of at most
+    /// `MAX_PAIRED_DEVICES` records.
     fn decode_versioned(&mut self, data: &[u8], resolve: &impl Resolve) -> bool {
-        if data[2] as usize > MAX_PAIRED_DEVICES {
+        if !framing::is_complete(data)
+            || framing::declared_count(data).is_none_or(|count| count as usize > MAX_PAIRED_DEVICES)
+        {
             return false;
         }
         for record in framing::records(data) {
@@ -366,9 +367,12 @@ impl DeviceList {
     }
 
     /// The pre-versioning format: a count byte, then records without a bond.
+    /// An empty item lacks even the count byte and is invalid.
     fn decode_legacy(&mut self, data: &[u8], resolve: &impl Resolve) -> bool {
-        let count = data[0] as usize;
-        if count > MAX_PAIRED_DEVICES {
+        let Some(&count) = data.first() else {
+            return false;
+        };
+        if count as usize > MAX_PAIRED_DEVICES {
             return false;
         }
         let mut offset = 1;

@@ -208,7 +208,7 @@ mod tests {
             match r {
                 HidReport::Mouse(m) => got_mouse = Some(m),
                 HidReport::Keyboard(k) => got_kb = Some(k),
-                HidReport::Consumer(_) => unreachable!(),
+                HidReport::Consumer(_) => panic!("no consumer report was pushed"),
             }
         }
         assert_eq!(

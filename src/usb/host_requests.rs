@@ -90,10 +90,13 @@ impl RequestHandler for BootRequestHandler {
     fn set_report(&mut self, id: ReportId, data: &[u8]) -> OutResponse {
         // Our keyboard descriptor declares no report IDs, so the output report
         // payload is the single LED bitfield byte.
-        if !self.keyboard || id != ReportId::Out(0) || data.len() != 1 {
+        if !self.keyboard || id != ReportId::Out(0) {
             return OutResponse::Rejected;
         }
-        let leds = KeyboardLeds::from_byte(data[0]);
+        let &[byte] = data else {
+            return OutResponse::Rejected;
+        };
+        let leds = KeyboardLeds::from_byte(byte);
         info!(
             "Host LEDs: num={} caps={} scroll={}",
             leds.num_lock(),

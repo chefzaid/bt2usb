@@ -78,7 +78,7 @@ embassy-sync      = { version = "0.7", features = ["defmt"], optional = true }
 embassy-futures   = { version = "0.1", optional = true }
 
 # - BLE (Nordic SoftDevice S140) (embedded only) ---------------
-nrf-softdevice    = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", features = ["defmt", "nrf52840", "s140", "ble-central", "ble-gatt-client", "ble-sec", "critical-section-impl"], optional = true }
+nrf-softdevice    = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", features = ["defmt", "nrf52840", "s140", "ble-central", "ble-gatt-client", "ble-sec", "critical-section-impl", "evt-max-size-256"], optional = true }
 nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", optional = true }
 
 # - Display (SSD1306 OLED) (embedded only) ------------------
@@ -112,8 +112,19 @@ embedded-graphics = "0.8"
 # Every `unsafe` block needs a `// SAFETY:` comment. CI runs Clippy with
 # `-D warnings` for the host, firmware, self-test, and simulation builds, so a
 # block without one fails it (docs/code-quality.md#unsafe-code-policy).
+# The other lints reject constructs that can panic outside tests (clippy.toml
+# allows them in tests); a kept site carries `#[expect(lint, reason = "...")]`
+# (docs/code-quality.md#panic-lints, ADR 0025).
 [lints.clippy]
 undocumented_unsafe_blocks = "warn"
+indexing_slicing = "warn"
+string_slice = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+unreachable = "warn"
+todo = "warn"
+unimplemented = "warn"
 
 [patch.'https://github.com/embassy-rs/nrf-softdevice']
 # Minimal audited extension for bounded offset reads of long GATT values.

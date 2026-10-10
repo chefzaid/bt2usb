@@ -70,12 +70,12 @@ pub struct ReportReference {
 impl ReportReference {
     /// Parse the 2-byte descriptor value (`[report_id, report_type]`).
     pub fn parse(data: &[u8]) -> Option<Self> {
-        if data.len() != 2 {
+        let &[report_id, report_type] = data else {
             return None;
-        }
+        };
         Some(Self {
-            report_id: data[0],
-            report_type: ReportType::from(data[1]),
+            report_id,
+            report_type: ReportType::from(report_type),
         })
     }
 
@@ -223,8 +223,7 @@ impl HidDescriptor {
         let mut usage = None;
 
         let mut i = 0;
-        while i < data.len() {
-            let prefix = data[i];
+        while let Some(&prefix) = data.get(i) {
             // Long items have a length and tag byte before their payload. The
             // payload must never be interpreted as a sequence of short items.
             if prefix == 0xFE {
@@ -244,15 +243,14 @@ impl HidDescriptor {
                 _ => 0,
             };
 
-            if i + 1 + size > data.len() {
-                return None;
-            }
+            // A short item's data must end within the descriptor.
+            let item_data = data.get(i + 1..i + 1 + size)?;
 
-            let value: u32 = match size {
-                0 => 0,
-                1 => data[i + 1] as u32,
-                2 => u16::from_le_bytes([data[i + 1], data[i + 2]]) as u32,
-                4 => u32::from_le_bytes([data[i + 1], data[i + 2], data[i + 3], data[i + 4]]),
+            let value: u32 = match *item_data {
+                [] => 0,
+                [b0] => b0 as u32,
+                [b0, b1] => u16::from_le_bytes([b0, b1]) as u32,
+                [b0, b1, b2, b3] => u32::from_le_bytes([b0, b1, b2, b3]),
                 _ => 0,
             };
 
@@ -406,5 +404,47 @@ fn field_kind(page: u16, usage: Option<(u16, u16)>) -> Option<ReportKind> {
             Some(ReportKind::Mouse)
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HidDescriptor;
+
+    /// A keyboard Usage Page and one Input: a descriptor `parse` accepts.
+    /// Each case below appends one bad item and keeps the stacks balanced, so
+    /// the item's data size is the only reason left to reject it.
+    const VALID: [u8; 4] = [0x05, 0x07, 0x81, 0x02];
+
+    fn parse_with(suffix: &[u8]) -> Option<HidDescriptor> {
+        let mut bytes = std::vec::Vec::from(VALID);
+        bytes.extend_from_slice(suffix);
+        HidDescriptor::parse(&bytes)
+    }
+
+    #[test]
+    fn short_item_data_past_the_end_is_rejected() {
+        assert!(HidDescriptor::parse(&VALID).is_some());
+        for truncated in [
+            &[0x05][..],                   // Usage Page missing its data byte
+            &[0x06, 0x01][..],             // two-byte Usage Page with one byte
+            &[0x0B, 0x01, 0x00, 0x07][..], // 32-bit Usage with three bytes
+        ] {
+            assert!(parse_with(truncated).is_none(), "{truncated:?}");
+        }
+    }
+
+    #[test]
+    fn items_with_the_wrong_data_size_are_rejected() {
+        for suffix in [
+            &[0x80][..],                   // Input without data
+            &[0xA0, 0xC0][..],             // Collection without data
+            &[0xA2, 0x01, 0x00, 0xC0][..], // Collection with two data bytes
+            &[0xA1, 0x00, 0xC1, 0x00][..], // End Collection with data
+            &[0xA5, 0x00, 0xB4][..],       // global Push with data
+            &[0xA4, 0xB5, 0x00][..],       // global Pop with data
+        ] {
+            assert!(parse_with(suffix).is_none(), "{suffix:?}");
+        }
     }
 }

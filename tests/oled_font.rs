@@ -5,6 +5,13 @@
 //! After a font change, rewrite the table with
 //! `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font`.
 
+#![allow(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::string_slice,
+    reason = "a test crate: a panic here is a failed test, not a stopped device"
+)]
+
 use std::fmt::Write as _;
 
 use embedded_graphics::mono_font::ascii::FONT_6X10;

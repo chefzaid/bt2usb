@@ -228,13 +228,13 @@ async fn main(spawner: Spawner) {
 /// the same `sequential-storage` map the firmware uses. Saved pairings (key
 /// 0x01) are only read.
 async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
-    let start = config::STORAGE_FLASH_START;
-    let end = config::STORAGE_FLASH_END;
-
     // Own the flash driver: MultiwriteNorFlash is not implemented for &mut
-    // Flash, and record removal requires that trait.
+    // Flash, and record removal requires that trait. The range check in
+    // `MapConfig::new` runs at compile time.
     let flash = nrf_softdevice::Flash::take(sd);
-    let mut map = MapStorage::<u8, _, _>::new(flash, MapConfig::new(start..end), NoCache);
+    let map_config =
+        const { MapConfig::new(config::STORAGE_FLASH_START..config::STORAGE_FLASH_END) };
+    let mut map = MapStorage::<u8, _, _>::new(flash, map_config, NoCache);
     // The scratch buffer must also fit the existing pairing blob, not just
     // our 16-byte test record, and be word aligned for the flash driver.
     let mut flash_buffer = sd_setup::FlashBuffer::<1024>::new();

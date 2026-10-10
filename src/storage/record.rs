@@ -6,7 +6,8 @@ pub const BOND_RECORD_SIZE: usize = 50;
 /// Decode the common address/RSSI/name prefix, shared by legacy and v1 blobs.
 pub fn base(data: &[u8]) -> Option<(&str, usize)> {
     let name_len = *data.get(ADDRESS_RECORD_SIZE + 1)? as usize;
-    if data[ADDRESS_RECORD_SIZE - 1] > 4 || name_len > 32 {
+    let kind = *data.get(ADDRESS_RECORD_SIZE - 1)?;
+    if kind > 4 || name_len > 32 {
         return None;
     }
     let start = ADDRESS_RECORD_SIZE + 2;
@@ -21,10 +22,12 @@ pub fn bond(data: &[u8], base_end: usize) -> Option<Option<&[u8]>> {
     match data.get(base_end)? {
         0 if data.len() == base_end + 1 => Some(None),
         1 if data.len() == base_end + 1 + BOND_RECORD_SIZE => {
-            let bytes = &data[base_end + 1..];
+            let bytes = data.get(base_end + 1..)?;
             // An identity address must be public or random static, never an
-            // anonymous/private advertising address or an unknown type.
-            (bytes[49] <= 1).then_some(Some(bytes))
+            // anonymous/private advertising address or an unknown type. Its
+            // type is the last byte of the bond.
+            let identity_kind = *bytes.get(BOND_RECORD_SIZE - 1)?;
+            (identity_kind <= 1).then_some(Some(bytes))
         }
         _ => None,
     }

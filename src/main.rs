@@ -127,13 +127,18 @@ async fn ble_task(sd: &'static nrf_softdevice::Softdevice) -> ! {
     .await
 }
 
-/// One connection worker per link; `main` spawns one for each slot.
+/// One connection worker per link; `main` spawns one for each slot, with that
+/// slot's command channel.
 #[embassy_executor::task(pool_size = MAX_CONNECTIONS)]
-async fn ble_slot_task(slot: usize, sd: &'static nrf_softdevice::Softdevice) -> ! {
+async fn ble_slot_task(
+    slot: usize,
+    commands: &'static Channel<CriticalSectionRawMutex, SlotCommand, 2>,
+    sd: &'static nrf_softdevice::Softdevice,
+) -> ! {
     slot_worker::connection_slot_task(
         slot,
         sd,
-        &BLE_SLOT_CMD_CHANNELS[slot].receiver(),
+        &commands.receiver(),
         &BLE_SLOT_EVENT_CHANNEL.sender(),
         &HID_REPORT_CHANNEL.sender(),
     )
@@ -201,8 +206,8 @@ async fn main(spawner: Spawner) {
     )));
     info!("USB HID device started");
 
-    for slot in 0..MAX_CONNECTIONS {
-        spawner.spawn(unwrap!(ble_slot_task(slot, sd)));
+    for (slot, commands) in BLE_SLOT_CMD_CHANNELS.iter().enumerate() {
+        spawner.spawn(unwrap!(ble_slot_task(slot, commands, sd)));
     }
     spawner.spawn(unwrap!(ble_task(sd)));
     info!("BLE task started");

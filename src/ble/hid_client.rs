@@ -191,7 +191,7 @@ impl HidServiceClient {
                 Some(ref_handle) => {
                     let mut buf = [0u8; 2];
                     match gatt_client::read(conn, ref_handle, &mut buf).await {
-                        Ok(n) => ReportReference::parse(&buf[..n]),
+                        Ok(n) => buf.get(..n).and_then(ReportReference::parse),
                         Err(_) => None,
                     }
                 }
@@ -284,7 +284,10 @@ async fn read_report_map(
     loop {
         let result = gatt_client::read_by_offset(conn, handle, read.offset(), &mut fragment).await;
         let completed = match result {
-            Ok(n) => read.append(&fragment[..n]),
+            Ok(n) => fragment
+                .get(..n)
+                .ok_or(ReadFailure::InvalidFragment)
+                .and_then(|bytes| read.append(bytes)),
             Err(gatt_client::ReadError::Gatt(GattError::ATTERR_INVALID_OFFSET)) => {
                 read.finish_at_end(EndOfValue::InvalidOffset).map(|()| true)
             }

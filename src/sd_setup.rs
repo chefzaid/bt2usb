@@ -10,6 +10,30 @@ const LINKS: u8 = {
     config::BLE_MAX_CONNECTIONS as u8
 };
 
+/// The ATT MTU each link offers in the MTU exchange.
+const ATT_MTU: u16 = 64;
+
+/// Bytes the vendored `nrf-softdevice` gives `sd_ble_evt_get` for one event,
+/// set by its `evt-max-size-256` feature in `Cargo.toml`.
+const BLE_EVT_BUFFER: usize = 256;
+
+// Nordic's `BLE_EVT_LEN_MAX(ATT_MTU)` (S140 `ble.h`): the longest event at this
+// MTU, a primary service discovery response carrying one service for every 4
+// bytes of an MTU-sized ATT PDU (132 bytes at 64). A peer chooses that count,
+// and the vendored event loop panics on an event longer than its buffer, so
+// the build fails instead if the MTU outgrows the buffer.
+const _: () = {
+    use core::mem::{offset_of, size_of};
+    use nrf_softdevice::raw;
+    // Bindgen lays each C union out as a struct whose members all sit at
+    // offset 0, so the event's offset is the sum of the enclosing structs'.
+    let services = offset_of!(raw::ble_evt_t, evt)
+        + offset_of!(raw::ble_gattc_evt_t, params)
+        + offset_of!(raw::ble_gattc_evt_prim_srvc_disc_rsp_t, services);
+    let longest = services + (ATT_MTU as usize - 1) / 4 * size_of::<raw::ble_gattc_service_t>();
+    assert!(longest <= BLE_EVT_BUFFER);
+};
+
 /// SoftDevice configuration: [`config::BLE_MAX_CONNECTIONS`] central links
 /// (keyboard + mouse), no advertising or peripheral role. The RAM this needs is logged by
 /// `Softdevice::enable` ("softdevice RAM: N bytes") and must fit below
@@ -26,7 +50,7 @@ pub fn softdevice_config() -> nrf_softdevice::Config {
             conn_count: LINKS,
             event_length: config::BLE_CONN_EVENT_LENGTH,
         }),
-        conn_gatt: Some(nrf_softdevice::raw::ble_gatt_conn_cfg_t { att_mtu: 64 }),
+        conn_gatt: Some(nrf_softdevice::raw::ble_gatt_conn_cfg_t { att_mtu: ATT_MTU }),
         gap_role_count: Some(nrf_softdevice::raw::ble_gap_cfg_role_count_t {
             adv_set_count: 0,          // we don't advertise
             periph_role_count: 0,      // we don't act as peripheral

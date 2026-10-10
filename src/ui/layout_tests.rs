@@ -284,5 +284,5 @@ fn a_name_wider_than_the_panel_is_kept_whole_for_the_panel_to_cut() {
     let row = &texts(&list)[1];
     assert_eq!(row, &format!("> {long}"));
     // The panel shows the first 21 characters: "> " and 19 of the name.
-    assert_eq!(&row[..SCREEN_COLUMNS], "> A keyboard with a 3");
+    assert_eq!(row.get(..SCREEN_COLUMNS), Some("> A keyboard with a 3"));
 }

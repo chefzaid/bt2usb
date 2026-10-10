@@ -10,26 +10,31 @@
 
 use heapless::String;
 
+/// Walk the length-type-value structures, yielding each one's AD type and
+/// value. A zero length or a structure that runs past the buffer ends the walk.
+fn ad_structures(data: &[u8]) -> impl Iterator<Item = (u8, &[u8])> {
+    let mut rest = data;
+    core::iter::from_fn(move || {
+        let (&len, tail) = rest.split_first()?;
+        let (structure, next) = tail.split_at_checked(usize::from(len))?;
+        let (&ad_type, value) = structure.split_first()?;
+        rest = next;
+        Some((ad_type, value))
+    })
+}
+
 /// Check if raw advertisement data contains the HID Service UUID (0x1812).
 pub fn contains_hid_service_uuid(data: &[u8]) -> bool {
     let hid_uuid_le: [u8; 2] = [0x12, 0x18]; // 0x1812 little-endian
 
-    let mut i = 0;
-    while i < data.len() {
-        let len = data[i] as usize;
-        if len == 0 || i + len >= data.len() {
-            break;
-        }
-        let ad_type = data[i + 1];
+    for (ad_type, uuid_data) in ad_structures(data) {
         if ad_type == 0x02 || ad_type == 0x03 {
-            let uuid_data = &data[i + 2..i + 1 + len];
             for chunk in uuid_data.as_chunks::<2>().0 {
                 if *chunk == hid_uuid_le {
                     return true;
                 }
             }
         }
-        i += len + 1;
     }
     false
 }
@@ -48,15 +53,8 @@ pub fn extract_device_name(data: &[u8]) -> String<32> {
 /// from a scan response that can improve a previously discovered device.
 pub fn advertised_name(data: &[u8]) -> Option<String<32>> {
     let mut shortened = None;
-    let mut i = 0;
-    while i < data.len() {
-        let len = data[i] as usize;
-        if len == 0 || i + len >= data.len() {
-            break;
-        }
-        let ad_type = data[i + 1];
+    for (ad_type, name_bytes) in ad_structures(data) {
         if ad_type == 0x08 || ad_type == 0x09 {
-            let name_bytes = &data[i + 2..i + 1 + len];
             if let Ok(text) = core::str::from_utf8(name_bytes) {
                 let mut name = String::new();
                 for c in text.chars() {
@@ -72,7 +70,6 @@ pub fn advertised_name(data: &[u8]) -> Option<String<32>> {
                 }
             }
         }
-        i += len + 1;
     }
 
     shortened
@@ -120,6 +117,19 @@ mod tests {
     fn shortened_name_is_used_when_no_complete_name_is_present() {
         let ad = [0x05, 0x08, b'B', b'T', b' ', b'K'];
         assert_eq!(extract_device_name(&ad).as_str(), "BT K");
+    }
+
+    #[test]
+    fn zero_length_or_overrunning_structure_ends_the_walk() {
+        // A zero length stops the walk before the HID UUID list after it.
+        assert!(!contains_hid_service_uuid(&[0x00, 0x03, 0x03, 0x12, 0x18]));
+        // The UUID list claims five bytes but only three follow its length.
+        assert!(!contains_hid_service_uuid(&[0x05, 0x03, 0x12, 0x18]));
+        assert!(advertised_name(&[0x04, 0x09, b'K', b'B']).is_none());
+        // Structures before the malformed one are still read.
+        assert!(contains_hid_service_uuid(&[0x03, 0x03, 0x12, 0x18, 0x09]));
+        let ad = [0x02, 0x09, b'K', 0x07, 0x08];
+        assert_eq!(extract_device_name(&ad).as_str(), "K");
     }
 
     #[test]

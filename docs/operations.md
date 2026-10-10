@@ -299,6 +299,8 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `slot {} failed to secure BLE link` | Encryption or pairing failed, the link dropped, or security did not complete within 5 s | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
 | info | `slot {} link lost; reconnecting` | An established link dropped; held input was released | None; retries follow |
 | warn | `sd_ble_gap_connect err {:?}`, `sd_ble_gap_scan_start err {:?}`, `sd_ble_gap_authenticate err {:?}` (vendor) | A SoftDevice GAP call was rejected | Note the error; report if it repeats |
+| warn | `sd_ble_gap_disconnect err {:?}` (vendor) | The bridge asked to disconnect a link the SoftDevice no longer accepts a disconnect for, because it is already gone; the disconnect event that follows ends it as usual | None |
+| warn | `unhandled timeout src {:?}` (vendor) | The SoftDevice reported a GAP timeout the bridge does not act on. Source 3 is the authenticated payload timeout: an encrypted link carried no packet with a valid MIC for 480 s, which a compliant peripheral prevents by answering LE Ping. The link stays up, and every report that arrives is still authenticated | Record the peripheral and this line for the compatibility baseline |
 
 ### HID Discovery And Input
 
@@ -447,7 +449,14 @@ last held key, and with a probe attached the log ends in a panic message.
 
 **Likely causes:** a panic anywhere in the firmware or the SoftDevice fault
 handler (`Softdevice assertion failed:` or `Softdevice memory access
-violation.`). There is no watchdog, so the core stays stopped. A USB host
+violation.`). The panic lists
+([application](code-quality.md#panic-paths-no-lint-flags) and
+[vendored](code-quality.md#vendored-nrf-softdevice)) name every panic path the
+code review found and why it should not fire. The one exception is open: a
+peer that sends a reserved identity address type during pairing panics the
+bond save (the FIXME in [TODO.md](../TODO.md#fixme)). Any other panic at
+runtime means one of those reasons is wrong; quote the message in the report.
+There is no watchdog, so the core stays stopped. A USB host
 generally keeps the last report it received from a device that stops
 responding, which is why a held key can keep repeating.
 

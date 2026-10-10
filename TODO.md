@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 33 | 0 | 0 |
+| [FIXME](#fixme) | 34 | 5 | 1 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 12 | 4 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 13 | 3 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 9 | 7 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **119** | **72** | **21** |
+| **Total** | **121** | **76** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -359,6 +359,102 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   pins.
   ADR 0003 counts 359 test attributes and lists the modules and test files
   added since (`messages.rs`, `controller.rs`, `layout.rs`, and their tests).
+- [x] **P1** **Peers could halt the bridge through four vendored panics.**
+  The panic inventory found them in the compiled `nrf-softdevice` modules.
+  At the 64-byte ATT MTU a primary-service discovery response with 15 handle
+  ranges is a 132-byte event, over the crate's default 128-byte buffer, so
+  `events::run_ble` panicked (`BLE_EVT_MAX_SIZE is too low`) and halted the
+  chip, and after each power cycle a bonded device sent the same response to
+  the next discovery. `gap::on_evt` panicked on the
+  authenticated payload timeout (`unknown timeout src`), which an encrypted
+  peer that ignores LE Ping causes. `Connection::drop` unwrapped the
+  `DisconnectedError` that dropping a link the peer had just ended returns,
+  for example after a failed MTU exchange in `connect_inner`, and
+  `disconnect_with_reason` unwrapped any other SoftDevice error. Fixed:
+  bt2usb enables `evt-max-size-256` and checks the buffer against the MTU at
+  compile time in `src/sd_setup.rs`; the timeout arm logs `unhandled timeout
+  src {:?}`; the disconnect returns `DisconnectedError` and the drop accepts
+  it ([ADR 0025](docs/adr/0025-panic-lints-and-inventory.md),
+  [vendored list](docs/code-quality.md#vendored-nrf-softdevice)).
+- [ ] **P0** **Report Maps are cut short when a peripheral offers an MTU above
+  64.** The vendored `gatt_client::att_mtu_exchange` stores the peer's Server
+  RX MTU from `BLE_GATTC_EVT_EXCHANGE_MTU_RSP` as the link's ATT MTU, but the
+  SoftDevice uses the smaller of that and the 64 bt2usb asks for (and never
+  less than 23), as the S140 documentation of
+  `sd_ble_gattc_exchange_mtu_request` says. With a peripheral that offers 65
+  to 517, as current BLE stacks commonly do (247 and 517 are typical),
+  `conn.att_mtu()` reports the larger value, `read_report_map` builds its
+  `LongRead` for fragments of that size minus 1, and the first 63-byte fragment
+  looks short, so the read ends after 63 bytes. A longer Report Map is
+  truncated: report IDs declared after byte 63 are unknown, and their reports
+  (often the mouse and media keys) are dropped, or the map fails to parse. With
+  an offer above 517, `LongRead::new` rejects the stored MTU and every connect
+  fails with `HID map read failed`.
+  Found by the panic inventory; not reproduced on hardware. Accept when the
+  stored MTU is `server_rx_mtu.min(requested).max(23)` (vendored change,
+  marked `bt2usb patch:`), the vendor notes and ADR 0007 describe it, and the
+  Report Map interoperability check covers a peripheral with an MTU above 64.
+- [ ] **P1** **A bond with a private or reserved identity address breaks the
+  store.** `Bonder::on_bonded` keeps the identity address the peer sends
+  during pairing without checking its type; when the peer sends none, it
+  keeps the connection's address with an all-zero IRK
+  (`IdentityKey::from_addr`). `execute_action` stores the bond only when
+  `bond_for_address` matches it to the connection's address: a public or
+  static address must equal the identity, a non-resolvable one never matches,
+  and a resolvable one must be resolved by the bond's IRK. A private or
+  reserved identity therefore reaches the store only from a peer that
+  connects from a resolvable private address and either distributes an IRK
+  that resolves it together with an identity type the SoftDevice passes
+  through (its documentation does not say whether it can), or distributes no
+  identity and built its address from an all-zero IRK, which a crafted peer
+  can do. `DeviceStore::add` then converts the identity with the vendored
+  `Address::address_type`, which `unwrap!`s and panics for the reserved raw
+  types 4 to 126. A private type (resolvable or non-resolvable) is saved, but
+  `record::bond` refuses any identity type above 1 on reload, so the next boot
+  logs `Invalid or unsupported device store; writes disabled`, loads no
+  devices, and refuses saves until a Factory reset: every pairing is lost.
+  Found by the panic inventory's reviewer. Accept when
+  the write side refuses what the read side refuses (a bond whose identity is
+  not public or random static is not stored, with a log line and a UI error),
+  no code path calls `address_type` on a peer-supplied address, and host tests
+  cover each identity type.
+- [ ] **P1** **A peripheral that refuses the MTU exchange cannot connect.**
+  `central::connect_with_security` runs `att_mtu_exchange` inside the vendored
+  `connect_inner` and fails the whole connection when it returns an error. A
+  GATT server may answer the Exchange MTU Request with an ATT error (Request
+  Not Supported), after which the Core specification has both sides use the
+  default 23-byte MTU; such a peripheral would fail every connect, shown as a
+  connect failure on the OLED. A timeout or a disconnect during the exchange
+  should still fail the connect. Found by the panic inventory's reviewer; not
+  reproduced. Accept when an ATT error response keeps the link at MTU 23 and
+  the connect continues, and the vendor notes record the change.
+- [ ] **P1** **A peripheral's own MTU exchange or CCCD access is never
+  answered.** With the `ble-gatt-server` feature off, the vendored
+  `ble::on_evt` drops every GATT server event, including
+  `BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST`, which needs
+  `sd_ble_gatts_exchange_mtu_reply`, and `BLE_GATTS_EVT_SYS_ATTR_MISSING`,
+  which needs `sd_ble_gatts_sys_attr_set` (S140 includes the Service Changed
+  characteristic and its CCCD by default). A peripheral that also acts as a
+  GATT client, sending its own MTU exchange or reading or writing the bridge's
+  Service Changed CCCD, gets no answer; its ATT transaction times out after
+  30 s, after which the Core specification lets it send no more ATT PDUs on
+  that link, including the notifications that carry its reports. Found by the
+  panic inventory's reviewer; not reproduced. Accept when the vendored
+  dispatch answers both events without the GATT server feature (an MTU reply
+  with Server RX MTU 64 that records `client_rx_mtu.min(64).max(23)`, as the
+  MTU FIXME above computes it, and empty system attributes), and the vendor
+  notes record it.
+- [ ] **P2** **Bonder callbacks re-enter the vendored connection state.**
+  The vendored crate calls `SecurityHandler::on_bonded` (in `gap::on_evt`,
+  `BLE_GAP_EVT_AUTH_STATUS`) and `get_peripheral_key` (in
+  `Connection::encrypt`) inside `Connection::with_state`, which holds a
+  `&mut ConnectionState`. bt2usb's `Bonder` calls `conn.peer_address()` in
+  both, which takes a second `&mut` to the same state through the
+  `UnsafeCell`. Two live mutable references are undefined behavior even
+  though both accesses only read, so today's builds behave as intended.
+  Found by the panic inventory. Accept when the vendored crate copies what the
+  handler needs out of the state and calls the handler after `with_state`
+  returns, and the unsafe-code inventory notes it.
 
 ## Needs Your Input
 
@@ -1158,17 +1254,25 @@ Host tests, simulation, and code-health work. Context:
   Checked locally: `--fail-under-lines 99` exits 1, and a broken intra-doc
   link in `src/ble/bonder.rs` fails the firmware rustdoc run
   (`.github/workflows/ci.yml`, `maskfile.md`).
-- [ ] **P2** **Inventory panic sites in firmware paths.** The
-  [panic table](docs/code-quality.md#panics-allocation-and-arithmetic) lists
-  the application's `unwrap!`, `expect`, and `unreachable!` sites, but not slice
-  indexing, `RefCell` borrows, or `StaticCell` initialization, and not the
-  vendored crate. The compiled vendored modules panic on an unexpected
-  SoftDevice event (`panic!("unexpected event {}", e)`, four times in
-  `vendor/nrf-softdevice/src/ble/gatt_client.rs` and once in `central.rs`).
-  Accept when every `unwrap!`, `expect`, `unreachable!`, and `panic!` reachable
-  from the bridge, application and vendored, is listed with the reason it
-  cannot fire, or is replaced by an error path
-  ([code quality](docs/code-quality.md#panics-allocation-and-arithmetic)).
+- [x] **P2** **Inventory panic sites in firmware paths.** Since 2026-10-10
+  Clippy's `indexing_slicing`, `string_slice`, `unwrap_used`, `expect_used`,
+  `panic`, `unreachable`, `todo`, and `unimplemented` lints are on for every
+  target and denied in CI; `clippy.toml` allows `unwrap_used`, `expect_used`,
+  `indexing_slicing`, and `panic` in tests, and `build.rs` and
+  `tests/oled_font.rs` allow the ones they use at crate level. Of the
+  112 sites they flagged outside tests, 109 were rewritten without a panic
+  path and 3 keep `#[expect]` with the bound as the reason. The constructs no
+  lint flags (`unwrap!` on spawns, `StaticCell`, `RefCell`, heapless
+  capacity, dependency calls, the one runtime divisor, flash futures) and
+  every panic path in the compiled vendored modules are listed with the
+  reason each cannot fire, except `Address::address_type`, which stays open
+  under a FIXME above; a second reviewer checked each entry. Four vendored
+  panics a peer could reach were fixed (FIXME above), the flash range and
+  the BLE event buffer are checked at compile time, and the inventory added
+  five FIXMEs (`Cargo.toml`, `clippy.toml`, `src/`,
+  `vendor/nrf-softdevice/src/ble/`;
+  [ADR 0025](docs/adr/0025-panic-lints-and-inventory.md),
+  [code quality](docs/code-quality.md#panics-allocation-and-arithmetic)).
 - [x] **P2** **Lint the release helper and shell scripts.** Since 2026-10-10
   `scripts/lint_scripts.py` runs `ruff check` and `ruff format --check` (Ruff
   0.16.9, settings in `ruff.toml`) over every tracked Python file, and

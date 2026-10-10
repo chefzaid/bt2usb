@@ -52,41 +52,45 @@ impl MouseReport {
     /// Absent trailing fields default to 0; the five supported button bits are
     /// preserved and the USB descriptor's padding bits are cleared.
     pub fn from_ble_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 3 {
+        let [buttons, x, y, ..] = *data else {
             return None;
-        }
+        };
         Some(Self {
-            buttons: data[0] & 0x1F,
-            x: data[1] as i8,
-            y: data[2] as i8,
-            wheel: if data.len() >= 4 { data[3] as i8 } else { 0 },
-            pan: if data.len() >= 5 { data[4] as i8 } else { 0 },
+            buttons: buttons & 0x1F,
+            x: x as i8,
+            y: y as i8,
+            wheel: data.get(3).map_or(0, |&wheel| wheel as i8),
+            pan: data.get(4).map_or(0, |&pan| pan as i8),
         })
     }
 
     /// Serialise into a byte slice for USB HID transmission.
     /// Returns the number of bytes written (always 5).
     pub fn serialize(&self, buf: &mut [u8]) -> usize {
-        if buf.len() < MOUSE_REPORT_SIZE {
+        let Some(out) = buf.first_chunk_mut::<MOUSE_REPORT_SIZE>() else {
             return 0;
-        }
-        buf[0] = self.buttons & 0x1F;
-        buf[1] = self.x as u8;
-        buf[2] = self.y as u8;
-        buf[3] = self.wheel as u8;
-        buf[4] = self.pan as u8;
+        };
+        *out = [
+            self.buttons & 0x1F,
+            self.x as u8,
+            self.y as u8,
+            self.wheel as u8,
+            self.pan as u8,
+        ];
         MOUSE_REPORT_SIZE
     }
 
     /// Serialize the three-byte, three-button boot-mouse report requested by
     /// a BIOS/boot host through SET_PROTOCOL.
     pub fn serialize_boot(&self, buf: &mut [u8]) -> usize {
-        if buf.len() < 3 {
+        let Some(out) = buf.first_chunk_mut::<3>() else {
             return 0;
-        }
-        buf[0] = self.buttons & 0x07;
-        buf[1] = self.x.max(-127) as u8;
-        buf[2] = self.y.max(-127) as u8;
+        };
+        *out = [
+            self.buttons & 0x07,
+            self.x.max(-127) as u8,
+            self.y.max(-127) as u8,
+        ];
         3
     }
 

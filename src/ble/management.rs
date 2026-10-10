@@ -26,11 +26,13 @@ impl Quiescence {
     }
 
     pub fn acknowledge(&mut self, slot: usize, token: u32) -> bool {
-        if token != self.token || slot >= MAX_CONNECTIONS || !self.pending[slot] {
-            return false;
+        match self.pending.get_mut(slot) {
+            Some(pending) if token == self.token && *pending => {
+                *pending = false;
+                true
+            }
+            _ => false,
         }
-        self.pending[slot] = false;
-        true
     }
 
     pub fn complete(&self) -> bool {

@@ -98,6 +98,10 @@ impl InputAggregator {
         update
     }
 
+    #[expect(
+        clippy::indexing_slicing,
+        reason = "`keys` is [bool; 256] and is indexed only by a u8 keycode, so every index is at most 255"
+    )]
     fn keyboard(&self) -> KeyboardReport {
         let mut report = KeyboardReport::default();
         let mut keys = [false; 256];
@@ -113,17 +117,16 @@ impl InputAggregator {
                 }
             }
         }
-        let mut count = 0;
+        let mut slots = report.keycodes.iter_mut();
         for (key, pressed) in keys.iter().enumerate().skip(4) {
             if !pressed {
                 continue;
             }
-            if count == report.keycodes.len() {
+            let Some(slot) = slots.next() else {
                 overflow = true;
                 break;
-            }
-            report.keycodes[count] = key as u8;
-            count += 1;
+            };
+            *slot = key as u8;
         }
         if overflow {
             report.keycodes = [1; 6];
@@ -250,6 +253,22 @@ mod tests {
                 .reports[2],
             b
         );
+    }
+
+    #[test]
+    fn source_error_rollover_and_out_of_range_consumer_usage() {
+        let mut aggregate = InputAggregator::default();
+        send(&mut aggregate, 0, key([4, 0, 0, 0, 0, 0], 0));
+        let update = send(&mut aggregate, 1, key([1; 6], 0));
+        assert_eq!(update.reports[0], key([1; 6], 0));
+        let usage = MAX_CONSUMER_USAGE + 1;
+        let update = send(
+            &mut aggregate,
+            0,
+            HidReport::Consumer(ConsumerReport { usage }),
+        );
+        assert!(update.reports.is_empty());
+        assert!(!update.wake);
     }
 
     #[test]

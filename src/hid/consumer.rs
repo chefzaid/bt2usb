@@ -106,10 +106,7 @@ impl ConsumerReport {
 
     /// Parse from raw BLE bytes.
     pub fn from_ble_bytes(data: &[u8]) -> Option<Self> {
-        if data.len() < 2 {
-            return None;
-        }
-        let usage = u16::from_le_bytes([data[0], data[1]]);
+        let usage = u16::from_le_bytes(*data.first_chunk::<CONSUMER_REPORT_SIZE>()?);
         if usage > MAX_CONSUMER_USAGE {
             return None;
         }
@@ -118,12 +115,10 @@ impl ConsumerReport {
 
     /// Serialize to USB HID report bytes.
     pub fn serialize(&self, buf: &mut [u8]) -> usize {
-        if buf.len() < CONSUMER_REPORT_SIZE {
+        let Some(out) = buf.first_chunk_mut::<CONSUMER_REPORT_SIZE>() else {
             return 0;
-        }
-        let bytes = self.usage.to_le_bytes();
-        buf[0] = bytes[0];
-        buf[1] = bytes[1];
+        };
+        *out = self.usage.to_le_bytes();
         CONSUMER_REPORT_SIZE
     }
 
@@ -192,5 +187,40 @@ mod tests {
         let data = [0xE9, 0x00]; // Volume Up
         let report = ConsumerReport::from_ble_bytes(&data).unwrap();
         assert_eq!(report.get_usage(), ConsumerUsage::VolumeUp);
+    }
+
+    #[test]
+    fn consumer_report_rejects_short_and_out_of_range_payloads() {
+        assert_eq!(ConsumerReport::from_ble_bytes(&[0xE9]), None);
+        assert_eq!(ConsumerReport::from_ble_bytes(&[0x00, 0x10]), None);
+        let mut short = [0u8; 1];
+        assert_eq!(
+            ConsumerReport::new(ConsumerUsage::Mute).serialize(&mut short),
+            0
+        );
+    }
+
+    #[test]
+    fn consumer_usage_round_trips_every_named_code() {
+        for usage in [
+            ConsumerUsage::PlayPause,
+            ConsumerUsage::NextTrack,
+            ConsumerUsage::PrevTrack,
+            ConsumerUsage::Stop,
+            ConsumerUsage::VolumeUp,
+            ConsumerUsage::VolumeDown,
+            ConsumerUsage::Mute,
+            ConsumerUsage::BrowserHome,
+            ConsumerUsage::BrowserBack,
+            ConsumerUsage::BrowserForward,
+            ConsumerUsage::BrowserRefresh,
+            ConsumerUsage::LaunchEmail,
+            ConsumerUsage::LaunchCalculator,
+            ConsumerUsage::LaunchFileBrowser,
+            ConsumerUsage::Sleep,
+        ] {
+            assert_eq!(ConsumerReport::new(usage).get_usage(), usage);
+        }
+        assert_eq!(ConsumerUsage::from(0x0FFF), ConsumerUsage::None);
     }
 }

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 15 | 4 | 0 |
+| [FIXME](#fixme) | 16 | 3 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **91** | **86** | **22** |
+| **Total** | **92** | **85** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -143,16 +143,25 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   each undeclared kind to three mixed maps without report IDs and checks the
   declared kinds still pass; with the filter removed, it is the one test that
   fails.
-- [ ] **P2** **Reconnect decisions in the scan shell have no host tests.**
+- [x] **P2** **Reconnect decisions in the scan shell had no host tests.**
   `SavedPeer` equality (`src/ble/scanner.rs`) decides whether re-registering a
   device keeps its slot's failure holdoff and fast-scan window: the same
   identity key, or the same address when neither record has one. The
-  `RECONNECT_WAKE` bookkeeping wakes the owning slot on a handover and is reset
+  `RECONNECT_WAKE` bookkeeping woke the owning slot on a handover and was reset
   on scan start, after a failed attempt, and on clear, with the same
-  `if let Some(signal) = RECONNECT_WAKE.get(slot)` block pasted three times.
-  Both are hardware-free but compile only into the firmware, so no test covers
-  them. Close when both live in `src/ble/reconnect.rs` with host tests and the
-  shell only maps their outcomes onto the signal.
+  `if let Some(signal) = RECONNECT_WAKE.get(slot)` block pasted three times,
+  and a handover to a slot cleared after the scan copied the targets still
+  stopped the scan and signalled that slot. Both were hardware-free but
+  compiled only into the firmware, so no test covered them. Fixed:
+  `reconnect::SavedPeer<A, K>` holds the identity rule and `matches` (the
+  firmware passes `IdentityKey::is_match`), `ReconnectTable::record_sighting`
+  returns `Recorded::{Own, HandedOver, NotRegistered}` and
+  `wake_pending` says when a slot is due a wake, and every table change in
+  `scanner.rs` goes through `update`, which sets or resets the slot's signal to
+  match. A handover to a cleared slot now records nothing and the scan goes on.
+  Eight host tests cover the rules, and the table's tests moved to
+  `src/ble/reconnect_tests.rs` (`reconnect.rs` 271 lines, tests 405).
+  This also closes the earlier P3 entry for the pasted reset block.
 - [x] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
   The `RECONNECTS` doc linked to [`reconnect`], which does not resolve
   (firmware rustdoc with private items warns), and a "Unit Tests" banner was
@@ -322,8 +331,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   `src/ble/scanner.rs`, `src/ble/multi_conn.rs`, `src/config.rs`,
   `src/ui/ui_logic.rs`; [ADR 0015](docs/adr/0015-shared-reconnect-scan.md)).
   Host tests cover the table: handover, single use, expiry, clearing, the
-  fast window across retries, the tie-break, and the holdoff after a failed
-  attempt. *(hardware evidence pending)*
+  fast window across retries, the tie-break, the holdoff after a failed
+  attempt, wakes, and saved-device identity. *(hardware evidence pending)*
 - [x] Write the host's current lock-key state to a keyboard as soon as its link
   starts, then every change. A keyboard that wakes and reconnects, or connects
   to a slot that already passed the last change to an earlier link, now shows

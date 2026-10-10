@@ -67,7 +67,7 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot and event reducers |
-| [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: targets, sightings handed between slots, scan duty |
+| [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management quiescence and transactional commit primitives |
 | [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator, two connection workers, and the bond and connection-parameter handler |
@@ -491,10 +491,16 @@ flowchart TD
   slot's device would be heard only when it happened to advertise first. With
   the holdoff the two slots alternate as they did with per-slot scans: one
   failing attempt, then one full scan for the other device.
-- A slot resets its `RECONNECT_WAKE` signal when it starts a reconnect scan,
-  having taken any pending sighting, when an attempt fails, which drops the
-  sighting, and when its target is cleared, so a wake left from a sighting it
-  already used or lost cannot skip a later backoff.
+- Each slot's `RECONNECT_WAKE` signal mirrors `ReconnectTable::wake_pending`:
+  set while another slot's scan has handed the slot a sighting it has not
+  taken, reset once it takes the sighting at the start of its next reconnect
+  scan, when an attempt fails, which drops the sighting, when its target is
+  cleared, and when it registers a different device. Every change to the table
+  goes through one helper in `scanner.rs` that applies the change and then sets
+  or resets the signal, so a wake left from a sighting the slot already used or
+  lost cannot skip a later backoff. A sighting for a slot that stopped
+  reconnecting after the scan copied the targets records nothing, wakes nobody,
+  and lets the scan go on.
 - The scan uses the fast duty cycle, a 50 ms window every 100 ms
   (`BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`), while any target was
   registered less than `BLE_FAST_RECONNECT_SECS` (30 s) ago, and otherwise
@@ -1029,7 +1035,7 @@ The other shared primitives:
 | `REMOTE_WAKE` | `Signal<()>` | Dispatcher → `usb_device_task` | Cleared on every suspend change and reset |
 | `KEYBOARD_LEDS` | `Watch<KeyboardLeds, 2>` | USB control handler → connection workers | Latest value, one receiver per slot; each link reads the latest value when it starts |
 | `RECONNECTS` | Blocking mutex over `ReconnectTable` | Both workers ↔ reconnect scan callback | One registered target, at most one 2 s sighting, and a holdoff after a failed attempt per slot |
-| `RECONNECT_WAKE` | `Signal<()>` per slot | Reconnect scan callback → the other slot's worker | Wake-up between attempts |
+| `RECONNECT_WAKE` | `Signal<()>` per slot | Reconnect scan callback → the other slot's worker | Wake-up between attempts; always equal to `ReconnectTable::wake_pending` |
 | `FRAMES` | `Signal<Frame>` | UI loop → `display_task` | Latest frame wins |
 | Endpoint `pending` and `lifecycle` | `Signal<()>` per endpoint | Dispatcher and USB handler → endpoint worker | Wake-ups; `lifecycle` is cleared when each transfer starts |
 | Notification `wake` | `Signal<()>` per connection | GATT callback → drain future | Wake-up |

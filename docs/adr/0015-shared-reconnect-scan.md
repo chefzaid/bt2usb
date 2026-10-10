@@ -57,9 +57,9 @@ to the UI, which stays on Home until a device connects.
 `reconnect::ReconnectTable<T, A>`, a pure module, holds one entry per slot:
 the target the slot is reconnecting to, when its outage started, and at most
 one pending sighting. The firmware instantiates it as `RECONNECTS` in
-[scanner.rs](../../src/ble/scanner.rs) with `T = SavedPeer` (the stored
-address and, for a bonded peer, its identity key from the `Bonder`) and
-`A = Address`. A worker registers its target before each silent attempt and
+[scanner.rs](../../src/ble/scanner.rs) with `T = SavedPeer`, an alias of the
+pure `reconnect::SavedPeer<Address, IdentityKey>` (the stored address and,
+for a bonded peer, its identity key from the `Bonder`), and `A = Address`. A worker registers its target before each silent attempt and
 clears it when it connects (just before `SlotEvent::Connected`), when any
 command other than `Reconnect` reaches it, and when an attempt ends in an error
 that stops retries.
@@ -79,18 +79,24 @@ that stops retries.
    advertiser against them outside the critical section with
    `reconnect::owner_of` (identity key, or the stored address for a record
    without a bond; the lower slot wins a tie), and records the sighting for the
-   owning slot;
-3. stops at the first match. Its own device is returned for an immediate
-   connection. Another slot's device is left for that slot, which is woken
-   through `RECONNECT_WAKE[owner]` if it is between attempts, and the scanning
-   slot returns to its 500 ms backoff.
+   owning slot with `ReconnectTable::record_sighting`;
+3. stops at the first match. Its own device (`Recorded::Own`) is returned for
+   an immediate connection. Another slot's device (`Recorded::HandedOver`) is
+   left for that slot, which is woken through `RECONNECT_WAKE[owner]` if it is
+   between attempts, and the scanning slot returns to its 500 ms backoff. If the
+   owner stopped reconnecting after the targets were copied
+   (`Recorded::NotRegistered`), nothing is recorded and the scan goes on.
 
-A slot resets its own `RECONNECT_WAKE` signal after it takes the GAP lock in
-`find_saved_peer`, when an attempt fails, and when its target is cleared. No
-other reconnect scan runs while it holds the lock, so a wake still pending then
-refers to the sighting it is about to take or to one that has expired; a
-failed attempt drops its sighting; and a cleared slot has none. Such a wake
-must not cut a later backoff short.
+The table also decides wakes. `ReconnectTable::wake_pending(slot)` is true
+while the slot holds a sighting another slot handed over and has not taken;
+taking it (at the start of the slot's next `find_saved_peer`, fresh or
+stale), a failed attempt, clearing the slot, and registering a different
+device all end it. Every change to `RECONNECTS` goes through one helper,
+`scanner::update(slot, f)`, which applies `f` and then sets or resets
+`RECONNECT_WAKE[slot]` to match, so the signal cannot outlive its sighting and
+cut a later backoff short. Until 2026-10-10 the shell reset the signal by hand
+at three call sites and signalled the owner without checking that its entry
+still existed; moving the rule into the table made it host-testable.
 
 **Hide a device from the other slot's scans after a failed attempt.** When a
 silent attempt fails with `ConnectFailed`, the worker calls
@@ -112,8 +118,9 @@ any target was registered less than `BLE_FAST_RECONNECT_SECS` (30 s) ago, and
 the scan then uses `BLE_FAST_SCAN_INTERVAL` / `BLE_FAST_SCAN_WINDOW`, a 50 ms
 window every 100 ms; otherwise it uses the vendored default. Re-registering
 the same device keeps the time its outage started; `SavedPeer` equality
-compares identity keys, so a private-address change does not restart the
-window. The window restarts after power-up and after each lost link.
+compares identity keys when both records have one and stored addresses when
+neither does, so a private-address change does not restart the window or end
+a holdoff. The window restarts after power-up and after each lost link.
 
 **Connect at the fast duty cycle.** Every connection attempt, silent or chosen
 by the user, scans for its whitelisted address with the fast interval and
@@ -234,9 +241,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Concern | Where |
 | --- | --- |
 | Boot assignment without a scan | `ble_task` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
-| Shared table, sighting lifetime, duty window, failure holdoff, tie-break | `ReconnectTable` (`register`, `clear`, `attempt_failed`, `targets`, `record_sighting`, `take_sighting`, `duty`), `SIGHTING_TTL_MS`, `ScanDuty`, and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs) |
-| Saved-device identity and matching | `SavedPeer` (equality by identity key, otherwise by address) in [scanner.rs](../../src/ble/scanner.rs) |
-| Shared reconnect scan and handover | `RECONNECTS`, `RECONNECT_WAKE`, `register_reconnect`, `clear_reconnect`, `reconnect_attempt_failed`, `reconnect_sighted`, and `find_saved_peer` in `scanner.rs`; the log line `slot {} scan found slot {}'s device` |
+| Shared table, sighting lifetime, duty window, failure holdoff, tie-break, wakes | `ReconnectTable` (`register`, `clear`, `attempt_failed`, `targets`, `record_sighting`, `take_sighting`, `wake_pending`, `duty`), `Recorded`, `SIGHTING_TTL_MS`, `ScanDuty`, and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs) |
+| Saved-device identity and matching | `reconnect::SavedPeer` (equality by identity key, otherwise by address; `matches` with a key resolver) in `reconnect.rs`; the `SavedPeer` alias and the `IdentityKey::is_match` resolver in [scanner.rs](../../src/ble/scanner.rs) |
+| Shared reconnect scan and handover | `RECONNECTS`, `RECONNECT_WAKE`, `update`, `register_reconnect`, `clear_reconnect`, `reconnect_attempt_failed`, `reconnect_sighted`, and `find_saved_peer` in `scanner.rs`; the log line `slot {} scan found slot {}'s device` |
 | Registration lifecycle | `connection_slot_task` (including the `attempt_failed` call on a silent `ConnectFailed`) and `connect_and_run_secure` in `multi_conn.rs` |
 | Timing constants | `BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`, `BLE_FAST_RECONNECT_SECS`, `BLE_FAILED_RECONNECT_HOLDOFF_MS`, `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS` in [config.rs](../../src/config.rs) |
 | UI at power-up | `UiState::connection_status` in [ui_logic.rs](../../src/ui/ui_logic.rs) no longer special-cases a boot scan |
@@ -244,7 +251,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 ### Verification Status
 
 - **Implemented:** everything in the table above.
-- **Software-verified:** 23 host tests in `reconnect.rs` cover handing a
+- **Software-verified:** 31 host tests in `reconnect_tests.rs` cover handing a
   sighting to the slot that owns the device, ignoring unregistered devices and
   slots, single use, replacement by a newer sighting, expiry at and after 2
   seconds, clearing, keeping the outage start across re-registration of the
@@ -254,7 +261,13 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   slot's own scan still sees it, the holdoff ends on time, is kept across
   re-registration and extended by a new failure, ends for a new target, and
   drops the pending sighting), the lower-slot tie-break, out-of-range slots,
-  and a clock that goes backwards. The scanner and worker changes pass embedded Clippy with warnings
+  and a clock that goes backwards. Since 2026-10-10 they also cover wakes (a
+  handover wakes only the owner; taking the sighting, fresh or stale, a failed
+  attempt, clearing, and a new target end the wake; re-registering keeps it; a
+  sighting for a slot cleared after the copy wakes nobody) and saved-device
+  identity (equality by identity key or by address, matching by a resolved or
+  stored address, and a retry at a new private address keeping the holdoff and
+  window). The scanner and worker shells pass embedded Clippy with warnings
   denied but have no host tests, and the Renode scenario does not include the
   SoftDevice.
 - **Hardware-verified:** not yet. No board record covers a cold start, the

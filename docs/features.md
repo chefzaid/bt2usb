@@ -858,8 +858,8 @@ are open work.
   connection parameter policy, long-read assembly, management primitives,
   advertisement parser, storage framing and record validation, power policy,
   and UI logic.
-- The source contains 286 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 283 unit tests and the 3
+- The source contains 294 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 291 unit tests and the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), all
   of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or

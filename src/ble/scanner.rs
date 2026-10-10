@@ -8,7 +8,7 @@
 use core::cell::RefCell;
 
 use crate::ble::coordinator::{merge_advertisement, MAX_CONNECTIONS};
-use crate::ble::reconnect::{owner_of, ReconnectTable, ScanDuty};
+use crate::ble::reconnect::{self, owner_of, ReconnectTable, Recorded, ScanDuty};
 use crate::ble::{BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::{
     BLE_FAILED_RECONNECT_HOLDOFF_MS, BLE_FAST_RECONNECT_SECS, BLE_FAST_SCAN_INTERVAL,
@@ -24,50 +24,24 @@ use heapless::Vec;
 use nrf_softdevice::ble::{central, Address, IdentityKey};
 use nrf_softdevice::Softdevice;
 
-/// A saved device a connection slot is reconnecting to in the background.
-#[derive(Clone, Copy)]
-pub struct SavedPeer {
-    /// The address stored when the device was saved, or its last live address.
-    pub address: Address,
-    /// The bonded peer's identity key, which resolves its rotating private
-    /// addresses; `None` for a record saved without a bond.
-    pub identity: Option<IdentityKey>,
-}
+/// A saved device a connection slot is reconnecting to in the background
+/// (see [`reconnect::SavedPeer`]).
+pub type SavedPeer = reconnect::SavedPeer<Address, IdentityKey>;
 
-impl SavedPeer {
-    /// Whether an advertisement from `seen` comes from this device. Resolving
-    /// a private address calls into the SoftDevice.
-    fn matches(&self, seen: Address) -> bool {
-        self.identity.is_some_and(|id| id.is_match(seen)) || self.address == seen
-    }
-}
-
-impl PartialEq for SavedPeer {
-    /// The same device: a bonded peer by its identity key, whatever private
-    /// address it last used, and any other record by its stored address.
-    fn eq(&self, other: &Self) -> bool {
-        match (self.identity, other.identity) {
-            (Some(a), Some(b)) => a == b,
-            (None, None) => self.address == other.address,
-            _ => false,
-        }
-    }
-}
+type Table = ReconnectTable<SavedPeer, Address>;
 
 /// Background reconnect targets and sightings shared by both slots; see
-/// [`crate::ble::reconnect`].
-static RECONNECTS: BlockingMutex<
-    CriticalSectionRawMutex,
-    RefCell<ReconnectTable<SavedPeer, Address>>,
-> = BlockingMutex::new(RefCell::new(ReconnectTable::new(
-    BLE_FAST_RECONNECT_SECS * 1000,
-    BLE_FAILED_RECONNECT_HOLDOFF_MS,
-)));
+/// [`crate::ble::reconnect`]. Changed only through [`update`].
+static RECONNECTS: BlockingMutex<CriticalSectionRawMutex, RefCell<Table>> =
+    BlockingMutex::new(RefCell::new(ReconnectTable::new(
+        BLE_FAST_RECONNECT_SECS * 1000,
+        BLE_FAILED_RECONNECT_HOLDOFF_MS,
+    )));
 
 /// Wakes a slot waiting between reconnect attempts when another slot's scan
-/// has seen its device. A slot resets its own signal when it starts a
-/// reconnect scan, when an attempt fails, and when it stops reconnecting, so a
-/// wake always refers to a sighting still waiting in [`RECONNECTS`].
+/// has seen its device. [`update`] keeps each slot's signal equal to
+/// [`ReconnectTable::wake_pending`], so a wake always refers to a sighting
+/// still waiting in [`RECONNECTS`].
 static RECONNECT_WAKE: [Signal<CriticalSectionRawMutex, ()>; MAX_CONNECTIONS] =
     [const { Signal::new() }; MAX_CONNECTIONS];
 
@@ -75,17 +49,31 @@ fn now_ms() -> u64 {
     embassy_time::Instant::now().as_millis()
 }
 
+/// Apply `f` to the reconnect table at the current time, then set or reset
+/// `slot`'s wake signal to match the table. Every change goes through here.
+fn update<R>(slot: usize, f: impl FnOnce(&mut Table, u64) -> R) -> R {
+    RECONNECTS.lock(|table| {
+        let mut table = table.borrow_mut();
+        let result = f(&mut table, now_ms());
+        if let Some(signal) = RECONNECT_WAKE.get(slot) {
+            if table.wake_pending(slot) {
+                signal.signal(());
+            } else {
+                signal.reset();
+            }
+        }
+        result
+    })
+}
+
 /// Record that `slot` is reconnecting to `peer` in the background.
 pub fn register_reconnect(slot: usize, peer: SavedPeer) {
-    RECONNECTS.lock(|table| table.borrow_mut().register(slot, peer, now_ms()));
+    update(slot, |table, now| table.register(slot, peer, now));
 }
 
 /// `slot` stopped reconnecting in the background.
 pub fn clear_reconnect(slot: usize) {
-    RECONNECTS.lock(|table| table.borrow_mut().clear(slot));
-    if let Some(signal) = RECONNECT_WAKE.get(slot) {
-        signal.reset();
-    }
+    update(slot, |table, _| table.clear(slot));
 }
 
 /// `slot`'s background attempt to connect to its device failed. The other
@@ -93,11 +81,7 @@ pub fn clear_reconnect(slot: usize) {
 /// `BLE_FAILED_RECONNECT_HOLDOFF_MS`, so a device that advertises but will not
 /// connect cannot keep cutting them short.
 pub fn reconnect_attempt_failed(slot: usize) {
-    RECONNECTS.lock(|table| table.borrow_mut().attempt_failed(slot, now_ms()));
-    // The failed attempt dropped any pending sighting; its wake goes with it.
-    if let Some(signal) = RECONNECT_WAKE.get(slot) {
-        signal.reset();
-    }
+    update(slot, |table, now| table.attempt_failed(slot, now));
 }
 
 /// Wait until another slot's scan sees `slot`'s device.
@@ -123,15 +107,9 @@ pub async fn reconnect_sighted(slot: usize) {
 /// change the UI's scan results.
 pub async fn find_saved_peer(sd: &Softdevice, slot: usize) -> Option<Address> {
     let _gap = crate::ble::GAP_PROCEDURE.lock().await;
-    // No other reconnect scan can run while this slot holds the radio, so any
-    // wake already pending refers to the sighting taken below, or to one that
-    // has expired.
-    if let Some(signal) = RECONNECT_WAKE.get(slot) {
-        signal.reset();
-    }
-    let (sighting, duty) = RECONNECTS.lock(|table| {
-        let mut table = table.borrow_mut();
-        let now = now_ms();
+    // No other reconnect scan can run while this slot holds the radio, so
+    // taking the sighting here also ends any wake due for it.
+    let (sighting, duty) = update(slot, |table, now| {
         (table.take_sighting(slot, now), table.duty(now))
     });
     if let Some(address) = sighting {
@@ -164,12 +142,17 @@ pub async fn find_saved_peer(sd: &Softdevice, slot: usize) -> Option<Address> {
         // Match against a copy: resolving a private address calls into the
         // SoftDevice, which must not happen inside the critical section.
         let targets = RECONNECTS.lock(|table| table.borrow().targets(slot, now_ms()));
-        let owner = owner_of(&targets, address, SavedPeer::matches)?;
-        RECONNECTS.lock(|table| table.borrow_mut().record_sighting(owner, address, now_ms()));
-        if owner != slot {
-            RECONNECT_WAKE[owner].signal(());
+        let owner = owner_of(&targets, address, |peer: &SavedPeer, seen| {
+            peer.matches(seen, IdentityKey::is_match)
+        })?;
+        // A handover wakes the owner; an owner that stopped reconnecting since
+        // the copy was taken records nothing, and the scan goes on.
+        match update(owner, |table, now| {
+            table.record_sighting(slot, owner, address, now)
+        }) {
+            Recorded::Own | Recorded::HandedOver => Some(owner),
+            Recorded::NotRegistered => None,
         }
-        Some(owner)
     });
     let owner = with_timeout(
         Duration::from_secs(crate::config::BLE_CONNECT_TIMEOUT_SECS as u64),
@@ -182,7 +165,7 @@ pub async fn find_saved_peer(sd: &Softdevice, slot: usize) -> Option<Address> {
         info!("slot {} scan found slot {}'s device", slot, owner);
         return None;
     }
-    RECONNECTS.lock(|table| table.borrow_mut().take_sighting(slot, now_ms()))
+    update(slot, |table, now| table.take_sighting(slot, now))
 }
 
 /// Result of a single scan pass.

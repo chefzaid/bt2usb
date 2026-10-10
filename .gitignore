@@ -24,6 +24,10 @@ snapshots/
 /s140_nrf52_7.3.0_softdevice.hex
 /softdevice.zip
 
+# Python bytecode written by the release helper tests (scripts/release_test.py)
+__pycache__/
+*.py[cod]
+
 # Coverage reports (mask coverage)
 coverage-html/
 coverage/

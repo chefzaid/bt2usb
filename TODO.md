@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 18 | 1 | 0 |
+| [FIXME](#fixme) | 19 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **94** | **83** | **22** |
+| **Total** | **95** | **83** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -116,6 +116,15 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the shared scan, its duty cycle, and the connectable-only rule. Every
   `info!`, `warn!`, and `error!` string outside the self-test is now in the
   guide.
+- [x] **P2** **Python bytecode was not ignored, and got committed.** Running
+  the documented release helper tests (`python -m unittest discover -s scripts
+  -p "release_test.py"`) writes `scripts/__pycache__/`, which `.gitignore` did
+  not cover, so it showed as untracked and was committed by mistake in "Record
+  firmware sizes with their log level" (`3061a1b`). Tracked bytecode is rewritten
+  whenever the tests run with another Python, leaving a modified tracked file
+  that `release.py` staging refuses as a dirty tree. Fixed: the bytecode is
+  removed from the repository and `.gitignore` covers `__pycache__/` and
+  `*.py[cod]`.
 - [ ] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
   `src/ble/multi_conn.rs` (845 now), `src/usb/hid_device.rs` (536), and pushed
   `src/hid_descriptor_tests.rs` past the limit (551, split to 444 since);

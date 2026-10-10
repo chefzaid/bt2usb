@@ -269,7 +269,7 @@ Radio parameters that are not in `config.rs` come from the vendored
 
 | Parameter | Value |
 | --- | --- |
-| Scan type | Active for user scans, so scan responses supply names; passive for reconnect scans, which need only the advertiser's address |
+| Scan type | Active for user scans, so scan responses supply names; passive for reconnect scans, which need only the advertiser's address and count only connectable advertisements |
 | Extended scanning | Enabled (vendored default) |
 | PHY | 1M |
 | Scan interval / window | User scans and slow reconnect scans: the vendored default of 2732 / 500 in 0.625 ms units, about 1.7 s / 312.5 ms. Reconnect scans for 30 s after power-up or a lost link, and every connection attempt: 160 / 80, a 50 ms window every 100 ms |

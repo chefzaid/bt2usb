@@ -118,9 +118,9 @@ pub async fn reconnect_sighted(slot: usize) {
 /// when nothing is seen within `BLE_CONNECT_TIMEOUT_SECS`. Another slot's
 /// device whose last attempt failed is ignored for a while (see
 /// [`reconnect_attempt_failed`]). A sighting recorded earlier by the other
-/// slot's scan is used without scanning. The scan is passive, accepts
-/// advertisements without the HID UUID, and does not change the UI's scan
-/// results.
+/// slot's scan is used without scanning. The scan is passive, counts only
+/// connectable advertisements, accepts them without the HID UUID, and does not
+/// change the UI's scan results.
 pub async fn find_saved_peer(sd: &Softdevice, slot: usize) -> Option<Address> {
     let _gap = crate::ble::GAP_PROCEDURE.lock().await;
     // No other reconnect scan can run while this slot holds the radio, so any
@@ -152,6 +152,14 @@ pub async fn find_saved_peer(sd: &Softdevice, slot: usize) -> Option<Address> {
         ..Default::default()
     };
     let scan = central::scan(sd, &config, |params| {
+        // Only a connectable advertisement says the device will accept the
+        // connection attempt a sighting starts. A device that also sends
+        // non-connectable advertising, possibly from another private address,
+        // must not end the scan or hand its slot an address it cannot connect
+        // to. A passive scan receives no scan responses.
+        if params.type_.connectable() == 0 {
+            return None;
+        }
         let address = Address::from_raw(params.peer_addr);
         // Match against a copy: resolving a private address calls into the
         // SoftDevice, which must not happen inside the critical section.
@@ -272,7 +280,3 @@ pub async fn scan(
 
     Ok(ScanResult { devices: found })
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Unit Tests (run on host, not embedded)
-// ═══════════════════════════════════════════════════════════════════════════

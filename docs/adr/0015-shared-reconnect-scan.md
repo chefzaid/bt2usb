@@ -71,7 +71,11 @@ that stops retries.
    last `SIGHTING_TTL_MS` (2 s), without scanning; a sighting is used once and
    a stale one is discarded;
 2. otherwise runs one passive scan, bounded by `BLE_CONNECT_TIMEOUT_SECS`,
-   whose callback copies the registered targets out of the table, matches the
+   whose callback skips non-connectable advertising reports (added on
+   2026-10-10: a device that also advertises a non-connectable set, possibly
+   from another private address, would otherwise end the scan and hand its
+   slot an address that a connection attempt cannot use), copies the
+   registered targets out of the table, matches the
    advertiser against them outside the critical section with
    `reconnect::owner_of` (identity key, or the stored address for a record
    without a bond; the lower slot wins a tie), and records the sighting for the

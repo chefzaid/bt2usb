@@ -497,8 +497,9 @@ covered by host tests; the tasks that perform them are in
   after each attempt. A user command replaces the retry at any time.
 - Retrying slots share one reconnect table
   ([`ble/reconnect.rs`](../src/ble/reconnect.rs)). Whichever slot holds the
-  radio runs one passive scan for every slot's device, and a device heard for
-  the other slot is handed to it with its address and wakes it, so that slot
+  radio runs one passive scan for every slot's device, counting only
+  advertisements that accept a connection, and a device heard for the other
+  slot is handed to it with its address and wakes it, so that slot
   connects without a scan of its own. A handed-over address is used only
   within 2 seconds of being heard, and once.
 - Every retry finds the device's current address first, so a private address

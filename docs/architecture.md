@@ -465,8 +465,8 @@ flowchart TD
 - `scanner::find_saved_peer` first takes a sighting that the other slot's scan
   recorded for this slot in the last 2 seconds (`SIGHTING_TTL_MS`), and
   connects to it without scanning. Otherwise it runs one passive scan, bounded
-  by `BLE_CONNECT_TIMEOUT_SECS`, that matches every advertisement against
-  every registered target: through the identity key, which follows a rotated
+  by `BLE_CONNECT_TIMEOUT_SECS`, that ignores non-connectable advertisements
+  and matches every connectable one against every registered target: through the identity key, which follows a rotated
   private address on every attempt, or by the stored address. For each
   advertisement it copies the targets out of the table and resolves the
   address outside the critical section, because `IdentityKey::is_match` calls

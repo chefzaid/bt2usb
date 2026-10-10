@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 2 | 0 | 0 |
+| [FIXME](#fixme) | 3 | 11 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **78** | **82** | **22** |
+| **Total** | **79** | **93** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -75,6 +75,79 @@ fixed it.
   one array). Found while bounding the management wait; fixed in the same
   commit, which also removed the allowance from the
   [lint inventory](docs/code-quality.md#lint-allowances).
+
+The entries below came from a four-part audit of commit `4faf99f` against the
+checklist on 2026-10-10; each was confirmed by a second, independent check.
+
+- [x] **P1** **The reconnect scan counts non-connectable advertisements.**
+  `find_saved_peer` (`src/ble/scanner.rs`) records a sighting for any report
+  from a saved device, including `ADV_NONCONN_IND` and `ADV_SCAN_IND`. A device
+  that also advertises a non-connectable set ends the other slot's scan and
+  hands its slot an address for a 6 s attempt that a connection cannot use,
+  and never succeeds if that set uses another private address. Fixed by the
+  commit "Count only connectable advertisements in the reconnect scan": the
+  callback returns early when the report's `connectable` bit is clear, and
+  [ADR 0015](docs/adr/0015-shared-reconnect-scan.md), the architecture, feature,
+  hardware, and security guides say so. Not yet seen on a board.
+- [ ] **P2** **The keyboard-only Report Map rule is written twice.**
+  `src/hid/mod.rs` (reserved-byte handling) and `src/ble/hid_client.rs` (LED
+  output report) each test `!has_report_ids() && has_keyboard && !has_mouse &&
+  !has_consumer` by hand, and only the first is host-tested. If they drift, the
+  bridge writes LEDs to a report it does not treat as the keyboard, or the
+  reverse. Close when both call one `HidDescriptor` method with a host test.
+- [ ] **P2** **`HostLeds::current` documents the wrong start state.** The trait
+  doc (`src/hid/host_leds.rs`) says it returns `None` until the host sends an
+  LED state after enumeration, but every USB bus reset stores all-off in
+  `KEYBOARD_LEDS` (`UsbPowerHandler::reset`), so a new link gets `Some(all off)`
+  before any SET_REPORT. Close when the doc describes the reset behavior.
+- [ ] **P2** **New log strings are missing from the operations guide.** The
+  [log reference](docs/operations.md#ble-scan-and-connection) lacks
+  `slot {} scan found slot {}'s device` and the three connection-parameter
+  lines added in `4faf99f`, and its `slot {} connecting to {}` row no longer
+  matches when that line appears. Close when every new string is listed with
+  its meaning and the row is corrected.
+- [ ] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
+  `src/ble/multi_conn.rs` (845 now), `src/usb/hid_device.rs` (536), and pushed
+  `src/hid_descriptor_tests.rs` past the limit (551); `src/lib_tests.rs` is
+  503. Close with the split that
+  [Keep source files within a size limit](#verification-and-code-quality)
+  asks for.
+- [ ] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
+  The `RECONNECTS` doc links to [`reconnect`], which does not resolve
+  (`cargo doc --features embedded` warns), and a "Unit Tests" banner was left
+  at the end of the file when its tests moved to `adv_parser.rs`. Close when
+  firmware rustdoc is warning-free and the banner is gone.
+- [ ] **P3** **The `RECONNECT_WAKE` reset is pasted three times.**
+  `clear_reconnect`, `reconnect_attempt_failed`, and `find_saved_peer` each
+  repeat the same `if let Some(signal) = RECONNECT_WAKE.get(slot)` block for one
+  documented rule. Close when one helper does it.
+- [ ] **P3** **Duplicated and dead logic in `conn_params.rs`.** Reversed
+  interval bounds are normalized twice in two styles (`bound_request` and
+  `interval_within_request`); the step-back loop in `max_latency_for` can never
+  run for a nonzero timeout and its comment ("can overshoot by one event") is
+  false; and the tests copy the Core-rule check three times. Close when one
+  helper normalizes the range, `max_latency_for` uses the closed form with a
+  correct comment, and the tests share one Core-rule helper.
+- [ ] **P3** **`SIGHTING_TTL_MS` sits outside `config.rs` unlisted.** The
+  other `ReconnectTable` timings come from `config.rs`; the 2 s sighting
+  lifetime is a constant in `src/ble/reconnect.rs` and is missing from
+  [constants outside config.rs](docs/hardware.md#constants-outside-configrs).
+  Close when it is passed in from `config.rs` like the others.
+- [ ] **P3** **A redundant `Disconnect` arm in `connection_slot_task`.** The
+  arm for a `Disconnect` that arrives between reconnect attempts repeats what
+  the fall-through path does (`clear_reconnect`, then `Disconnected`). Close
+  when the arm is removed and the behavior is unchanged.
+- [ ] **P3** **`BLE_CONNECT_TIMEOUT_SECS` cites a scan rate attempts no longer
+  use.** Its doc justifies 6 s with three default 1.7 s scan intervals, but
+  connection attempts now always scan at the fast duty, and the constant also
+  bounds reconnect scans, which the doc does not mention. Close when the doc
+  states both uses and the current rationale.
+- [ ] **P3** **Docs describe removed code.**
+  [data model](docs/data-model.md#ui-state-model) still lists the removed
+  `UiState::interactive_scan`, and ADR 0011 and the architecture guide still
+  speak of a "reconnect planner" or "boot planner" that `4faf99f` replaced with
+  the reconnect table and inline boot reconnect. Close when no guide names
+  either.
 
 ## Needs Your Input
 

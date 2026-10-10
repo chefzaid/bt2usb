@@ -214,8 +214,9 @@ Useful log lines: `Loaded {} BLE bonds into security handler` at startup,
   36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09)
   and scheduled run 37338711407 (2026-10-05). The security handler, the encryption gate, and the pairing permission live in
   SoftDevice-coupled code that is not part of the host test library, so no
-  automated test covers them. The pure reconnect planner and coordinator that
-  surround them have host tests.
+  automated test covers them. The pure reconnect table (`ReconnectTable`,
+  [ADR 0015](0015-shared-reconnect-scan.md)) and coordinator that surround them
+  have host tests.
 - **Hardware-verified:** not yet. The pairing, reconnect, and sleep-reconnect
   checks in [first flash](../first-flash.md#4-pairing-and-daily-use) have no
   board record in the repository.

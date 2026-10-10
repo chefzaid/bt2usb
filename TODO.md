@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 14 | 5 | 0 |
+| [FIXME](#fixme) | 15 | 4 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **90** | **87** | **22** |
+| **Total** | **91** | **86** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -191,12 +191,14 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   both uses, the fast duty for attempts (60 windows in 6 s), the default duty
   for a reconnect scan past its fast window (three windows), and the holdoff
   derived from it.
-- [ ] **P3** **Docs describe removed code.**
-  [data model](docs/data-model.md#ui-state-model) still lists the removed
+- [x] **P3** **Docs described removed code.**
+  [data model](docs/data-model.md#ui-state-model) still listed the removed
   `UiState::interactive_scan`, and ADR 0011 and the architecture guide still
-  speak of a "reconnect planner" or "boot planner" that `4faf99f` replaced with
-  the reconnect table and inline boot reconnect. Close when no guide names
-  either.
+  spoke of a "reconnect planner" or "boot planner" that `4faf99f` replaced with
+  the reconnect table and inline boot reconnect. Fixed: the row is gone, the
+  architecture guide says `ble_task` sends `Reconnect` at power-up, ADR 0011
+  and the multi-device item name the reconnect table, and only ADR 0015's
+  account of the old tree still names `resolve_reconnect_targets`, as history.
 
 - [x] **P3** **The test map misdescribed two `conn_params` tests.** The
   [testing guide](docs/testing.md#test-map) said "a faster request gets
@@ -1270,7 +1272,7 @@ These decisions come first because several items below depend on them.
   that scan first disconnects both slots when both are in use
   (`plan_start_scan`). Let a saved device that advertises take a free slot, or
   a slot whose device is still retrying, and decide when a retrying device
-  gives up its slot. Accept when reconnect-planner and coordinator tests cover
+  gives up its slot. Accept when reconnect-table and coordinator tests cover
   four saved devices with any two present, a saved device that wakes while its
   slot is held by a retrying one, and an unchanged result when only the two
   most recent are present ([features](docs/features.md#boot-and-reconnect)).

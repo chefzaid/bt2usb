@@ -429,8 +429,8 @@ worker waiting to retry drops its target. Stored records and bonds are kept.
 
 ### Background Reconnect
 
-A slot reconnects silently, without pairing, in three cases: the boot planner
-sends `Reconnect`; an established link closes (`"slot {} link lost;
+A slot reconnects silently, without pairing, in three cases: `ble_task` sends
+it `Reconnect` at power-up; an established link closes (`"slot {} link lost;
 reconnecting"`), including one that the user connected; or a silent attempt
 fails with `ConnectFailed`.
 

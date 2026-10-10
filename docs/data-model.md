@@ -656,7 +656,6 @@ to the display task after every event
 | `connected_name` | `String<32>` | Link summary; empty when nothing is connected |
 | `message` | `String<32>` | Error or notice text, truncated by characters |
 | `scan_dots` | `u8` | Scanning animation, advanced once per second while scanning with the display on |
-| `interactive_scan` | `bool` (private) | Set by the first user-started scan and never cleared |
 
 The loop also keeps the `DiscoveredDevice` list from the last `PairedDevices`
 reply to turn a Forget index into an address, a `ManagementRequests` tracker,

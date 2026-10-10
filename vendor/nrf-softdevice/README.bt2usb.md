@@ -35,6 +35,20 @@ refused: {:?}; keeping the default mtu` and keeps the link at the default
 ATT MTU of 23. A timeout, a disconnect, or a SoftDevice error still fails the
 connect.
 
+GATT server events without the GATT server feature (2026-10-10): bt2usb
+leaves `ble-gatt-server` off, and upstream then dropped every GATT server
+event in `ble::on_evt`, including the two the SoftDevice waits on the
+application for. A peripheral that also acts as a GATT client and sends its
+own Exchange MTU Request, or reads or writes the Service Changed CCCD that
+S140 includes by default, got no answer; its ATT transaction timed out after
+30 s, after which it may send no more ATT PDUs on the link, notifications
+included. `on_gatts_evt_without_server` in `src/ble/mod.rs` now answers the
+MTU request with the configured MTU as Server RX MTU and records the smaller
+of the two RX MTUs (never below 23) through `try_with_state_by_conn_handle`,
+a non-panicking lookup added to `src/ble/connection.rs`, and answers
+`BLE_GATTS_EVT_SYS_ATTR_MISSING` with default system attributes. Both are
+compiled only without `ble-gatt-server`, whose module answers them itself.
+
 Discovery no longer panics on peer-controlled counts or handles. With the
 configured 64-byte ATT MTU one response can carry eight characteristic
 declarations; `discover` keeps the first six and resumes after the last kept
@@ -93,6 +107,7 @@ reads, timeout errors, bounded discovery, a way for the application to
 answer connection parameter requests, a way to keep peer addresses,
 passkeys, and notification bytes out of debug and trace logs, no panic
 on an unexpected timeout source or a disconnect error, an ATT MTU that
-matches the one the SoftDevice uses, and a connect that survives a refused
-MTU exchange. Do not edit the Cargo checkout to deploy this change; the root Cargo
+matches the one the SoftDevice uses, a connect that survives a refused
+MTU exchange, and answers to a peer's Exchange MTU Request and system
+attribute access without the GATT server feature. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

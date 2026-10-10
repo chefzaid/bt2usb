@@ -834,6 +834,17 @@ pub(crate) fn with_state_by_conn_handle<T>(conn_handle: u16, f: impl FnOnce(&mut
     with_state(index, f)
 }
 
+/// bt2usb patch: `with_state_by_conn_handle` for an event that can arrive for a
+/// handle with no state, such as a link refused for lack of connection slots;
+/// returns `None` instead of panicking.
+#[cfg(not(feature = "ble-gatt-server"))]
+pub(crate) fn try_with_state_by_conn_handle<T>(
+    conn_handle: u16,
+    f: impl FnOnce(&mut ConnectionState) -> T,
+) -> Option<T> {
+    index_by_handle(conn_handle).get().map(|index| with_state(index, f))
+}
+
 pub(crate) fn with_state<T>(index: u8, f: impl FnOnce(&mut ConnectionState) -> T) -> T {
     let state = unsafe { &mut *STATES[index as usize].get() };
     f(state)

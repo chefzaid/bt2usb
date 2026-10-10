@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 36 | 3 | 0 |
+| [FIXME](#fixme) | 37 | 2 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **123** | **74** | **21** |
+| **Total** | **124** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -435,22 +435,27 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
   embedded builds and Clippy; hardware evidence belongs to "Report Map
   interoperability and legacy policy".
-- [ ] **P1** **A peripheral's own MTU exchange or CCCD access is never
+- [x] **P1** **A peripheral's own MTU exchange or CCCD access was never
   answered.** With the `ble-gatt-server` feature off, the vendored
-  `ble::on_evt` drops every GATT server event, including
+  `ble::on_evt` dropped every GATT server event, including
   `BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST`, which needs
   `sd_ble_gatts_exchange_mtu_reply`, and `BLE_GATTS_EVT_SYS_ATTR_MISSING`,
   which needs `sd_ble_gatts_sys_attr_set` (S140 includes the Service Changed
   characteristic and its CCCD by default). A peripheral that also acts as a
   GATT client, sending its own MTU exchange or reading or writing the bridge's
-  Service Changed CCCD, gets no answer; its ATT transaction times out after
+  Service Changed CCCD, got no answer; its ATT transaction timed out after
   30 s, after which the Core specification lets it send no more ATT PDUs on
   that link, including the notifications that carry its reports. Found by the
-  panic inventory's reviewer; not reproduced. Accept when the vendored
-  dispatch answers both events without the GATT server feature (an MTU reply
-  with Server RX MTU 64 that records `client_rx_mtu.min(64).max(23)`, as the
-  MTU FIXME above computes it, and empty system attributes), and the vendor
-  notes record it.
+  panic inventory's reviewer; not reproduced. Fixed: without the GATT server
+  feature, `on_gatts_evt_without_server` answers the MTU request with Server
+  RX MTU 64 and records `client_rx_mtu.min(64).max(23)`, and answers a
+  missing system attribute with the defaults
+  (`vendor/nrf-softdevice/src/ble/mod.rs` and a non-panicking state lookup in
+  `connection.rs`, marked `bt2usb patch:`;
+  [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
+  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
+  embedded builds and Clippy; hardware evidence needs a peripheral that sends
+  its own MTU exchange.
 - [ ] **P2** **Bonder callbacks re-enter the vendored connection state.**
   The vendored crate calls `SecurityHandler::on_bonded` (in `gap::on_evt`,
   `BLE_GAP_EVT_AUTH_STATUS`) and `get_peripheral_key` (in

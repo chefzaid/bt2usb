@@ -401,12 +401,14 @@ feature and `sim.rs` does not declare `stack` or `sd_setup`.
 ### Vendored Unsafe
 
 The vendored `nrf-softdevice` crate wraps the SoftDevice C API, so it uses
-`unsafe` throughout: `grep -rw unsafe vendor/nrf-softdevice/src` matches 161
+`unsafe` throughout: `grep -rw unsafe vendor/nrf-softdevice/src` matches 162
 lines in 22 files, 18 of them in `src/ble/gatt_client.rs`, the file the local
-patch changes. The patch's changes are recorded in the
+patch changes most. One of the 162 is the patch's own
+`on_gatts_evt_without_server` in `src/ble/mod.rs` (2026-10-10), an `unsafe fn`
+like the crate's other event handlers. The patch's changes are recorded in the
 [vendor notes](../vendor/nrf-softdevice/README.bt2usb.md) and
-[ADR 0007](adr/0007-vendored-softdevice-patch.md). Review every change to
-that file with the same rules as application `unsafe`.
+[ADR 0007](adr/0007-vendored-softdevice-patch.md). Review every change to the
+vendored sources with the same rules as application `unsafe`.
 
 ### Review Rule
 
@@ -598,7 +600,7 @@ The remaining panic paths, and why each does not fire:
 | Boot only | `Softdevice::enable` and `cfg_set` (configuration, RAM, a second enable); `Flash::take` (a second take) | Each runs once per boot with a constant configuration (see the application table) |
 | SoftDevice fault handler | `fault_handler`: an internal SoftDevice assertion, an application access to SoftDevice-protected memory or peripherals, an unknown fault | bt2usb touches TWIM0, USBD, GPIOTE, and RTC1 (the embassy-time driver) through embassy-nrf, plus GPIO and FICR, never POWER, CLOCK, or other SoftDevice-owned blocks directly, and runs the interrupts it uses at priority 2 |
 | Event fetch | `run_soc`, `run_ble`, `on_soc_evt` | With a valid buffer the SoftDevice returns only "no event", "BLE not enabled", or "data size", and the buffer covers the largest event. SoC event IDs come from the same S140 bindings |
-| Connection bookkeeping | Reference-count `checked_add` and `checked_sub`, `with_state_by_conn_handle`, `index_by_handle`, `gatt_client::portal` and `hvx_portal` (which index by connection handle), `Connection::new`, `on_disconnected` | A link has a few `Connection` clones at most (the slot worker, the HID client, the LED forwarder) against a `u8` count. The SoftDevice sends one DISCONNECTED per handle and every other event for a handle after its CONNECTED, and the 20-entry state and portal tables cover the 2 links, whose handles S140 numbers from 0 |
+| Connection bookkeeping | Reference-count `checked_add` and `checked_sub`, `with_state_by_conn_handle`, `index_by_handle` (also behind the non-panicking `try_with_state_by_conn_handle`), `gatt_client::portal` and `hvx_portal` (which index by connection handle), `Connection::new`, `on_disconnected` | A link has a few `Connection` clones at most (the slot worker, the HID client, the LED forwarder) against a `u8` count. The SoftDevice sends one DISCONNECTED per handle and every other event for a handle after its CONNECTED, and the 20-entry state and portal tables cover the 2 links, whose handles S140 numbers from 0 |
 | Event portals | `Multiple tasks waiting on same portal`; each portal's `RefCell` and thread-mode mutex; `unreachable!()` in `wait_many` | `GAP_PROCEDURE` serializes scans and connects, the GATT procedures on one link run one after another, and notifications and the LED write wait on different portals. Every portal call runs in thread mode, and no waiter closure re-enters a portal |
 | Connect waiter | `unexpected event {}` in `central::connect_inner` | The connect portal receives only CONNECTED or the connect timeout |
 | Notification loop | `unwrap!(Connection::from_handle(..))` in `gatt_client::run` | The notification portal receives events only while the link has an index, DISCONNECTED clears it, and the loop returns on DISCONNECTED |

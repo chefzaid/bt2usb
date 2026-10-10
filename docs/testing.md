@@ -138,15 +138,15 @@ line coverage on 2026-10-10.
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
 2026-10-10, in the commit that bounds the UI's management wait. The tree holds
-279 `#[test]` functions: 276 in files compiled into the host library and 3 in
+283 `#[test]` functions: 280 in files compiled into the host library and 3 in
 `tests/integration.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
 tests, before four advertisement tests moved into the host library and twelve
 UI tests (the management deadline, the saved-device list, scans, and
-`UiState` updates) were added; the 276 passed with `cargo test` on
-2026-10-10. There are no `#[ignore]` or
+`UiState` updates) and four keyboard-report tests were added; the 280 passed
+with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -154,7 +154,8 @@ UI tests (the management deadline, the saved-device list, scans, and
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
 | [lib_tests.rs](../src/lib_tests.rs) | 53 | Keyboard, mouse, and consumer report parsing from BLE bytes and serialization to USB: empty, short, exact, and longer inputs; too-small output buffers; all modifiers and buttons; six-key arrays; negative motion and wheel; 5-byte mouse reports with horizontal pan and back/forward buttons; consumer volume, media, browser, and launcher usages. `classify_report` and `classify_notification` routing by report ID or length, rejecting a keyboard report with a nonzero reserved byte when its kind is only inferred, invalid 2-byte consumer payloads, unknown lengths, and empty or single-byte input. |
-| [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) | 40 | Report-descriptor parsing in `hid/report_protocol.rs`: usage pages, keyboard/mouse/consumer detection, Push/Pop, long items, bounded nesting, overflow-safe report dimensions, constant padding, unsupported applications, extended usages, and every truncated prefix of the firmware's own USB descriptors failing closed. Descriptor-guided routing (`classify_notification_with_hint`, `classify_known`) that rejects unknown or mixed-kind report IDs instead of falling back to another kind. GATT Report Reference parsing, consumer usage range, three-button boot mouse serialization, and GATT values whose first byte resembles a report ID. The reserved keyboard byte: a keyboard report carrying OEM data there is accepted, with the reserved byte cleared, when `classify_known` is given the keyboard kind, when a Report Reference resolves through a numbered Report Map to the keyboard report as `subscribe_all` resolves it, and when an unnumbered map describes only a keyboard; the check stays when an unnumbered map also has other kinds and on the length- and ID-inferred paths; a declared keyboard report must still be 8 bytes. |
+| [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) | 34 | Report-descriptor parsing in `hid/report_protocol.rs`: usage pages, keyboard/mouse/consumer detection, Push/Pop, long items, bounded nesting, overflow-safe report dimensions, constant padding, unsupported applications, extended usages, and every truncated prefix of the firmware's own USB descriptors failing closed. Descriptor-guided routing (`classify_notification_with_hint`, `classify_known`) that rejects unknown or mixed-kind report IDs instead of falling back to another kind. GATT Report Reference parsing, consumer usage range, three-button boot mouse serialization, and GATT values whose first byte resembles a report ID. |
+| [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs) | 10 | Which report is the keyboard's (`HidDescriptor::is_unnumbered_keyboard_only` and `is_keyboard_report`, the rule `subscribe_all` uses for the LED output report): an unnumbered keyboard-only map owns every report, a numbered map only the keyboard ID, and an unnumbered map with another input, or an ID shared by two kinds, owns none. The reserved keyboard byte: a keyboard report carrying OEM data there is accepted, with the reserved byte cleared, when `classify_known` is given the keyboard kind, when a Report Reference resolves through a numbered Report Map to the keyboard report as `subscribe_all` resolves it, and when an unnumbered map describes only a keyboard; the check stays when an unnumbered map also has other kinds and on the length- and ID-inferred paths; a declared keyboard report must still be 8 bytes. |
 | [lib_logic_tests.rs](../src/lib_logic_tests.rs) | 14 | `HidReport` serialization, equality, and kind helpers; HID UUID detection, name extraction, malformed lengths, and name truncation through the public `ble::adv_parser` API; scan-dot cycling; `power_logic::screen_should_be_on` auto-off policy. |
 | [hid/aggregate.rs](../src/hid/aggregate.rs) | 5 | Two-source union: a key held by both sources survives one release or disconnect, rollover recovers when a source disconnects, mouse buttons union without replaying the other source's motion, consumer lowest-slot priority with fallback, and out-of-range sources cannot change state or wake the host. |
 | [hid/coalesce.rs](../src/hid/coalesce.rs) | 8 | Per-endpoint coalescing: latest keyboard and consumer state wins but a release survives, mouse motion accumulates with saturation while the latest buttons win, round-robin pop across endpoints, and endpoint independence. |

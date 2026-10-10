@@ -167,6 +167,21 @@ impl HidDescriptor {
             || self.consumer_report_id.is_some()
     }
 
+    /// A map that numbers no reports and whose only input is a keyboard. Its
+    /// reports carry no ID prefix, and every one of them, including the LED
+    /// output report, belongs to the keyboard.
+    pub fn is_unnumbered_keyboard_only(&self) -> bool {
+        !self.has_report_ids() && self.has_keyboard && !self.has_mouse && !self.has_consumer
+    }
+
+    /// Whether the report a GATT Report Reference names by `report_id` is the
+    /// keyboard's: the map gives that ID the keyboard kind, or the map is
+    /// [unnumbered and keyboard-only](Self::is_unnumbered_keyboard_only).
+    pub fn is_keyboard_report(&self, report_id: u8) -> bool {
+        self.report_kind_for_id(report_id) == Some(ReportKind::Keyboard)
+            || self.is_unnumbered_keyboard_only()
+    }
+
     pub fn report_kind_for_id(&self, report_id: u8) -> Option<ReportKind> {
         // A report containing fields for multiple kinds cannot be translated
         // by any one of the fixed-layout decoders. Never choose one by order.

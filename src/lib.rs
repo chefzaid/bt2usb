@@ -118,3 +118,7 @@ mod logic_tests;
 #[cfg(test)]
 #[path = "hid_descriptor_tests.rs"]
 mod hid_descriptor_tests;
+
+#[cfg(test)]
+#[path = "hid_keyboard_report_tests.rs"]
+mod hid_keyboard_report_tests;

@@ -172,7 +172,8 @@ Follow-up obligations:
 - The self-test includes `ble/adv_parser.rs` through `#[path]`, and the
   simulation compiles `ble::coordinator` and `ui::ui_logic` for the ARM target.
 - Test files: `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
-  `src/hid_descriptor_tests.rs`, `src/ble/coordinator_tests.rs`,
+  `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
+  `src/ble/coordinator_tests.rs`, `src/ui/ui_logic_tests.rs`,
   `src/hid/delivery_tests.rs` (the production worker against fake endpoints,
   for example `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
   in-module tests such as those in `aggregate.rs` and `management.rs`, and
@@ -187,12 +188,12 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 279 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 276 unit and 3 integration tests, which
+  finds 283 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 280 unit and 3 integration tests, which
   passed on 2026-10-10 (the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09)
   ran 260 unit tests, before four advertisement tests moved out of the
-  firmware-only `scanner.rs` and twelve UI tests were added).
+  firmware-only `scanner.rs` and sixteen UI and keyboard-report tests were added).
   The CI host-test jobs on Linux and Windows passed on GitHub-hosted runners
   in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
   (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The

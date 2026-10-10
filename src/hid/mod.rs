@@ -96,7 +96,7 @@ pub fn classify_notification_with_hint(
         // No prefix is declared. A map whose only input is a keyboard declares
         // that this is the keyboard report, as it does for the LED output
         // report (`subscribe_all` in `ble/hid_client.rs`).
-        if desc.has_keyboard && !desc.has_mouse && !desc.has_consumer {
+        if desc.is_unnumbered_keyboard_only() {
             return parse_by_kind(ReportKind::Keyboard, data, KindSource::Declared);
         }
 

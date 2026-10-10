@@ -518,7 +518,8 @@ the USB keyboard's one-byte output report. The bridge masks undefined bits,
 logs `Host LEDs: num={} caps={} scroll={}`, and writes the byte to the BLE
 keyboard's own output report: the first Output report that shares the keyboard
 input's report ID in the Report Map, or, for a keyboard-only map without report
-IDs, the first Output report. Both slots watch the latest
+IDs, the first Output report (`HidDescriptor::is_keyboard_report`, the same
+rule that decides which input is the keyboard's). Both slots watch the latest
 LED state, so it reaches the keyboard whichever slot holds it. When a keyboard
 connects, including one that wakes from sleep and reconnects, the bridge first
 writes the host's current state, then every change, so the keyboard shows the
@@ -855,8 +856,8 @@ are open work.
   connection parameter policy, long-read assembly, management primitives,
   advertisement parser, storage framing and record validation, power policy,
   and UI logic.
-- The source contains 279 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 276 unit tests and the 3
+- The source contains 283 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 280 unit tests and the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), all
   of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or

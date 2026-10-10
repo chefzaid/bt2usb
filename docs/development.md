@@ -31,7 +31,8 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── usb/               composite USB HID device
 │   ├── storage.rs, storage/  pairing store and its framing/codec
 │   ├── ui/                display, buttons, UI state machine
-│   └── lib_tests.rs, lib_logic_tests.rs, hid_descriptor_tests.rs
+│   └── lib_tests.rs, lib_logic_tests.rs, hid_descriptor_tests.rs,
+│       hid_keyboard_report_tests.rs
 │                          host test modules included by lib.rs
 ├── tests/                 host integration tests
 ├── renode/                platform description, GPIO/GPIOTE models, Robot test
@@ -728,7 +729,8 @@ Files:
 
 Tests: parsing and serialization in [lib_tests.rs](../src/lib_tests.rs),
 descriptor and routing cases (including every truncated descriptor prefix) in
-[hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), held-input release
+[hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) and
+[hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs), held-input release
 in the aggregation and delivery tests, and a round trip in
 [tests/integration.rs](../tests/integration.rs). Docs: the
 [report contracts](data-model.md#usb-hid-report-contracts),

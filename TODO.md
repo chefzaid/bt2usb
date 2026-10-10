@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 3 | 11 | 0 |
+| [FIXME](#fixme) | 4 | 10 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **79** | **93** | **22** |
+| **Total** | **80** | **92** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -89,12 +89,15 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   callback returns early when the report's `connectable` bit is clear, and
   [ADR 0015](docs/adr/0015-shared-reconnect-scan.md), the architecture, feature,
   hardware, and security guides say so. Not yet seen on a board.
-- [ ] **P2** **The keyboard-only Report Map rule is written twice.**
+- [x] **P2** **The keyboard-only Report Map rule is written twice.**
   `src/hid/mod.rs` (reserved-byte handling) and `src/ble/hid_client.rs` (LED
   output report) each test `!has_report_ids() && has_keyboard && !has_mouse &&
   !has_consumer` by hand, and only the first is host-tested. If they drift, the
   bridge writes LEDs to a report it does not treat as the keyboard, or the
-  reverse. Close when both call one `HidDescriptor` method with a host test.
+  reverse. Fixed: both call `HidDescriptor::is_unnumbered_keyboard_only`
+  (through `is_keyboard_report` for the LED output report), with four host
+  tests in `src/hid_keyboard_report_tests.rs`, which also took the
+  reserved-byte tests out of `hid_descriptor_tests.rs` (551 to 444 lines).
 - [ ] **P2** **`HostLeds::current` documents the wrong start state.** The trait
   doc (`src/hid/host_leds.rs`) says it returns `None` until the host sends an
   LED state after enumeration, but every USB bus reset stores all-off in
@@ -108,8 +111,8 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   its meaning and the row is corrected.
 - [ ] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
   `src/ble/multi_conn.rs` (845 now), `src/usb/hid_device.rs` (536), and pushed
-  `src/hid_descriptor_tests.rs` past the limit (551); `src/lib_tests.rs` is
-  503. Close with the split that
+  `src/hid_descriptor_tests.rs` past the limit (551, split to 444 since);
+  `src/lib_tests.rs` is 503. Close with the split that
   [Keep source files within a size limit](#verification-and-code-quality)
   asks for.
 - [ ] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
@@ -887,12 +890,13 @@ Host tests, simulation, and code-health work. Context:
   for the Python files and ShellCheck for the scripts and the extracted
   `maskfile.md` recipes. Accept when a lint finding in any of them fails CI
   ([code quality](docs/code-quality.md#other-files)).
-- [ ] **P2** **Keep source files within a size limit.** Four files are over
+- [ ] **P2** **Keep source files within a size limit.** Three files are over
   500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10:
-  `src/ble/multi_conn.rs` 844, `src/hid_descriptor_tests.rs` 551,
-  `src/usb/hid_device.rs` 536, `src/lib_tests.rs` 503; `src/ui/ui_logic.rs`
-  dropped to 446 when its tests moved to `ui_logic_tests.rs`), and no tool
-  limits file length. Accept when each is split below the limit, or a recorded limit with
+  `src/ble/multi_conn.rs` 844, `src/usb/hid_device.rs` 536,
+  `src/lib_tests.rs` 503; `src/ui/ui_logic.rs` dropped to 446 when its tests
+  moved to `ui_logic_tests.rs`, and `src/hid_descriptor_tests.rs` from 551 to
+  444 when its keyboard-report tests moved out), and no tool limits file
+  length. Accept when each is split below the limit, or a recorded limit with
   named exceptions is checked in CI
   ([code quality](docs/code-quality.md#known-gaps)).
 

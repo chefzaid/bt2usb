@@ -203,10 +203,7 @@ impl HidServiceClient {
             let Some(cccd) = report.cccd_handle else {
                 let is_output = matches!(report_ref, Some(r)
                 if r.report_type == ReportType::Output
-                    && descriptor.is_some_and(|d| {
-                        d.report_kind_for_id(r.report_id) == Some(ReportKind::Keyboard)
-                            || (!d.has_report_ids() && d.has_keyboard && !d.has_mouse && !d.has_consumer)
-                    }));
+                    && descriptor.is_some_and(|d| d.is_keyboard_report(r.report_id)));
                 if is_output && self.keyboard_led_handle.is_none() {
                     self.keyboard_led_handle = Some(report.value_handle);
                     info!("Found keyboard LED output report");

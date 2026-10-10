@@ -613,7 +613,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 | No automated check of documentation links or documented constants | [Automated documentation checks](../TODO.md#documentation) (P1) |
 | No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
-| Four source files are over 500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10: `multi_conn.rs`, `hid_descriptor_tests.rs`, `hid_device.rs`, `lib_tests.rs`); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |
+| Three source files are over 500 lines again after the split in commit `e3bc620` (`wc -l` on 2026-10-10: `multi_conn.rs`, `hid_device.rs`, `lib_tests.rs`; `hid_descriptor_tests.rs` was split below the limit); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |
 
 ## Related Guides
 

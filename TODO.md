@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 26 | 0 | 0 |
+| [FIXME](#fixme) | 27 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **111** | **73** | **21** |
+| **Total** | **112** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -289,6 +289,14 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   [boot sequence](docs/operations.md#boot-sequence) lists only that summary line. Found while
   moving the store into host code; fixed by the move: the pure loader merges
   without logging, and only runtime adds log.
+- [x] **P3** **The data model still described the store before the move.**
+  After `eeae4b8` the [data model](docs/data-model.md#in-memory-cache) still
+  gave `DeviceStore` the fields `devices: Vec<PairedDevice, 4>`, `dirty`, and
+  `writable`, which now live in `DeviceList` as `StoredDevice` records, and
+  said legacy parsing "exists only in `storage.rs` and has no host test".
+  Found while reading the schema rules for the storage migration item; fixed:
+  the In-Memory Cache and Legacy Format sections describe `DeviceList`, its
+  `resolve` function, the `AddOutcome` log lines, and the legacy tests.
 
 ## Needs Your Input
 

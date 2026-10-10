@@ -192,8 +192,13 @@ Legacy records carry no bond. Each record passes the same address-type,
 name-length and UTF-8 checks as a version 1 record, and the records must end
 exactly at the end of the item; trailing or missing bytes reject the whole
 blob. Because a legacy count is at most 4, a valid legacy blob never starts
-with the `0xB2` magic. Legacy parsing exists only in `storage.rs` and has no
-host test.
+with the `0xB2` magic. Legacy parsing (`DeviceList::decode_legacy` in
+[storage/devices.rs](../src/storage/devices.rs)) is host-tested in
+[devices_format_tests.rs](../src/storage/devices_format_tests.rs): a valid
+legacy store loads without bonds and is rewritten in the versioned format by
+the next change; a count above four, a truncated record or header, or
+trailing bytes refuse the whole store; and a zero count alone is a valid,
+empty store.
 
 ### Capacity And Compile-Time Checks
 
@@ -225,19 +230,28 @@ two. New versions of the item are appended across the four 4 KiB pages, and
 
 ### In-Memory Cache
 
-`DEVICE_STORE` is an async `Mutex` around a `DeviceStore`:
+`DEVICE_STORE` is an async `Mutex` around a `DeviceStore`, the flash shell in
+[storage.rs](../src/storage.rs). It holds one `DeviceList` from
+[storage/devices.rs](../src/storage/devices.rs), which keeps the records in
+the hardware-free `StoredDevice` form and converts them to `PairedDevice` and
+`BondInfo` (SoftDevice address and key types) only at the shell's boundary:
 
-| Field | Type | Meaning |
+| `DeviceList` field | Type | Meaning |
 | --- | --- | --- |
-| `devices` | `heapless::Vec<PairedDevice, 4>` | Cached records in insertion order, oldest first |
+| `devices` | `heapless::Vec<StoredDevice, MAX_PAIRED_DEVICES>` (4) | Cached records in insertion order, oldest first |
 | `dirty` | `bool` | The cache differs from flash in a field that must persist |
 | `writable` | `bool` | Ordinary saves are allowed |
 
-`add` merges a new record into an existing one when the addresses are equal or
-either side's IRK resolves the other's address. A merge marks the store dirty
-only when the address, name, or bond changed. A new record appended to a full
-store evicts the oldest entry (`"Paired device store full - evicting oldest entry"`).
-Updating an existing record does not move it.
+`DeviceList::add` merges a new record into an existing one when the addresses
+are equal or either side's IRK resolves the other's address; the IRK check is
+the `resolve` function the shell passes in, which asks the SoftDevice's AES
+block. A merge marks the store dirty only when the address, name, or bond
+changed. A new record appended to a full store evicts the oldest entry.
+Updating an existing record does not move it. `add` returns an `AddOutcome`,
+and `DeviceStore::add` logs it: `"Updated existing paired device"`,
+`"Added paired device - now storing {}"`, or, for an eviction,
+`"Paired device store full - evicting oldest entry"` first. Loading merges
+through the same `add` without logging.
 
 `iter_recent` yields records newest-first by insertion. Boot reconnect gives the
 first two of that order to slots 0 and 1 at once, without a scan, and the saved-devices list is shown in it. Because an

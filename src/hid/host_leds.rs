@@ -15,9 +15,11 @@ use core::future::Future;
 
 /// The host's LED state, as the USB keyboard's output report delivers it.
 pub trait HostLeds {
-    /// The host's latest LED state, or `None` if it has not sent one since
-    /// USB enumeration. The returned state counts as seen, so
-    /// [`changed`](Self::changed) waits for a newer one.
+    /// The host's latest LED state, or `None` before the USB side has
+    /// published any. Every USB bus reset publishes all off, so after the
+    /// first reset this is `Some` even if the host has not yet sent its state.
+    /// The returned state counts as seen, so [`changed`](Self::changed) waits
+    /// for a newer one.
     fn current(&mut self) -> Option<KeyboardLeds>;
 
     /// Wait for an LED state newer than the last one seen, and return it.

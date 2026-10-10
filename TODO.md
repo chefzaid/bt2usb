@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 4 | 10 | 0 |
+| [FIXME](#fixme) | 5 | 14 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **80** | **92** | **22** |
+| **Total** | **81** | **96** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -98,11 +98,14 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   (through `is_keyboard_report` for the LED output report), with four host
   tests in `src/hid_keyboard_report_tests.rs`, which also took the
   reserved-byte tests out of `hid_descriptor_tests.rs` (551 to 444 lines).
-- [ ] **P2** **`HostLeds::current` documents the wrong start state.** The trait
-  doc (`src/hid/host_leds.rs`) says it returns `None` until the host sends an
-  LED state after enumeration, but every USB bus reset stores all-off in
+- [x] **P2** **`HostLeds::current` documented the wrong start state.** The
+  trait doc (`src/hid/host_leds.rs`) said it returns `None` until the host sends
+  an LED state after enumeration, but every USB bus reset stores all-off in
   `KEYBOARD_LEDS` (`UsbPowerHandler::reset`), so a new link gets `Some(all off)`
-  before any SET_REPORT. Close when the doc describes the reset behavior.
+  before any SET_REPORT. Fixed: the trait doc and the
+  [feature guide](docs/features.md#keyboard-leds) now say `None` lasts only until
+  the first bus reset, and that a keyboard connecting before the host sends its
+  state gets all off first. The behavior was right and is unchanged.
 - [ ] **P2** **New log strings are missing from the operations guide.** The
   [log reference](docs/operations.md#ble-scan-and-connection) lacks
   `slot {} scan found slot {}'s device` and the three connection-parameter
@@ -115,15 +118,37 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   `src/lib_tests.rs` is 503. Close with the split that
   [Keep source files within a size limit](#verification-and-code-quality)
   asks for.
+- [ ] **P2** **A link change on the scan screens has no test.** Since
+  `4faf99f`, `UiState::connection_status` leaves a running scan or its picker on
+  screen with its list when a saved device connects or drops in the
+  background, and clears the list only on the Home, Connecting, and Connected
+  screens. `a_new_link_returns_home_screens_to_connected_and_clears_the_list`
+  covers the second half; nothing covers the first, so a regression that sends
+  the user's picker back to Home passes every test. Close when host tests pin
+  both screens and their lists across a connect and a drop.
+- [ ] **P2** **The advertised-kind filter for unnumbered maps lost its test.**
+  `unnumbered_descriptor_rejects_unadvertised_kind` feeds a 3-byte report to a
+  keyboard-only map, which now takes the keyboard-only shortcut in
+  `classify_notification_with_hint` and never reaches the filter that drops a
+  report of a kind the map does not declare. No test covers that filter for a
+  mixed map, so removing it would let a keyboard-and-consumer device's
+  mouse-sized vendor report move the host's pointer. Close when tests send
+  undeclared kinds to mixed unnumbered maps and declared kinds still pass.
+- [ ] **P2** **Reconnect decisions in the scan shell have no host tests.**
+  `SavedPeer` equality (`src/ble/scanner.rs`) decides whether re-registering a
+  device keeps its slot's failure holdoff and fast-scan window: the same
+  identity key, or the same address when neither record has one. The
+  `RECONNECT_WAKE` bookkeeping wakes the owning slot on a handover and is reset
+  on scan start, after a failed attempt, and on clear, with the same
+  `if let Some(signal) = RECONNECT_WAKE.get(slot)` block pasted three times.
+  Both are hardware-free but compile only into the firmware, so no test covers
+  them. Close when both live in `src/ble/reconnect.rs` with host tests and the
+  shell only maps their outcomes onto the signal.
 - [ ] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
   The `RECONNECTS` doc links to [`reconnect`], which does not resolve
   (`cargo doc --features embedded` warns), and a "Unit Tests" banner was left
   at the end of the file when its tests moved to `adv_parser.rs`. Close when
   firmware rustdoc is warning-free and the banner is gone.
-- [ ] **P3** **The `RECONNECT_WAKE` reset is pasted three times.**
-  `clear_reconnect`, `reconnect_attempt_failed`, and `find_saved_peer` each
-  repeat the same `if let Some(signal) = RECONNECT_WAKE.get(slot)` block for one
-  documented rule. Close when one helper does it.
 - [ ] **P3** **Duplicated and dead logic in `conn_params.rs`.** Reversed
   interval bounds are normalized twice in two styles (`bound_request` and
   `interval_within_request`); the step-back loop in `max_latency_for` can never
@@ -151,6 +176,24 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   speak of a "reconnect planner" or "boot planner" that `4faf99f` replaced with
   the reconnect table and inline boot reconnect. Close when no guide names
   either.
+
+- [ ] **P3** **The test map misdescribes two `conn_params` tests.** The
+  [testing guide](docs/testing.md#test-map) says "a faster request gets
+  7.5 ms" and "latency is lowered when 4 s cannot cover it", but those tests
+  raise the floor to 15 ms and cap the timeout at 1 s. Close when the row says
+  what the tests check.
+- [ ] **P3** **ADR 0016 and the architecture guide misstate when the
+  out-of-range warning fires.** They say only a peripheral that wants nothing
+  faster than 30 ms is granted an interval outside its range. A request
+  entirely below 7.5 ms, which the Core forbids, is granted 7.5 ms and gets the
+  warning too, while one whose fastest interval is exactly 30 ms is granted it
+  inside its range. Close when both name the two cases precisely.
+- [ ] **P3** **The recorded firmware size omits `DEFMT_LOG` and is stale.**
+  The [2026-10-09 validation record](docs/testing.md#validation-record--2026-10-09) gives
+  `.text` and `.bss` for the release build without the log level, which
+  [code quality](docs/code-quality.md#measuring) requires, and the code has
+  changed since. Close when the figures are measured at the current head and
+  name `DEFMT_LOG` for each.
 
 ## Needs Your Input
 

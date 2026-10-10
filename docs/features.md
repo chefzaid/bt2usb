@@ -524,8 +524,10 @@ LED state, so it reaches the keyboard whichever slot holds it. When a keyboard
 connects, including one that wakes from sleep and reconnects, the bridge first
 writes the host's current state, then every change, so the keyboard shows the
 right Caps Lock and Num Lock state at once, as a wired keyboard does when it is
-plugged in. Nothing is written before the host has sent a state. A USB reset
-sends all LEDs off. A failed write logs
+plugged in. Nothing is written before the first USB bus reset. Each reset
+publishes all LEDs off, so a keyboard that connects after enumeration but
+before the host sends its state gets all off first, then the host's state when
+it arrives. A failed write logs
 `Failed to write LED state to BLE keyboard`; the next change is still written.
 
 Hardware evidence still needed for the BLE central: pairing, reconnect, LED, and

@@ -36,10 +36,10 @@ probe, or USB host to close.
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 6 | 10 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
-| [Developer Experience](#developer-experience) | 7 | 2 | 0 |
+| [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **73** | **86** | **22** |
+| **Total** | **74** | **85** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -953,22 +953,22 @@ Tasks, tooling, and environments for working on the firmware. Context:
 - [x] Ignore the downloaded SoftDevice HEX and zip that `mask softdevice`
   writes to the repository root (`/s140_nrf52_7.3.0_softdevice.hex` and
   `/softdevice.zip` in `.gitignore`; 2026-10-09).
-- [ ] **P1** **Development environment hardening.** *(hardware)* Pin optional
-  tools/container inputs and replace blanket container privilege with scoped
+- [x] Fix maskfile coverage and install recipes. The tarpaulin fallback in
+  `mask coverage`, `coverage-html`, and `coverage-json` now passes
+  `--lib --tests`, so both coverage paths run the same unit and integration
+  tests. `mask deps`, `mask coverage-install`, and the devcontainer run
+  `cargo install --locked` with exact versions (probe-rs-tools 0.32.0,
+  cargo-binutils 0.4.0, cargo-bloat 0.12.1, mask 0.11.7, cargo-llvm-cov
+  0.9.1), and `mask deps` calls `$MASK coverage-install` unquoted, because
+  mask sets `$MASK` to `mask --maskfile <path>` (2026-10-10;
+  [development](docs/development.md#environment-setup)).
+- [ ] **P1** **Development environment hardening.** *(hardware)* Pin the
+  container inputs and replace blanket container privilege with scoped
   probe access where feasible. Today the devcontainer runs `--privileged` on the
-  `mcr.microsoft.com/devcontainers/rust:1-bookworm` tag. The `mask` install
-  recipes are the next item. Accept when fresh Linux/WSL setups pass checks and
+  `mcr.microsoft.com/devcontainers/rust:1-bookworm` tag. The Cargo tools are
+  pinned (done above). Accept when fresh Linux/WSL setups pass checks and
   a no-probe setup still works
   ([development](docs/development.md#devcontainer-and-wsl2)).
-- [ ] **P2** **Fix maskfile coverage and install recipes.** The tarpaulin
-  fallback in `mask coverage`, `coverage-html`, and `coverage-json` runs
-  `cargo tarpaulin --locked --lib` without `--tests`, so it skips the
-  integration tests that the `cargo llvm-cov` path includes with
-  `--lib --tests`. `mask coverage-install` and `mask deps` run `cargo install`
-  without `--locked` or pinned versions. Accept when both coverage paths
-  measure the same test set and every `cargo install` that a `maskfile.md`
-  recipe runs uses `--locked` with a pinned version
-  ([development](docs/development.md#environment-setup)).
 
 ## Documentation
 

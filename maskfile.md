@@ -2,7 +2,7 @@
 
 Common development tasks for the bt2usb Bluetooth-to-USB HID bridge.
 
-> Requires [mask](https://github.com/jacobdeichert/mask) (`cargo install --locked mask`)
+> Requires [mask](https://github.com/jacobdeichert/mask) (`cargo install --locked mask --version 0.11.7`)
 
 ## build
 
@@ -129,18 +129,18 @@ if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
     fi
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
     if [[ "${html:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Html --output-dir coverage
+        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --tests --out Html --output-dir coverage
         echo "Coverage report: coverage/tarpaulin-report.html"
     elif [[ "${json:-false}" == "true" ]]; then
-        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Json --output-dir coverage
+        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --tests --out Json --output-dir coverage
         echo "Coverage report: coverage/coverage.json"
     else
-        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Stdout
+        ./scripts/run-tool.sh cargo tarpaulin --locked --lib --tests --out Stdout
     fi
 else
     echo "No coverage tool found. Install one of:"
-    echo "  cargo install cargo-llvm-cov"
-    echo "  cargo install cargo-tarpaulin (Linux only)"
+    echo "  mask coverage-install   (cargo-llvm-cov, recommended)"
+    echo "  cargo install --locked cargo-tarpaulin --version 0.37.5   (Linux only)"
     exit 1
 fi
 ```
@@ -154,12 +154,12 @@ if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
     ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html
     echo "Coverage report: coverage-html/html/index.html"
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Html --output-dir coverage
+    ./scripts/run-tool.sh cargo tarpaulin --locked --lib --tests --out Html --output-dir coverage
     echo "Coverage report: coverage/tarpaulin-report.html"
 else
     echo "No coverage tool found. Install one of:"
-    echo "  cargo install cargo-llvm-cov"
-    echo "  cargo install cargo-tarpaulin (Linux only)"
+    echo "  mask coverage-install   (cargo-llvm-cov, recommended)"
+    echo "  cargo install --locked cargo-tarpaulin --version 0.37.5   (Linux only)"
     exit 1
 fi
 ```
@@ -173,12 +173,12 @@ if ./scripts/run-tool.sh cargo llvm-cov --version >/dev/null 2>&1; then
     ./scripts/run-tool.sh cargo llvm-cov --locked --lib --tests --json --output-path coverage.json
     echo "Coverage report: coverage.json"
 elif ./scripts/run-tool.sh cargo tarpaulin --version >/dev/null 2>&1; then
-    ./scripts/run-tool.sh cargo tarpaulin --locked --lib --out Json --output-dir coverage
+    ./scripts/run-tool.sh cargo tarpaulin --locked --lib --tests --out Json --output-dir coverage
     echo "Coverage report: coverage/coverage.json"
 else
     echo "No coverage tool found. Install one of:"
-    echo "  cargo install cargo-llvm-cov"
-    echo "  cargo install cargo-tarpaulin (Linux only)"
+    echo "  mask coverage-install   (cargo-llvm-cov, recommended)"
+    echo "  cargo install --locked cargo-tarpaulin --version 0.37.5   (Linux only)"
     exit 1
 fi
 ```
@@ -188,8 +188,9 @@ fi
 > Install code coverage tools
 
 ```bash
+set -e
 echo "Installing cargo-llvm-cov (recommended, cross-platform)..."
-./scripts/run-tool.sh cargo install cargo-llvm-cov
+./scripts/run-tool.sh cargo install --locked cargo-llvm-cov --version 0.9.1
 ./scripts/run-tool.sh rustup component add llvm-tools-preview
 echo "Done! Run 'mask coverage' to generate reports."
 ```
@@ -411,11 +412,13 @@ echo "Installing Rust target..."
 ./scripts/run-tool.sh rustup target add thumbv7em-none-eabihf
 
 echo "Installing embedded tools..."
-./scripts/run-tool.sh cargo install probe-rs-tools cargo-binutils cargo-bloat mask
+./scripts/run-tool.sh cargo install --locked probe-rs-tools --version 0.32.0
+./scripts/run-tool.sh cargo install --locked cargo-binutils --version 0.4.0
+./scripts/run-tool.sh cargo install --locked cargo-bloat --version 0.12.1
+./scripts/run-tool.sh cargo install --locked mask --version 0.11.7
 
 echo "Installing coverage tools..."
-./scripts/run-tool.sh cargo install cargo-llvm-cov
-./scripts/run-tool.sh rustup component add llvm-tools-preview
+$MASK coverage-install
 
 echo "Installing LLVM tools..."
 ./scripts/run-tool.sh rustup component add llvm-tools

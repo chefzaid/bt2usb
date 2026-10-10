@@ -14,16 +14,16 @@ rustup target add thumbv7em-none-eabihf
 
 # - Install cargo tools for embedded development ---------------
 echo "→ Installing probe-rs (flashing & debugging)..."
-cargo install --locked probe-rs-tools
+cargo install --locked probe-rs-tools --version 0.32.0
 
 echo "→ Installing mask task runner..."
-cargo install --locked mask
+cargo install --locked mask --version 0.11.7
 
 echo "→ Installing cargo-llvm-cov (coverage)..."
-cargo install --locked cargo-llvm-cov
+cargo install --locked cargo-llvm-cov --version 0.9.1
 
 echo "→ Installing cargo-binutils (objcopy, nm, size)..."
-cargo install --locked cargo-binutils
+cargo install --locked cargo-binutils --version 0.4.0
 rustup component add llvm-tools llvm-tools-preview
 
 # - Setup udev rules for probe access (requires privileged container) ----

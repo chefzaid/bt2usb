@@ -354,9 +354,11 @@ cargo-llvm-cov and the `llvm-tools-preview` component, which
 the [development guide](development.md#coverage) and the
 [testing guide](testing.md#coverage).
 
-The tarpaulin recipes pass `--lib` without `--tests`, so a tarpaulin figure
-leaves out `tests/integration.rs` and is not comparable with an llvm-cov
-figure.
+Both tools run the same unit and integration tests (`--lib --tests`) since
+2026-10-10. A tarpaulin figure is still not comparable with an llvm-cov figure:
+tarpaulin counts lines from its own instrumentation, while llvm-cov uses the
+compiler's source-based coverage regions, so the two report different totals
+for the same run. Report which tool produced a figure.
 
 ### What Is Instrumented
 
@@ -412,7 +414,7 @@ its commit and scope cannot be checked and goes stale silently.
 | `nrf-softdevice`, `nrf-softdevice-s140` | Git `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"`; `nrf-softdevice` is replaced by `vendor/nrf-softdevice` through `[patch]` | Enforced by Cargo |
 | GitHub Actions | Each `uses:` names a full commit SHA with a tag comment | Enforced by the SHA; the comment is informational |
 | cargo-audit, actionlint | `cargo-audit@0.22.2` through `taiki-e/install-action`; actionlint 1.7.12 with a SHA-256 check | Enforced in CI |
-| Developer tools | `cargo install --locked` in the devcontainer without versions; `cargo install` without `--locked` in `mask deps` and `mask coverage-install` | Gap |
+| Developer tools | `cargo install --locked` with an exact `--version` in `mask deps`, `mask coverage-install`, and the devcontainer setup; the tarpaulin hint `mask coverage` prints uses the same form | Pinned by hand: the versions repeat in `maskfile.md`, `post-create.sh`, and the [development guide](development.md#toolchain), and nothing checks that they agree |
 | SoftDevice, Renode, Robot Framework | Download URLs and versions without digests | Gap; see [security](security.md#supply-chain) |
 
 The action pins and their comments are:
@@ -604,7 +606,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | `cargo audit` does not fail on unmaintained crates, and two are in the graph | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | Two action pin comments (`Swatinem/rust-cache`, `taiki-e/install-action`) say `# v2` instead of an exact release | [CI runtime maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
-| Developer tools install without versions, and `mask deps` omits `--locked` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
+| The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 | No automated check of documentation links or documented constants | [Automated documentation checks](../TODO.md#documentation) (P1) |
 | No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
 | Four source files are over 500 lines again after the split in commit `e3bc620` (`wc -l`: `multi_conn.rs`, `ui_logic.rs`, `hid_device.rs`, `lib_tests.rs`); no tool limits file length | [Keep source files within a size limit](../TODO.md#verification-and-code-quality) (P2) |

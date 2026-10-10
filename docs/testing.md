@@ -128,10 +128,11 @@ see [Modules Without Host Tests](#modules-without-host-tests).
 | cargo-llvm-cov | Terminal | `coverage-html/html/index.html` | `coverage.json` |
 | cargo-tarpaulin | Terminal | `coverage/tarpaulin-report.html` | `coverage/coverage.json` |
 
-The llvm-cov recipes pass `--lib --tests`; the tarpaulin recipes pass only
-`--lib`, so a tarpaulin report excludes `tests/integration.rs`. These output
-paths are ignored by Git. CI does not run coverage and the repository records
-no coverage percentage.
+Both tools run with `--lib --tests`, so both include `tests/integration.rs`;
+their percentages still differ because they instrument differently (see
+[code quality](code-quality.md#coverage)). These output paths are ignored by
+Git. CI does not run coverage. The latest local llvm-cov figure is 96.16% host
+line coverage on 2026-10-10.
 
 ## Test Map
 

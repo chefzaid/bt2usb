@@ -95,12 +95,20 @@ small vendored patch (offset reads, timeout errors, and bounded discovery); see
 ```sh
 rustup target add thumbv7em-none-eabihf
 rustup component add rustfmt clippy llvm-tools-preview
-cargo install --locked probe-rs-tools mask cargo-llvm-cov cargo-binutils cargo-bloat
+cargo install --locked mask --version 0.11.7
+cargo install --locked probe-rs-tools --version 0.32.0
+cargo install --locked cargo-llvm-cov --version 0.9.1
+cargo install --locked cargo-binutils --version 0.4.0
+cargo install --locked cargo-bloat --version 0.12.1
 ```
 
 Only the compiler is needed for host tests. ARM builds need the target; flashing
 needs `probe-rs` and a probe; coverage and size analysis need the corresponding
 optional Cargo tools. Tool installation may require system libraries on the host.
+Once mask is installed, `mask deps` runs the same installs. The Cargo tool
+versions are pinned in three places that must change together: the `deps` and
+`coverage-install` recipes in [maskfile.md](../maskfile.md),
+[post-create.sh](../.devcontainer/post-create.sh), and the commands above.
 
 | Tool | Version and where it is pinned | Needed for |
 | --- | --- | --- |
@@ -108,12 +116,12 @@ optional Cargo tools. Tool installation may require system libraries on the host
 | rustfmt, Clippy | `components` in `rust-toolchain.toml` (toolchain profile `minimal`) | `mask fmt`, `mask clippy`, `mask ci`, CI |
 | `thumbv7em-none-eabihf` target | `targets` in `rust-toolchain.toml` | Bridge, self-test, and simulation builds |
 | LLVM tools component | Matches the pinned toolchain but is not listed in `rust-toolchain.toml`; added by `mask deps`, `mask coverage-install`, the devcontainer setup, and the CI embedded job | `cargo-llvm-cov`, `mask size`, CI's `llvm-objcopy` HEX conversion |
-| probe-rs (`probe-rs-tools`) | Not pinned | Cargo runner, `mask run`, `flash`, `selftest`, `rtt`, `probe-list`, `softdevice` |
-| mask | Not pinned | Task recipes |
-| cargo-llvm-cov | Not pinned | `mask coverage*` |
-| cargo-tarpaulin | Not pinned; optional, Linux only | Coverage fallback |
-| cargo-binutils | Not pinned | `mask size` |
-| cargo-bloat | Not pinned | `mask bloat` |
+| probe-rs (`probe-rs-tools`) | 0.32.0 in `mask deps` and the devcontainer setup | Cargo runner, `mask run`, `flash`, `selftest`, `rtt`, `probe-list`, `softdevice` |
+| mask | 0.11.7 in `mask deps`, the devcontainer setup, and the `maskfile.md` header | Task recipes |
+| cargo-llvm-cov | 0.9.1 in `mask coverage-install` (run by `mask deps`) and the devcontainer setup | `mask coverage*` |
+| cargo-tarpaulin | 0.37.5 in the install hint `mask coverage` prints; optional, Linux only | Coverage fallback |
+| cargo-binutils | 0.4.0 in `mask deps` and the devcontainer setup | `mask size` |
+| cargo-bloat | 0.12.1 in `mask deps` (the devcontainer does not install it) | `mask bloat` |
 | cargo-audit | 0.22.2 in the CI `audit` job | Dependency audit |
 | actionlint | 1.7.12 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml) | Workflow lint |
 | Python | 3.11 or newer (`tomllib` in `scripts/release.py`) | Release helper and its tests |
@@ -296,12 +304,12 @@ compares it with CI.
 
 | Task | Runs | Notes |
 | --- | --- | --- |
-| `mask coverage` | `cargo llvm-cov --locked --lib --tests` when `cargo llvm-cov --version` succeeds; otherwise `cargo tarpaulin --locked --lib --out Stdout` | Prints `No coverage tool found.` and exits 1 if neither tool runs |
+| `mask coverage` | `cargo llvm-cov --locked --lib --tests` when `cargo llvm-cov --version` succeeds; otherwise `cargo tarpaulin --locked --lib --tests --out Stdout`, so both tools measure the same unit and integration tests | Prints `No coverage tool found.` and exits 1 if neither tool runs |
 | `mask coverage --html` | llvm-cov: `--html --output-dir coverage-html`; tarpaulin: `--out Html --output-dir coverage` | Prints the report path; does not open a browser |
 | `mask coverage --json` | llvm-cov: `--json --output-path coverage.json`; tarpaulin: `--out Json --output-dir coverage` | If both flags are given, `--html` wins |
 | `mask coverage-html` | Same as `mask coverage --html` | |
 | `mask coverage-json` | Same as `mask coverage --json` | |
-| `mask coverage-install` | `cargo install cargo-llvm-cov`, then `rustup component add llvm-tools-preview` | Installs without `--locked` |
+| `mask coverage-install` | `cargo install --locked cargo-llvm-cov --version 0.9.1`, then `rustup component add llvm-tools-preview` | Does not install tarpaulin; the `mask coverage` hint gives its pinned command |
 
 The report files each tool writes are listed under
 [coverage in the testing guide](testing.md#coverage). What coverage measures,
@@ -333,7 +341,7 @@ keeps the SoftDevice. The scenario and assertions are described in
 
 | Task | Runs | Notes |
 | --- | --- | --- |
-| `mask deps` | `rustup target add thumbv7em-none-eabihf`; `cargo install probe-rs-tools cargo-binutils cargo-bloat mask`; `cargo install cargo-llvm-cov`; `rustup component add llvm-tools-preview`; `rustup component add llvm-tools` | Installs without `--locked`, and needs mask already. Does not install Renode, cargo-audit, or actionlint |
+| `mask deps` | `rustup target add thumbv7em-none-eabihf`; `cargo install --locked` of probe-rs-tools 0.32.0, cargo-binutils 0.4.0, cargo-bloat 0.12.1, and mask 0.11.7; `mask coverage-install`; `rustup component add llvm-tools` | Needs mask already. Does not install Renode, cargo-audit, or actionlint |
 | `mask devcontainer` | `code --folder-uri "vscode-remote://dev-container+<hex of $PWD>/workspaces/bt2usb"` | Opens the folder in the devcontainer; needs VS Code's `code` CLI and `xxd` |
 | `mask devcontainer-build` | `devcontainer build --workspace-folder .` | Needs the Dev Containers CLI |
 
@@ -442,8 +450,9 @@ USB port attached to the PC whose enumeration/input behavior you are testing.
 `--privileged`. [post-create.sh](../.devcontainer/post-create.sh) then:
 
 1. adds the `thumbv7em-none-eabihf` target
-2. installs `probe-rs-tools`, `mask`, `cargo-llvm-cov`, and `cargo-binutils`
-   with `cargo install --locked` (latest versions, each with its own lockfile)
+2. installs `probe-rs-tools` 0.32.0, `mask` 0.11.7, `cargo-llvm-cov` 0.9.1, and
+   `cargo-binutils` 0.4.0 with `cargo install --locked` (each with the
+   lockfile it was published with)
 3. adds the `llvm-tools` and `llvm-tools-preview` components
 4. writes `/etc/udev/rules.d/69-probe-rs.rules` for J-Link (`1366`), the listed
    ST-Link IDs (`0483`), CMSIS-DAP products, and Nordic (`1915`) devices, but

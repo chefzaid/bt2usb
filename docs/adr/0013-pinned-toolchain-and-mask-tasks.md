@@ -100,8 +100,8 @@ readable tasks.
   without a `/dev/bus/usb` bind mount (which would fail container creation
   when no probe is attached), and runs
   [post-create.sh](../../.devcontainer/post-create.sh). That script installs
-  the ARM target and `probe-rs-tools`, `mask`, `cargo-llvm-cov`, and
-  `cargo-binutils` with `cargo install --locked`, writes udev rules for
+  the ARM target and `probe-rs-tools` 0.32.0, `mask` 0.11.7, `cargo-llvm-cov`
+  0.9.1, and `cargo-binutils` 0.4.0 with `cargo install --locked`, writes udev rules for
   J-Link, ST-Link, CMSIS-DAP, and Nordic development kits and dongles, and
   fails setup if
   `cargo test --locked --lib --tests` fails.
@@ -171,18 +171,19 @@ Negative:
   `DEFMT_LOG = "debug"`, while CI sets `DEFMT_LOG: info` in its environment,
   which takes precedence, and release packaging requires `info`. A local
   release build is therefore not byte-identical to a published artifact.
-- Optional tools are not version-pinned. `mask deps` runs `cargo install`
-  without `--locked` or versions, the devcontainer installs the latest
-  versions of its tools (with `--locked`), its base image tag `1-bookworm`
-  moves, and `scripts/install-renode.sh` downloads Renode 1.16.1 without a
-  checksum.
+- Optional Cargo tools are pinned by hand since 2026-10-10. `mask deps`,
+  `mask coverage-install`, and the devcontainer run `cargo install --locked`
+  with an exact `--version`; the versions repeat in `maskfile.md`,
+  `post-create.sh`, and the development guide, with no check that they agree.
+  The devcontainer base image tag `1-bookworm` still moves, and
+  `scripts/install-renode.sh` downloads Renode 1.16.1 without a checksum.
 - The privileged devcontainer has broad access to the host. Review it before
   using it on a shared machine.
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
-- "Development environment hardening": pin optional tools and container
-  inputs, and replace blanket container privilege with scoped probe access.
+- "Development environment hardening": pin the container inputs, and replace
+  blanket container privilege with scoped probe access.
 - "Supply-chain and tooling maintenance": add license checks, an SBOM, and
   verified digests for downloaded non-Cargo tools and the SoftDevice.
 - "Reproducible firmware evidence": compare artifacts from two clean

@@ -1125,8 +1125,9 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   (`v2.9.2`) instead of the `v2` tag object, `taiki-e/install-action` names
   `v2.87.21`, every job runs on `ubuntu-24.04` or `windows-2025` instead of the
   moving `-latest` labels (`ubuntu-latest` was to move to Ubuntu 26 from
-  2026-10-19), and the toolchain steps call `rustup install`, ending rustup's
-  warning that implicit installation is deprecated
+  2026-10-19), and every job that runs Cargo, the audit job included, calls
+  `rustup install` first, ending rustup's warning that implicit installation
+  is deprecated
   ([pinning](docs/code-quality.md#pinning)). Accept when a hosted run of the
   check jobs shows no deprecation annotation. The release jobs' actions were
   checked from their `action.yml`; they first run with the first tag, under

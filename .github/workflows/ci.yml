@@ -153,6 +153,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      # `cargo audit` runs through the rustup proxy, so install the pinned
+      # toolchain explicitly instead of letting rustup auto-install it.
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup install
+          rustup show active-toolchain
       - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: cargo-audit@0.22.2

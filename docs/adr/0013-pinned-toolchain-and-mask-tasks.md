@@ -49,11 +49,12 @@ readable tasks.
 - **Compiler.** [rust-toolchain.toml](../../rust-toolchain.toml) pins channel
   `1.95.0` with the `minimal` profile, `clippy` and `rustfmt`, and the
   `thumbv7em-none-eabihf` target. `rust-version = "1.95"` in
-  [Cargo.toml](../../Cargo.toml) states the same minimum to Cargo. CI installs
-  the toolchain the file names (`rustup install`, then
-  `rustup show active-toolchain` to log it) instead of choosing its own; until
-  2026-10-10 it relied on `rustup show` installing the toolchain
-  implicitly, which rustup now warns is deprecated.
+  [Cargo.toml](../../Cargo.toml) states the same minimum to Cargo. Every CI
+  job that runs Cargo installs the toolchain the file names (`rustup install`,
+  then `rustup show active-toolchain` to log it) instead of choosing its own;
+  until 2026-10-10 the jobs relied on `rustup show`, and the audit job on its
+  first `cargo` command, installing the toolchain implicitly, which rustup now
+  warns is deprecated.
 - **Dependencies.** `Cargo.lock` is tracked; `.gitignore` now says "Cargo.lock
   is tracked: firmware builds must use the reviewed dependency graph." Every
   Cargo build, run, check, test, Clippy, coverage, size, and doc invocation in

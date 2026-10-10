@@ -197,6 +197,12 @@ currently unauthenticated Just Works bonding; see
 - [ ] **Pair a mouse** the same way (SELECT on the Connected screen starts
       another scan). Both keep working at once, and the OLED shows "2 devices".
 - [ ] **Media keys** (volume, play/pause) work, if the keyboard has them.
+- [ ] **ATT MTU and Report Map length:** in a `debug` build, record each
+      peripheral's `att mtu exchange: server offers N, using M` line (vendor)
+      and its `HID service discovered (N report characteristics)` line. M is
+      at most 64. A peripheral that offers more than 64 still delivers every
+      report kind its map declares (keys, media keys, mouse); missing media
+      keys or mouse input on such a device points at a short Report Map read.
 - [ ] **Five-button mouse / horizontal scroll:** each supported extra button and
       scroll direction works; mark unsupported peripheral features as skipped.
 - [ ] **Caps Lock LED:** press Caps Lock; the keyboard's own LED follows

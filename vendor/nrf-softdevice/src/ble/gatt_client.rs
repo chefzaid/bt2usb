@@ -668,9 +668,17 @@ pub(crate) async fn att_mtu_exchange(conn: &Connection, mtu: u16) -> Result<(), 
                         Err(e) => return Some(Err(e.into())),
                     };
                     let params = get_union_field(ble_evt, &gattc_evt.params.exchange_mtu_rsp);
-                    let mtu = params.server_rx_mtu;
-                    debug!("att mtu exchange: got mtu {:?}", mtu);
-                    conn.with_state(|state| state.att_mtu = mtu);
+                    // bt2usb patch: the SoftDevice sets ATT_MTU to the smaller of
+                    // the client and server RX MTUs, and never below the default
+                    // (sd_ble_gattc_exchange_mtu_request). Store that, not the
+                    // server's offer, which can exceed what the link uses.
+                    let server_rx_mtu = params.server_rx_mtu;
+                    let att_mtu = server_rx_mtu.min(mtu).max(raw::BLE_GATT_ATT_MTU_DEFAULT as u16);
+                    debug!(
+                        "att mtu exchange: server offers {:?}, using {:?}",
+                        server_rx_mtu, att_mtu
+                    );
+                    conn.with_state(|state| state.att_mtu = att_mtu);
 
                     Some(Ok(()))
                 }

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 34 | 5 | 1 |
+| [FIXME](#fixme) | 35 | 4 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **121** | **76** | **22** |
+| **Total** | **122** | **75** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -376,24 +376,27 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   src {:?}`; the disconnect returns `DisconnectedError` and the drop accepts
   it ([ADR 0025](docs/adr/0025-panic-lints-and-inventory.md),
   [vendored list](docs/code-quality.md#vendored-nrf-softdevice)).
-- [ ] **P0** **Report Maps are cut short when a peripheral offers an MTU above
-  64.** The vendored `gatt_client::att_mtu_exchange` stores the peer's Server
-  RX MTU from `BLE_GATTC_EVT_EXCHANGE_MTU_RSP` as the link's ATT MTU, but the
-  SoftDevice uses the smaller of that and the 64 bt2usb asks for (and never
-  less than 23), as the S140 documentation of
-  `sd_ble_gattc_exchange_mtu_request` says. With a peripheral that offers 65
+- [x] **P0** **Report Maps were cut short when a peripheral offered an MTU
+  above 64.** The vendored `gatt_client::att_mtu_exchange` stored the peer's
+  Server RX MTU from `BLE_GATTC_EVT_EXCHANGE_MTU_RSP` as the link's ATT MTU,
+  but the SoftDevice uses the smaller of that and the 64 bt2usb asks for (and
+  never less than 23), as the S140 documentation of
+  `sd_ble_gattc_exchange_mtu_request` says. With a peripheral that offered 65
   to 517, as current BLE stacks commonly do (247 and 517 are typical),
-  `conn.att_mtu()` reports the larger value, `read_report_map` builds its
-  `LongRead` for fragments of that size minus 1, and the first 63-byte fragment
-  looks short, so the read ends after 63 bytes. A longer Report Map is
-  truncated: report IDs declared after byte 63 are unknown, and their reports
-  (often the mouse and media keys) are dropped, or the map fails to parse. With
-  an offer above 517, `LongRead::new` rejects the stored MTU and every connect
-  fails with `HID map read failed`.
-  Found by the panic inventory; not reproduced on hardware. Accept when the
-  stored MTU is `server_rx_mtu.min(requested).max(23)` (vendored change,
-  marked `bt2usb patch:`), the vendor notes and ADR 0007 describe it, and the
-  Report Map interoperability check covers a peripheral with an MTU above 64.
+  `conn.att_mtu()` reported the larger value, `read_report_map` built its
+  `LongRead` for fragments of that size minus 1, and the first 63-byte
+  fragment looked short, so the read ended after 63 bytes. A longer Report Map
+  was truncated: report IDs declared after byte 63 were unknown, and their
+  reports (often the mouse and media keys) were dropped, or the map failed to
+  parse. With an offer above 517, `LongRead::new` rejected the stored MTU and
+  every connect failed with `HID map read failed`. Found by the panic
+  inventory; not reproduced on hardware. Fixed: the exchange stores
+  `server_rx_mtu.min(requested).max(23)` (`vendor/nrf-softdevice/src/ble/gatt_client.rs`,
+  marked `bt2usb patch:`;
+  [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
+  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
+  embedded builds and Clippy; the vendored code has no tests, and the
+  hardware check is part of "Report Map interoperability and legacy policy".
 - [ ] **P1** **A bond with a private or reserved identity address breaks the
   store.** `Bonder::on_bonded` keeps the identity address the peer sends
   during pairing without checking its type; when the peer sends none, it
@@ -621,7 +624,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   ([security](docs/security.md#threat-model)).
 - [ ] **P1** **Report Map interoperability and legacy policy.** *(hardware)*
   Validate the implemented 512-byte fragmented GATT reader against real
-  peripherals with long maps and different MTUs. Decide whether the absent-map
+  peripherals with long maps and different MTUs, including one that offers an
+  MTU above 64 and one that keeps 23. Decide whether the absent-map
   compatibility fallback remains allowed for deployment. Accept when captures
   demonstrate full reads and error handling, and same-length incompatible
   layouts are rejected by the supported descriptor-driven translation policy

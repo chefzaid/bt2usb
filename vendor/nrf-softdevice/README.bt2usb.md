@@ -22,7 +22,13 @@ Service/characteristic/descriptor discovery and MTU exchange likewise return
 their respective `Timeout` errors instead of panicking on the timeout event,
 and since 2026-10-10 they skip any other event they did not expect and keep
 waiting, as `read_by_offset` and `write` do, instead of panicking with
-`unexpected event {}`.
+`unexpected event {}`. Also since 2026-10-10, the MTU exchange stores the ATT
+MTU the SoftDevice actually uses: the smaller of the requested MTU and the
+server's offer, and never less than 23 (the S140 documentation of
+`sd_ble_gattc_exchange_mtu_request`). Upstream stored the server's offer, so
+with a peripheral offering more than bt2usb's 64, `Connection::att_mtu`
+overstated the link's MTU, and bt2usb's Report Map reader took the first
+63-byte fragment for the last one.
 
 Discovery no longer panics on peer-controlled counts or handles. With the
 configured 64-byte ATT MTU one response can carry eight characteristic
@@ -80,6 +86,7 @@ first. A bt2usb FIXME tracks it.
 Remove this patch only when the pinned upstream provides equivalent offset
 reads, timeout errors, bounded discovery, a way for the application to
 answer connection parameter requests, a way to keep peer addresses,
-passkeys, and notification bytes out of debug and trace logs, and no panic
-on an unexpected timeout source or a disconnect error. Do not edit the Cargo checkout to deploy this change; the root Cargo
+passkeys, and notification bytes out of debug and trace logs, no panic
+on an unexpected timeout source or a disconnect error, and an ATT MTU that
+matches the one the SoftDevice uses. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

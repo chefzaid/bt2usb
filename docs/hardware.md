@@ -250,7 +250,7 @@ The SoftDevice configuration is shared by the bridge and the self-test in
 | Link count | `conn_count`, `central_role_count`, and `central_sec_count` all equal `BLE_MAX_CONNECTIONS` (2) | Two central links, both able to use security |
 | Advertising and peripheral role | `adv_set_count = 0`, `periph_role_count = 0` | The bridge never advertises |
 | Connection event length | 6 (`BLE_CONN_EVENT_LENGTH`), 7.5 ms | Short enough for two links to interleave |
-| ATT MTU | 64 bytes, requested on each connection by `connect_with_security` | Bounds GATT fragments; Report Maps are read in pieces |
+| ATT MTU | 64 bytes, requested on each connection by `connect_with_security`; the link uses the smaller of 64 and the peripheral's offer, never below 23 | Bounds GATT fragments; Report Maps are read in pieces of the link's MTU minus 1 |
 | GAP device name and other options | Not set | SoftDevice defaults |
 
 The values are from `sd_setup.rs`; the meaning of the clock fields (units of

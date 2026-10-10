@@ -472,9 +472,12 @@ the same toolchain reproduces its results. `mask ci` runs the local subset.
 ### Hosted CI Runs
 
 Runs of [ci.yml](../.github/workflows/ci.yml) on `main`, read with
-`gh run list` and `gh run view` on 2026-10-09. The five check jobs in these runs
-are the two host-test jobs, the dependency audit, the embedded build, and the
-Renode test; the Host coverage job, added on 2026-10-10, makes six from then on.
+`gh run list` and `gh run view` on 2026-10-09 and through the GitHub Actions API
+on 2026-10-10. The five check jobs in these runs are the two host-test jobs, the
+dependency audit, the embedded build, and the Renode test; the Host coverage
+job, added on 2026-10-10 in `27bd09e`, makes six from then on. The 2026-10-10
+rows are the commits that changed CI; every other push run on `main` that day
+from run number 37 to 64 also passed, except the ones a newer push cancelled.
 Dependabot pull-request runs are not listed.
 
 | Run ID | Trigger | Commit | Date (UTC) | Result | Jobs |
@@ -484,6 +487,13 @@ Dependabot pull-request runs are not listed.
 | 37338711407 | Weekly schedule | `8a04b25` | 2026-10-05 | Passed | All five check jobs passed |
 | 37932436721 | Push | `7fc99d6` | 2026-10-09 | Passed | All five check jobs passed |
 | 37967375873 | Push | `802bbf1` | 2026-10-09 | Passed | All five check jobs passed |
+| 38064576663 | Push | `6e1b8b4` | 2026-10-10 | Passed | All five check jobs passed; the commit of the [2026-10-10 validation record](#validation-record--2026-10-10) |
+| 38066476307 | Push | `6fe4ca9` | 2026-10-10 | Passed | All five check jobs passed, with the new 500-line check |
+| 38067332132 | Push | `27bd09e` | 2026-10-10 | Passed | All six check jobs passed; the first Host coverage run, and the firmware and simulation rustdoc steps |
+| 38068103002 | Push | `c5fe413` | 2026-10-10 | Passed | All six check jobs passed, with the documentation checker |
+| 38068455349 | Push | `c0b4b48` | 2026-10-10 | Passed | All six check jobs passed on Node 24 actions, `ubuntu-24.04`, and `windows-2025`; no job log has a `##[warning]` annotation, and only the audit job printed rustup's implicit-install warning |
+| 38068870462 | Push | `2622228` | 2026-10-10 | Passed | All six check jobs passed; the audit job installs its toolchain first and no longer prints the rustup warning |
+| 38069780606 | Push | `baa29ff` | 2026-10-10 | Passed | All six check jobs passed, with Ruff, ShellCheck, and the script linter's 7 tests in the Linux host job |
 
 The `2479c79` failure was the earlier actionlint installation step, which
 `8a04b25` replaced (see its commit message). In every run, "Verify and attest

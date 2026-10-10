@@ -35,11 +35,11 @@ probe, or USB host to close.
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 10 | 6 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 8 | 8 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **104** | **78** | **22** |
+| **Total** | **105** | **77** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1143,7 +1143,7 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   passes, existing stores load after the upgrade, and the affected first-flash
   sections pass on a board
   ([security](docs/security.md#supply-chain)).
-- [ ] **P1** **CI runtime maintenance.** Since 2026-10-10 every action runs
+- [x] **P1** **CI runtime maintenance.** Since 2026-10-10 every action runs
   on Node 24 or is composite: `actions/checkout` v7.0.1 and
   `actions/upload-artifact` v7.0.1 replace the Node 20 v4.4.0 and v4.6.2, and
   `softprops/action-gh-release` v3.0.3 replaces the Node 20 v2.6.2 in the
@@ -1154,9 +1154,12 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   2026-10-19), and every job that runs Cargo, the audit job included, calls
   `rustup install` first, ending rustup's warning that implicit installation
   is deprecated
-  ([pinning](docs/code-quality.md#pinning)). Accept when a hosted run of the
-  check jobs shows no deprecation annotation. The release jobs' actions were
-  checked from their `action.yml`; they first run with the first tag, under
+  ([pinning](docs/code-quality.md#pinning)). Accepted on hosted runs: the
+  six check jobs of run 38068455349 (`c0b4b48`) logged no `##[warning]`
+  annotation, run 38068870462 (`2622228`) removed the last rustup warning from
+  the audit job, and run 38069780606 (`baa29ff`) passed clean
+  ([hosted runs](docs/testing.md#hosted-ci-runs)). The release jobs' actions
+  were checked from their `action.yml`; they first run with the first tag, under
   [Hosted provenance and release recovery acceptance](#release-provenance-and-supply-chain)
   ([testing](docs/testing.md#continuous-integration)).
 - [ ] **P1** **Reproducible firmware evidence.** Compare artifacts from two

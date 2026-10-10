@@ -32,8 +32,14 @@ mod stack;
 mod ui;
 mod usb;
 
-#[path = "ble/adv_parser.rs"]
-mod adv_parser;
+// The pure BLE files: the advertisement parser for the scan stage, and the
+// coordinator and message types the shared `ui` controller speaks. The
+// SoftDevice-coupled BLE tasks are not part of this image.
+mod ble {
+    pub mod adv_parser;
+    pub mod coordinator;
+    pub mod messages;
+}
 
 use defmt::{info, unwrap, warn};
 use defmt_rtt as _;
@@ -315,10 +321,10 @@ async fn check_ble_scan(sd: &Softdevice, tally: &mut Tally) {
         // SAFETY: the SoftDevice guarantees `p_data`/`len` describe the report.
         let data =
             unsafe { core::slice::from_raw_parts(params.data.p_data, params.data.len as usize) };
-        if adv_parser::contains_hid_service_uuid(data) {
+        if ble::adv_parser::contains_hid_service_uuid(data) {
             let addr = nrf_softdevice::ble::Address::from_raw(params.peer_addr);
             if !hid_seen.contains(&addr) && hid_seen.push(addr).is_ok() {
-                let name = adv_parser::extract_device_name(data);
+                let name = ble::adv_parser::extract_device_name(data);
                 info!("BLE: HID device '{}' (RSSI {})", name.as_str(), params.rssi);
             }
         }

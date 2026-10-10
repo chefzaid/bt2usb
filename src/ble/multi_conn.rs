@@ -9,8 +9,8 @@
 //! [`bonder`](crate::ble::bonder).
 
 use crate::ble::bonder::bonder;
-use crate::ble::coordinator::{self, Action, ConnManager, UiEvent, MAX_CONNECTIONS};
-use crate::ble::management::Quiescence;
+use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
+use crate::ble::management::{self, Quiescence};
 use crate::ble::scanner::ScanResult;
 use crate::ble::{scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::storage::{PairedDevice, DEVICE_STORE};
@@ -252,20 +252,17 @@ async fn manage_devices(
     } else {
         None
     };
-    let mut targets = [false; MAX_CONNECTIONS];
-    for (slot, target) in targets.iter_mut().enumerate() {
-        *target = match &paired {
-            None => true,
-            Some(peer) => manager.slot_address(slot).is_some_and(|current| {
-                *current == peer.address
-                    || peer
-                        .bond
-                        .is_some_and(|bond| bond.peer_id.is_match(*current))
-            }),
-        };
-        if *target {
-            send_slot_cmd(slot, SlotCommand::Quiesce(token), slot_txs).await;
-        }
+    let targets = match &paired {
+        None => [true; MAX_CONNECTIONS],
+        Some(peer) => management::forget_targets(manager, |current| {
+            *current == peer.address
+                || peer
+                    .bond
+                    .is_some_and(|bond| bond.peer_id.is_match(*current))
+        }),
+    };
+    for (slot, _) in targets.iter().enumerate().filter(|(_, &target)| target) {
+        send_slot_cmd(slot, SlotCommand::Quiesce(token), slot_txs).await;
     }
     let mut barrier = Quiescence::new(targets, token);
     while !barrier.complete() {
@@ -302,12 +299,7 @@ async fn manage_devices(
             None => bonder().clear(),
         }
     }
-    let state = if manager.active_count() == 0 {
-        BleEvent::Disconnected
-    } else {
-        BleEvent::Connected(coordinator::connection_summary(manager))
-    };
-    event_tx.send(state).await;
+    event_tx.send(coordinator::link_state(manager).into()).await;
     result.map_err(|_| BleErrorTag::StorageFailed)
 }
 
@@ -338,14 +330,7 @@ async fn execute_action(
                     .await;
             }
         }
-        Action::Emit(ui) => {
-            let event = match ui {
-                UiEvent::Connected(summary) => BleEvent::Connected(summary),
-                UiEvent::Disconnected => BleEvent::Disconnected,
-                UiEvent::Error(tag) => BleEvent::Error(tag),
-            };
-            event_tx.send(event).await;
-        }
+        Action::Emit(ui) => event_tx.send(ui.into()).await,
     }
 }
 

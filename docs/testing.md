@@ -146,8 +146,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
-2026-10-10, in the commit that moved the paired-device store into
-host-compiled modules. The tree holds 327 `#[test]` functions: 324 in files
+2026-10-10, in the commit that moved the UI loop's decisions into
+`ui::controller`. The tree holds 344 `#[test]` functions: 341 in files
 compiled into the host library and 3 in
 `tests/integration.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
@@ -155,8 +155,8 @@ compiled into the host library and 3 in
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
 tests, before four advertisement tests moved into the host library and
 fourteen UI tests (the management deadline, the saved-device list, scans, and
-`UiState` link updates), four keyboard-report tests, one connection-parameter test, eight reconnect wake and identity tests, six crowded-scan tests, and 27
-device-store tests were added; the 324 passed with `cargo test` on 2026-10-10. There are no `#[ignore]` or
+`UiState` link updates), four keyboard-report tests, one connection-parameter test, eight reconnect wake and identity tests, six crowded-scan tests, 27
+device-store tests, and 17 controller, message, and management-target tests were added; the 341 passed with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -184,7 +184,8 @@ device-store tests were added; the 324 passed with `cargo test` on 2026-10-10. T
 | [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 32 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved, reconnection, and disconnect during retry. `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 7 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
-| [ble/management.rs](../src/ble/management.rs) | 5 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |
+| [ble/management.rs](../src/ble/management.rs) | 6 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. `forget_targets` picks the connected or reconnecting slots of the forgotten peer only. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |
+| [ble/messages.rs](../src/ble/messages.rs) | 3 | Only management commands carry a request ID, only `Connected` and `Disconnected` report link state, and each coordinator `UiEvent` converts to the matching UI event. |
 | [ble/reconnect_tests.rs](../src/ble/reconnect_tests.rs), for [reconnect.rs](../src/ble/reconnect.rs) | 31 | The shared background-reconnect table ([ADR 0015](adr/0015-shared-reconnect-scan.md)): a sighting goes to the slot that owns the device, unregistered devices and slots are ignored, a sighting is used once, replaced by a newer one, fresh at 2 s and discarded after, and dropped with its slot or when the slot changes target; re-registering the same target keeps the outage start, a different one restarts the fast window; the duty cycle is fast while any target is inside its window; after a failed attempt the other slot's scans ignore that device while its own still see it, the holdoff ends on time, survives re-registration, is extended by a new failure, ends for a new target, drops the pending sighting, and ignores unregistered slots; the lower slot wins a tie; out-of-range slots and a clock going backwards are harmless. A handover wakes only the owner, and taking the sighting (fresh or stale), a failed attempt, clearing, or a new target ends the wake while re-registering keeps it; a sighting for a slot cleared after the targets were copied wakes nobody. `SavedPeer` is the same device by identity key or, without one, by address, matches a resolved or stored address, and a retry at a new private address keeps the holdoff and fast window. |
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | 14 | Bounding a peripheral's connection parameter request ([ADR 0016](adr/0016-bounded-peer-connection-parameters.md)): a request inside the limits is granted unchanged, a peripheral asking only for 20–40 ms gets 20 ms, one asking for 50–100 ms gets 30 ms and is flagged as outside its range while one whose fastest interval is 30 ms gets it inside its range, an overlapping range is narrowed to 7.5–15 ms, a 32 s supervision timeout is capped at 4 s and a short one raised to 1 s, latency is capped at 20, reversed bounds read as a range (also by `interval_within_request`), a request entirely below 7.5 ms gets 7.5 ms and is flagged, as is a request below a raised 15 ms floor given that floor, latency is lowered when a 1 s timeout cap cannot cover it, the latency limit is the largest the timeout covers for every timeout up to 33 s at twelve intervals, and the timeout is raised to meet the Core rule. A sweep over every boundary of the policy and over out-of-range values (interval 0 and 0xFFFF, latency 500, timeout 0) checks that every answer stays inside the limits and the Core rule, that a peripheral accepting 15 ms is never slowed, and that any request reaching into the grantable range gets an interval it asked for. |
 
@@ -204,7 +205,8 @@ protect.
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [ui/ui_logic_tests.rs](../src/ui/ui_logic_tests.rs), for [ui_logic.rs](../src/ui/ui_logic.rs) | 33 | `on_button` transitions: SELECT scans from Home and Error, list navigation clamps, SELECT connects the highlighted entry, an empty list cannot connect, stale selections are clamped, SELECT on Connected rescans and DOWN disconnects, ignored combinations are no-ops. `on_scan_complete`. Management confirmations default to Cancel, one request runs at a time, stale replies are rejected, request IDs stay unique across wraparound, an unanswered request expires at its deadline and its late reply is ignored, an answered request never expires, a timeout shows **No reply** without claiming an outcome, drops the saved list, survives link updates, reopens saved devices with UP and is acknowledged with SELECT, and keeps an error already showing, an empty store still offers Factory reset, errors survive later status, and background status or scans do not dismiss a confirmation. Saved-device navigation reaches every entry and backs out, `UiState` counts saved devices on management screens, a completed change shows its notice and drops the saved list (an error stays), a scan lists results, reports none, or ignores a stray completion, a button scan clears old results, a new link or a drop on Home, Connecting, or Connected clears the list, a background connect or drop leaves a running scan or its picker and list on screen, and long messages are cut to 32 bytes. |
+| [ui/ui_logic_tests.rs](../src/ui/ui_logic_tests.rs), for [ui_logic.rs](../src/ui/ui_logic.rs) | 30 | `on_button` transitions: SELECT scans from Home and Error, list navigation clamps, SELECT connects the highlighted entry, an empty list cannot connect, stale selections are clamped, SELECT on Connected rescans and DOWN disconnects, ignored combinations are no-ops. `on_scan_complete`. Only the saved-device commands are management requests. Management confirmations default to Cancel, a timeout shows **No reply** without claiming an outcome, drops the saved list, survives link updates, reopens saved devices with UP and is acknowledged with SELECT, and keeps an error already showing, an empty store still offers Factory reset, errors survive later status, and background status or scans do not dismiss a confirmation. Saved-device navigation reaches every entry and backs out, `UiState` counts saved devices on management screens, a completed change shows its notice and drops the saved list (an error stays), a scan lists results, reports none, or ignores a stray completion, a button scan clears old results, a new link or a drop on Home, Connecting, or Connected clears the list, a background connect or drop leaves a running scan or its picker and list on screen, and long messages are cut to 32 bytes. |
+| [ui/controller_tests.rs](../src/ui/controller_tests.rs), for [controller.rs](../src/ui/controller.rs) | 16 | Request tracking: one request runs at a time, stale replies are rejected, IDs stay unique across wraparound, an unanswered request expires at its deadline and its late reply is ignored, an answered request never expires. The commands presses send: scan results are listed and Connect sends the highlighted index, devices found outside a scan are not listed, buttons wait for the list reply while a stale reply is ignored, a list reply does not hide an error, Forget names the listed address and reports the stored result, Factory reset returns home without links, a failed change shows the coordinator's error, a Forget of an entry missing from the snapshot sends nothing, and a command that could not be queued reports Busy and frees its request. `tick` animates only a visible scan and abandons an unanswered request at its deadline. Every error tag has a distinct message that fits a 21-character display line. |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | 2 | OLED retry backoff of 1, 2, 4, 8, 16, then 30 s (capped) without blocking new frames, reset on recovery, and saturating deadlines. |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | 3 | The device-list window keeps the selection visible, handles an empty list and a stale selection, and the scan spinner recovers from an out-of-range state. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
@@ -240,15 +242,20 @@ exercises.
 | `storage.rs` | Embedded build and Clippy; the decisions it calls (the device list, codec, framing, and record validation) are host-tested, but its conversions to and from SoftDevice types, IRK resolution through the SoftDevice, and flash writes with retries are not; the self-test flash stage exercises the same region and `sequential-storage` map, not this code; hardware acceptance |
 | `usb/hid_device.rs`, `usb/host_requests.rs` | Embedded build and Clippy; delivery, aggregation, wake policy, and host LED decoding and forwarding are host-tested; self-test USB stages; hardware acceptance |
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
+| `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` mirrors the order in which `ble/multi_conn.rs` calls the pure modules, but nothing checks that the two stay in step |
 | `ui/display.rs` | Embedded build and Clippy; recovery policy is host-tested; self-test OLED stages |
 | `stack.rs`, `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice and stack stages |
 | `power.rs` | Embedded build and Clippy; its policy (`power_logic.rs`) is host-tested; hardware acceptance (sleep and wake) |
 
 ## Renode Simulation
 
-The simulation runs the real `ble::coordinator` and `ui::ui_logic` modules on an
-emulated nRF52840. Its BLE events are a scripted scenario. UART0 carries logs,
-so no probe or defmt decoder is required.
+The simulation runs the firmware's UI controller (`ui::controller` over
+`ui::ui_logic`) and the pure BLE and storage modules (`ble::coordinator`,
+`ble::management`, `ble::messages`, `ble::adv_parser`, and
+`storage::{devices, codec, framing, record}`) on an emulated nRF52840. The
+radio, the connection workers, and flash are stand-ins that answer at once;
+BLE events come from a scripted scenario and from the commands the buttons
+send. UART0 carries logs, so no probe or defmt decoder is required.
 
 Build from the repository root:
 
@@ -295,25 +302,37 @@ mask sim-test
 renode-test renode/bt2usb-sim.robot
 ```
 
-The Robot test asserts boot and coordinator output and uses GPIO presses to
-check screen transitions. Run this when changing the simulation, GPIO path, or
-shared reducers. A simulated scan completes immediately with scenario devices;
-this is not a test of scan timing or advertisement interoperability.
+The Robot test asserts boot, the scripted scenario, and the UI flows the GPIO
+presses drive, including a link loss and saved-device management. Run it when
+changing the simulation, the GPIO path, or any pure module the simulation
+runs. A simulated scan hears three fixed advertisements at once; this is not a
+test of scan timing or advertisement interoperability.
 
 ### What The Simulation Build Contains
 
-`--features sim` builds [sim.rs](../src/sim.rs) without SoftDevice, USB, flash
-storage, or the OLED task, links it with [memory_sim.x](../memory_sim.x) from
-address 0 (no SoftDevice reservation), and supplies the single-core
-`cortex-m` critical section that the SoftDevice provides in firmware builds.
+`--features sim` builds [sim.rs](../src/sim.rs) and
+[sim_ble.rs](../src/sim_ble.rs) without SoftDevice, USB, the flash shell, or
+the OLED task, links them with [memory_sim.x](../memory_sim.x) from address 0
+(no SoftDevice reservation), and supplies the single-core `cortex-m` critical
+section that the SoftDevice provides in firmware builds.
 [build.rs](../build.rs) selects the memory map by feature and refuses to build
 `embedded` and `sim` together. The debounce interval is `BUTTON_DEBOUNCE_MS`
 (50 ms) from [config.rs](../src/config.rs).
 
-UART0 output is written by the `slog!` macro in `sim.rs` (TX P0.06, RX P0.08 in
-the code; Renode's UART model emits the bytes regardless of pin routing).
-`defmt` messages from shared modules, such as the button driver's
-`Button: …` line, go to the defmt RTT logger and do not appear on UART0.
+| Part | Firmware code that runs | Stand-in |
+| --- | --- | --- |
+| Buttons | `ui::buttons::button_task` on P0.11, P0.12, P0.24, through the custom GPIO/GPIOTE models | Edges injected with `gpio0 OnGPIO` |
+| UI loop | `UiController::{button, event, tick}`, `UiState`, `on_button` | `sim.rs` applies each event as `main.rs` does, but without the power manager, the display, or the command and event channels: commands run to completion before the next button |
+| Coordinator | `plan_start_scan`, `plan_connect`, `plan_disconnect`, `on_slot_connected`, `on_slot_disconnected`, `on_slot_link_lost`, `link_state`, and the `ConnManager` | `SimBle` in `sim_ble.rs` executes their `Action`s in the order `multi_conn::execute_action` does; a connection worker connects or disconnects as soon as it is told |
+| Scan | `merge_advertisement` and `adv_parser` | Three fixed advertisements: `Keyboard` (address `0xA1`, RSSI −42, HID UUID), `Phone` (`0xC3`, −30, no HID UUID), `Mouse` (`0xB2`, −55, HID UUID) |
+| Forget and Factory reset | `forget_targets`, `Quiescence`, `commit`, then the link status and `ManagementResult`, as `multi_conn::manage_devices` orders them | Targeted workers acknowledge the barrier at once |
+| Pairing store | `DeviceList::{add, find, without, reset, pending_item, mark_saved, load, iter_recent}` with the record codec and framing | The item is written to RAM; each save is read back with `DeviceList::load` and compared with the list. Addresses are random static addresses whose low four bytes are the `u32` stand-in; peers never pair, so no record has a bond |
+
+UART0 output is written by the `slog!` macro through `Console` in `sim.rs`
+(TX P0.06, RX P0.08 in the code; Renode's UART model emits the bytes
+regardless of pin routing). `defmt` messages from shared modules, such as the
+button driver's `Button: …` line, go to the defmt RTT logger and do not appear
+on UART0.
 
 The platform script loads Renode's stock `platforms/cpus/nrf52840.repl`,
 unregisters its `gpiote`, `gpio0`, and `gpio1`, and loads
@@ -327,66 +346,78 @@ LATCH or DETECTMODE, so edge waits never complete with them. See
 ### Scripted BLE Scenario
 
 The sim's main loop waits for either a button event or a 2-second timer. A
-button event runs `ui_logic::on_button`; a timer tick runs one step of a
-four-step scenario through the real coordinator reducers, using two scenario
-devices: `Keyboard` (address `0xA1`, RSSI −42) and `Mouse` (`0xB2`, −55). The
-address type is a `u32` stand-in for the SoftDevice `Address`, which is why the
-coordinator is generic over it. The timer restarts after every button event,
-so a tick is "2 s without a button press", not a fixed period.
+button event runs `UiController::button`; a command it returns runs through
+`SimBle::command`, and the events that produces go to `UiController::event`,
+each logged as `  event: <event> -> screen <screen> (selected <n>)`. A timer
+tick runs one step of a four-step scenario through `SimBle::scenario_step`
+and applies its events the same way. The timer restarts after every button
+event, so a tick is "2 s without a button press", not a fixed period.
 
-| Step (tick mod 4) | UART header | Reducer calls | UI event logged | `active_count` |
+| Step (tick mod 4) | UART header | Reducer calls | UI event | Slots after (`active_count`, `occupied_count`) |
 | --- | --- | --- | --- | --- |
-| 0 | `scenario: connect device 0 (Keyboard)` | `plan_connect`, then `on_slot_connected` for slot 0 | `action: UI Connected 'Keyboard'` | 1 |
-| 1 | `scenario: connect device 1 (Mouse)` | `plan_connect`, then `on_slot_connected` for slot 1 | `action: UI Connected '2 devices'` | 2 |
-| 2 | `scenario: slot 0 link lost` | `on_slot_disconnected` for slot 0 | `action: UI Connected 'Mouse'` | 1 |
-| 3 | `scenario: disconnect all` | `plan_disconnect`, then `on_slot_disconnected` per slot | `action: UI Disconnected` | 0 |
+| 0 | `scenario: connect device 0 (Keyboard)` | `plan_connect`, then `on_slot_connected`; the device is saved | `Connected 'Keyboard'`, or the current summary if it is already connected | One more active, unless already connected |
+| 1 | `scenario: connect device 1 (Mouse)` | The same for the mouse | `Connected '2 devices'` when both are up | As step 0 |
+| 2 | `scenario: slot 0 link lost` | `on_slot_link_lost` for the device in slot 0; then `scenario: slot 0 kept reserved for 0xa1` (or `released`, which would be a fault) | The remaining links, for example `Connected 'Mouse'` | One fewer active, the same occupied |
+| 3 | `scenario: disconnect all` | `plan_disconnect`, then `on_slot_disconnected` per occupied slot | `Disconnected` when a slot was occupied | 0, 0 |
 
-Connect steps also log `action: ConnectSlot …` and `action: PersistDevice …`;
-every step ends with `scenario: active_count=N`. The cycle then repeats.
-
-Step 2 is labelled "link lost" but calls `on_slot_disconnected`, which frees the
-slot. The link-loss path that keeps a slot reserved for reconnection
-(`on_slot_link_lost`) is covered only by host tests.
+Step 2 logs `scenario: slot 0 has no link to lose` when slot 0 is empty. Every
+step ends with `scenario: active_count=N occupied_count=M`, so a reserved slot
+shows as an occupied one that is not active. Connect steps also log
+`action: ConnectSlot …`, `action: PersistDevice …`, and, when the list changed,
+`store: item of N bytes holds M device(s); reload matches`. The cycle then
+repeats.
 
 Button commands are handled as follows:
 
-| UI command | Simulation behavior |
-| --- | --- |
-| `StartScan` | Logged, then the scan completes at once through `ui_logic::on_scan_complete` with the two scenario devices |
-| `ListPaired` | Logged, then the screen moves to `SavedDevices` |
-| `Connect`, `Disconnect`, `Forget`, `FactoryReset`, `Dismiss` | Logged only; the coordinator is not called |
+| Command | Simulation behavior | Log lines |
+| --- | --- | --- |
+| `StartScan` | `plan_start_scan`, then the three advertisements through `merge_advertisement` | `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, then `ScanStarted`, one `DeviceFound` per HID device, and `ScanComplete` events |
+| `Connect(index)` | `plan_connect` on the last scan's results; a new connection is saved | `cmd: Connect(n)`, the actions, and the link-status event |
+| `Disconnect` | `plan_disconnect` | `cmd: Disconnect`, `action: DisconnectSlot(n)`, link status |
+| `ListPaired { id }` | Replies with the saved devices, newest first | `cmd: ListPaired id=N`, `event: PairedDevices id=N ['Mouse', 'Keyboard'] …` |
+| `Forget { id, address }` | Looks the device up, quiesces the slots `forget_targets` picks, commits the list without it, reports the links, then the result | `cmd: Forget id=N addr=0x…`, `quiesce: slot n released`, `quiesce: complete for token T`, `store: …`, `slots: active_count=… occupied_count=…`, link status, `ManagementResult id=N Ok(())` |
+| `FactoryReset { id }` | Quiesces every slot, commits an empty list, clears the scan results | As Forget, with every slot released |
 
-The sim calls `on_button` directly rather than through the firmware's
-`UiState`, so connection-status merging, management request IDs, and retained
-notices are covered by host tests, not by Renode.
+Item sizes follow the record layout in the
+[data model](data-model.md#pairing-store): 22 bytes for `Keyboard` alone, 38
+with `Mouse`, 19 for `Mouse` alone, and 3 for an empty list.
+
+The simulation sends no command through a channel, so `try_send` on a full
+channel ("Busy; try again") and the management timeout never happen there;
+host tests cover both.
 
 ### Robot Test Case
 
 [bt2usb-sim.robot](../renode/bt2usb-sim.robot) has one test case,
-`Sim Boots And Runs Coordinator And UI Logic`. It loads the GPIO models, creates
-the machine, swaps the GPIO peripherals, loads the ELF, attaches a terminal
-tester to `sysbus.uart0` with `timeout=20`, and starts emulation.
-`Wait For Line On Uart` consumes output in order, so each expected line must
-follow the previous one. The `Press Button` keyword drives the pin low, waits
-for the expected line with emulation paused, then releases the pin, so presses
-land at deterministic points and always outlast the debounce interval.
+`Sim Runs The UI Controller, Coordinator, Management, And Store`. It loads the
+GPIO models, creates the machine, swaps the GPIO peripherals, loads the ELF,
+attaches a terminal tester to `sysbus.uart0` with `timeout=20`, and starts
+emulation. `Wait For Line On Uart` consumes output in order, so each expected
+line must follow the previous one; it matches a substring of a line. The
+`Press Button` keyword drives the pin low, waits for the expected line with
+emulation paused, releases the pin, and runs the emulation for 100 ms, which
+outlasts the debounce, so the same button can be pressed twice in a row. Each
+press restarts the 2-second scenario timer, so a run of presses is never
+interrupted by a scenario step.
 
-| Order | Stimulus | Expected UART text | What it proves |
+| Order | Stimulus | Expected UART text (abridged) | What it proves |
 | --- | --- | --- | --- |
-| 1 | Boot | `bt2usb-sim starting` | Reset, memory map, and Embassy executor reach `main` |
-| 2 | — | `buttons ready` | Three button tasks spawned on P0.11, P0.12, P0.24 |
-| 3 | — | `entering sim UI loop` | The UI loop is running |
-| 4 | Timer | `action: UI Connected 'Keyboard'` (pauses emulation) | RTC time driver and coordinator step 0 |
-| 5 | SELECT (pin 24) | `button Select -> screen Scanning (selected 0)` | GPIO edge reaches the button task and `on_button` |
-| 6 | — | `cmd: StartScan`, then `scan: 2 devices -> screen DeviceList` | Scan command and scan-complete reducer |
-| 7 | DOWN (pin 12) | `button Down -> screen DeviceList (selected 1)`, then `redraw: DeviceList` | List navigation |
-| 8 | UP (pin 11) | `button Up -> screen DeviceList (selected 0)`, then `redraw: DeviceList` | List navigation in the other direction |
-| 9 | SELECT (pin 24) | `button Select -> screen Connecting (selected 0)`, then `cmd: Connect(0)` | Connect command for the highlighted entry |
-| 10 | Timer | `action: UI Connected '2 devices'`, then `scenario: active_count=2` | Coordinator step 1, two active links |
-| 11 | Timer | `action: UI Disconnected`, then `scenario: active_count=0` | Coordinator step 3, all links dropped |
+| 1 | Boot | `bt2usb-sim starting`, `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, three button tasks, UI loop |
+| 2 | Timer (step 0, pauses emulation) | `connect device 0 (Keyboard)`, `ConnectSlot slot=0 addr=0xa1`, `PersistDevice addr=0xa1`, `holds 1 device(s); reload matches`, `active_count=1 occupied_count=1`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | RTC time driver, `plan_connect` and `on_slot_connected`, the store's encode and load on the target, the controller's link update |
+| 3 | SELECT | `button Select -> screen Scanning (selected 0)`, `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, `ScanStarted`, `DeviceFound 'Keyboard' addr=0xa1 rssi=-42`, `DeviceFound 'Mouse' addr=0xb2 rssi=-55`, `event: ScanComplete -> screen DeviceList (selected 0)` | GPIO edge to `UiController::button`; scan merging drops the non-HID phone; scan events build the list |
+| 4 | DOWN, UP, DOWN | `button Down -> screen DeviceList (selected 1)`, then `selected 0`, then `selected 1` | List navigation both ways |
+| 5 | SELECT | `button Select -> screen Connecting (selected 1)`, `cmd: Connect(1)`, `ConnectSlot slot=1 addr=0xb2`, `holds 2 device(s); reload matches`, `event: Connected '2 devices' -> screen Connected (selected 0)` | A user connect reserves, connects, and saves the second device |
+| 6 | Timer (steps 1 and 2, pauses emulation) | `connect device 1 (Mouse)`, `active_count=2 occupied_count=2`, `slot 0 link lost`, `slot 0 kept reserved for 0xa1`, `active_count=1 occupied_count=2`, `event: Connected 'Mouse' -> screen Connected (selected 0)` | An already connected device only re-reports the links; `on_slot_link_lost` keeps the slot reserved while the UI shows only the live link |
+| 7 | UP, DOWN, SELECT, SELECT | `button Up -> screen Managing (selected 0)`, `cmd: ListPaired id=1`, `event: PairedDevices id=1 ['Mouse', 'Keyboard'] -> screen SavedDevices (selected 0)`, then `SavedDevices (selected 1)`, `ConfirmForget(1) (selected 0)`, `SavedDevices (selected 0)` | The saved list, newest first, under a request ID; a confirmation opens on Cancel and cancelling changes nothing |
+| 8 | DOWN, SELECT, DOWN, SELECT | `ConfirmForget(1) (selected 1)`, `button Select -> screen Managing (selected 1)`, `cmd: Forget id=2 addr=0xa1`, `quiesce: slot 0 released`, `quiesce: complete for token 1`, `holds 1 device(s); reload matches`, `slots: active_count=1 occupied_count=1`, `event: Connected 'Mouse' -> screen Managing`, `event: ManagementResult id=2 Ok(()) -> screen Notice` | Forget of a device whose slot is reserved: the barrier releases that slot only, the shorter list is committed and reads back, the link status comes before the result, and the result shows the notice |
+| 9 | SELECT | `button Select -> screen Connected (selected 0)` | Dismissing returns to the live link |
+| 10 | UP, DOWN, SELECT, DOWN, SELECT | `cmd: ListPaired id=3`, `PairedDevices id=3 ['Mouse']`, `SavedDevices (selected 1)` (the Factory reset row), `ConfirmReset (selected 0)`, `ConfirmReset (selected 1)`, `cmd: FactoryReset id=4`, `quiesce: slot 1 released`, `quiesce: complete for token 2`, `holds 0 device(s); reload matches`, `slots: active_count=0 occupied_count=0`, `event: Disconnected -> screen Managing`, `event: ManagementResult id=4 Ok(()) -> screen Notice` | Factory reset releases every slot, commits an empty list, and reports no link |
+| 11 | SELECT | `button Select -> screen Home (selected 0)` | Dismissing with no link returns home |
+| 12 | Timer (step 3, then step 0) | `disconnect all`, `active_count=0 occupied_count=0`, `connect device 0 (Keyboard)`, `holds 1 device(s); reload matches`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | Nothing is left to close, and the reset store accepts writes again |
 
-The test does not assert step 2's output, any management screen, or anything
-about the OLED. Override inputs with `--variable ELF:/abs/path` or
+The test does not exercise the OLED task, a full command channel, a management
+timeout, a storage failure, bonds or IRK resolution, or anything about real
+radio timing. Override inputs with `--variable ELF:/abs/path` or
 `--variable PLATFORM:@/abs/nrf52840.repl`; the interactive script takes
 `renode -e "$bin=@/abs/path" renode/bt2usb-sim.resc`.
 
@@ -638,8 +669,10 @@ Specific to the current workflow and test tree:
 - The coverage floor is one line-coverage total over the 22 host-library source
   modules; a single module can lose coverage while the total stays above 97%,
   and region and function coverage have no floor.
-- The Renode job runs one scripted scenario on Linux; it does not exercise the
-  OLED task, management screens, or the link-loss reservation path.
+- The Renode job runs one scripted scenario on Linux. It covers the UI
+  controller, link loss, and saved-device management, but not the OLED task,
+  and its connection workers, radio, and flash are stand-ins that answer at
+  once ([Renode Scenario Map](#renode-scenario-map)).
 - actionlint, Ruff, and ShellCheck run only in the Linux host job, and only
   that job installs them; no mask recipe installs them locally.
 - rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
@@ -746,6 +779,31 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-10, UI Controller And Renode Scenario
+
+This record covers the commit that moves the UI loop's decisions into
+`ui::controller` with the shared `ble::messages` types, removes the unused
+redraw hint from the button reducer, and broadens the Renode scenario to link
+loss and saved-device management (list, cancelled forget, forget, factory
+reset) through [`src/sim_ble.rs`](../src/sim_ble.rs). The checks ran locally on
+Linux in a container, on the working tree just before that commit; nothing ran
+on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 341 unit tests and 3 integration tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.09% of lines, 98.47% of regions, 99.19% of functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting and host API documentation | `cargo fmt --package bt2usb -- --check`; rustdoc with warnings denied | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five ([commands](code-quality.md#documentation-comments)) |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A` on the release ELF: with `DEFMT_LOG=debug` (the `.cargo/config.toml` default), `.text` 111,648 bytes, `.rodata` 11,796, `.data` 1,640, `.bss` 23,204, `.uninit` 1,024; with `DEFMT_LOG=info`, the release setting, `.text` 110,676 bytes and the other sections unchanged |
+| Release helper policy/integrity tests | Python 3.13, Linux | Passed: 17 tests |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 43 Markdown files |
+| Headless Renode scenario | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: 1 test in 18.55 s. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
+| Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change |
+| Hosted CI | GitHub Actions | Runs on the push; not recorded here |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the UI loop change needs the pairing and device-management checks in the first-flash checklist ([4. Pairing and daily use](first-flash.md#4-pairing-and-daily-use), [6. Device management and degraded display](first-flash.md#6-device-management-and-degraded-display)) |
 
 ## Validation Record — 2026-10-10
 

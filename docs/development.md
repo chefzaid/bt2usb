@@ -20,6 +20,7 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── main.rs            bridge firmware entry point (feature `embedded`)
 │   ├── selftest.rs        board bring-up image (feature `embedded`)
 │   ├── sim.rs             Renode entry point (feature `sim`)
+│   ├── sim_ble.rs         Renode stand-in for the BLE coordinator task
 │   ├── lib.rs             host-test library of hardware-free modules
 │   ├── config.rs          compile-time timing, USB, and storage constants; pin notes
 │   ├── sd_setup.rs        SoftDevice configuration shared by bridge and self-test
@@ -30,7 +31,7 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── hid/               report types, descriptors, aggregation, delivery, wake
 │   ├── usb/               composite USB HID device
 │   ├── storage.rs, storage/  pairing store: flash shell, device list, codec, framing
-│   ├── ui/                display, buttons, UI state machine
+│   ├── ui/                display, buttons, UI controller and state machine
 │   └── lib_tests.rs, lib_logic_tests.rs, hid_classify_tests.rs,
 │       hid_descriptor_tests.rs, hid_keyboard_report_tests.rs
 │                          host test modules included by lib.rs
@@ -576,9 +577,9 @@ in a public issue. See the [security policy](../SECURITY.md).
 
 | You changed | Run before review | Also needed |
 | --- | --- | --- |
-| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator` or `ui_logic`; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
+| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `management`, `messages`, `controller`, `ui_logic`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
-| `sim.rs`, `ui/buttons.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
+| `sim.rs`, `sim_ble.rs`, `ui/buttons.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
 | `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
 | `memory_sd.x`, storage constants, or `build.rs` | `mask ci` (its Markdown check compares the documented memory map), `mask size` | Self-test flash stage and the `softdevice RAM` log |
 | `.github/workflows/ci.yml` | `actionlint` with `shellcheck` on `PATH` | A hosted run |
@@ -629,7 +630,7 @@ another module fails every build.
 | --- | --- |
 | `BLE_MAX_CONNECTIONS` (2) | `coordinator::MAX_CONNECTIONS`, `hid::aggregate::SOURCES`, `usb::host_requests::LED_CONSUMERS`, `multi_conn::SlotSenders`, `conn_count`/`central_role_count`/`central_sec_count` in `sd_setup.rs`, and in `main.rs` the `BLE_SLOT_CMD_CHANNELS` array and the `ble_slot_task` pool, spawned once per slot |
 | `BLE_MAX_DISCOVERED` (8) | `UiState::devices` capacity in `ui/ui_logic.rs`, the scan result list in `scanner.rs` |
-| `MAX_PAIRED_DEVICES` (4) | `UiState::paired_names` capacity, the `paired` snapshot in `main.rs`, the saved-device list in `BleEvent`, and the store |
+| `MAX_PAIRED_DEVICES` (4) | `UiState::paired_names` capacity, the saved-device addresses in `UiController`, the saved-device list in `messages::Event::PairedDevices`, and the store |
 | `STORAGE_FLASH_PAGE_START`/`COUNT` | `STORAGE_FLASH_START`/`END`, used by the store, the self-test, and `build.rs`; the linker fails if `FLASH` in `memory_sd.x` disagrees |
 
 The firmware and simulation build with any link count. The host tests encode
@@ -676,20 +677,24 @@ Files:
   the compiler requires a rendering. Text uses `FONT_6X10` on a 128-pixel-wide
   panel, which fits 21 characters per line; `UiState::message` holds at most
   32 bytes.
-- [main.rs](../src/main.rs): the button arm maps each `UiCommand` to a
-  `BleCommand` in an exhaustive `match`. Management commands go through
-  `ManagementRequests`, which allows one at a time, ignores buttons while
-  one is pending, and gives up after `UI_MANAGEMENT_TIMEOUT_SECS`. The first press while the display is off only wakes it.
-- [sim.rs](../src/sim.rs): the simulation matches `UiCommand` exhaustively and
-  logs each command, so the `sim` build fails until the new variant is handled.
+- [ui/controller.rs](../src/ui/controller.rs): `UiController::button` maps
+  each `UiCommand` to a `messages::Command` in an exhaustive `match`, so the
+  host library fails to build until a new variant is handled. Management
+  commands (`UiCommand::is_management`) go through `ManagementRequests`, which
+  allows one at a time, ignores buttons while one is pending, and gives up
+  after `UI_MANAGEMENT_TIMEOUT_SECS`. `main.rs` and `sim.rs` both run the
+  controller; only `main.rs` applies the power rule that the first press while
+  the display is off only wakes it.
 
 A new physical button also needs a pin, a `ButtonEvent` variant, a button task
 in `main.rs` and `sim.rs`, a `check_button` stage in `selftest.rs`, and a
 Renode pin.
 
 Tests: transitions next to the existing `on_button` tests in `ui_logic.rs`,
-including the ignored combinations. Extend the Robot test only when the screen
-is reachable in the simulation's scenario. Docs:
+including the ignored combinations, and the command it sends in
+`controller_tests.rs`. The Renode build runs the same controller, so extend
+the Robot test with the presses that reach the screen
+([scenario map](testing.md#renode-scenario-map)). Docs:
 [features](features.md#using-the-bridge) (controls and screen flow); the
 first-flash checklist when it adds an acceptance step. ADR: only when the
 change alters the display-task isolation
@@ -699,14 +704,17 @@ change alters the display-task isolation
 
 Files:
 
-- [ble/mod.rs](../src/ble/mod.rs): `BleCommand` and `BleEvent` (firmware only,
-  `defmt::Format`). A management command carries `id: u32` so the UI can reject
-  a stale reply.
+- [ble/messages.rs](../src/ble/messages.rs): the variant in `Command` or
+  `Event`, generic over the address type and `defmt::Format` behind the
+  feature; `BleCommand` and `BleEvent` in [ble/mod.rs](../src/ble/mod.rs) are
+  these types over the SoftDevice `Address`. A management command carries
+  `id: u32` (and `Command::request_id` must return it) so the UI can reject a
+  stale reply.
 - [ble/coordinator.rs](../src/ble/coordinator.rs): put the decision in a pure
   planner or reducer that returns `Action`s (`plan_connect`,
   `on_slot_link_lost`, and so on). A new failure needs an `ErrorTag` variant,
-  and `ble_error_message` in `main.rs` must then map it to a message of at most
-  21 characters.
+  and `controller::error_message` must then map it to a distinct message of
+  at most 21 characters, which a host test checks.
 - [ble/multi_conn.rs](../src/ble/multi_conn.rs): handle the command in
   `ble_task`, and add `SlotCommand`/`SlotEvent` variants if a connection worker
   must act. Scan and connection setup must hold `GAP_PROCEDURE`, because the
@@ -714,17 +722,21 @@ Files:
 - [ble/slot_worker.rs](../src/ble/slot_worker.rs): handle a new `SlotCommand`
   in `connection_slot_task`, the per-slot worker, and send a new `SlotEvent`
   from it.
-- [ble/management.rs](../src/ble/management.rs): quiescence and commit
-  primitives for anything that changes stored peers.
-- [main.rs](../src/main.rs): send with `BLE_CMD_CHANNEL.try_send`, never an
-  awaited send, so a full command channel cannot deadlock the UI against the
-  BLE task; handle the new event in the fourth `select4` arm.
-- [sim.rs](../src/sim.rs): `log_action` matches `Action` and `UiEvent`
-  exhaustively; add a log line for a new variant.
+- [ble/management.rs](../src/ble/management.rs): targets, quiescence, and
+  commit primitives for anything that changes stored peers.
+- [ui/controller.rs](../src/ui/controller.rs): apply a new event in
+  `UiController::event`, which matches `Event` exhaustively. `main.rs` sends
+  every command with `BLE_CMD_CHANNEL.try_send`, never an awaited send, so a
+  full command channel cannot deadlock the UI against the BLE task.
+- [sim_ble.rs](../src/sim_ble.rs) and [sim.rs](../src/sim.rs): the simulated
+  coordinator matches `Command` and `Action`, and the console log matches
+  `Command` and `Event`, exhaustively, so the `sim` build fails until a new
+  variant is simulated and logged.
 
 Tests: reducer cases in
 [coordinator_tests.rs](../src/ble/coordinator_tests.rs), management cases in
-`management.rs`, and UI cases for the reply in `ui_logic.rs`. Docs: the
+`management.rs`, UI cases for the reply in `controller_tests.rs`, and the
+Robot test when the simulation can produce it. Docs: the
 [task and channel tables](architecture.md#tasks-and-data-flow), the
 [channel contracts](data-model.md#task-channel-contracts), and features.
 ADR: a new task or channel, a changed capacity contract, or any pairing or

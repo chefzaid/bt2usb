@@ -4,7 +4,8 @@
 //! records (one per paired device). This module owns the *framing* — the magic
 //! byte, version, record count and per-record length prefixes — and the offset
 //! bookkeeping that goes with it, independent of what each record contains
-//! (that's [`super::PairedDevice`]/`codec`). Keeping it separate makes the
+//! (a [`StoredDevice`](super::devices::StoredDevice), which
+//! [`codec`](super::codec) encodes). Keeping it separate makes the
 //! error-prone length/offset handling unit-testable on the host (the embedded
 //! `storage` shell that calls it isn't).
 //!

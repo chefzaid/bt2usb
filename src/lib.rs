@@ -6,7 +6,8 @@
 //! they can be unit-tested on the host with `cargo test` / `mask test`.
 //!
 //! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
-//! reconnect, long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
+//! reconnect, long_read, management, messages}`, `ui::{controller, ui_logic,
+//! input_logic, display_logic}` and
 //! `power_logic`, plus `storage::{codec, devices, framing, record}` under `cfg(test)` only, and
 //! `config`, whose capacities the pure modules size their buffers from.
 //! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, bonder,
@@ -42,6 +43,8 @@ mod ble_reconnect_impl;
 mod ble_long_read_impl;
 #[path = "ble/management.rs"]
 mod ble_management_impl;
+#[path = "ble/messages.rs"]
+mod ble_messages_impl;
 
 // The pure parts of the paired-device store: the device list, its record
 // codec, and the flash-item framing (host-tested independently of the embedded
@@ -58,6 +61,8 @@ mod storage {
 
 #[path = "power_logic.rs"]
 mod power_logic_impl;
+#[path = "ui/controller.rs"]
+mod ui_controller_impl;
 #[path = "ui/display_logic.rs"]
 mod ui_display_logic_impl;
 #[path = "ui/input_logic.rs"]
@@ -71,6 +76,10 @@ pub mod ble {
     }
     pub mod management {
         pub use crate::ble_management_impl::*;
+    }
+    /// Commands from the UI and events back to it, generic over the address.
+    pub mod messages {
+        pub use crate::ble_messages_impl::*;
     }
     pub mod adv_parser {
         pub use crate::ble_adv_parser_impl::{
@@ -92,6 +101,10 @@ pub mod ble {
 }
 
 pub mod ui {
+    /// The UI loop's decisions: commands for buttons, view changes for events.
+    pub mod controller {
+        pub use crate::ui_controller_impl::*;
+    }
     pub mod display_logic {
         pub use crate::ui_display_logic_impl::*;
     }

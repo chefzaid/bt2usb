@@ -29,6 +29,7 @@ pub mod conn_params;
 pub mod coordinator;
 pub mod long_read;
 pub mod management;
+pub mod messages;
 pub mod reconnect;
 
 #[cfg(feature = "embedded")]
@@ -45,8 +46,6 @@ pub mod slot_worker;
 #[cfg(feature = "embedded")]
 mod softdevice_types {
     use super::coordinator;
-    use defmt::Format;
-    use heapless::String;
     use nrf_softdevice::ble::Address;
 
     /// Information about a discovered BLE peripheral.
@@ -57,47 +56,10 @@ mod softdevice_types {
     pub type DiscoveredDevice = coordinator::DeviceInfo<Address>;
 
     /// Commands that the UI task can send to the BLE task.
-    #[derive(Clone, Format)]
-    pub enum BleCommand {
-        /// Start scanning for peripherals.
-        StartScan,
-        /// Connect to the peripheral at the given index in the discovered list.
-        Connect(usize),
-        /// Disconnect the currently connected peripheral.
-        Disconnect,
-        /// Read the current saved-device list for explicit management.
-        ListPaired { id: u32 },
-        /// Forget this stable identity (never a mutable list index).
-        Forget { id: u32, address: Address },
-        /// Deliberately remove all peers, including recovery of unreadable flash.
-        FactoryReset { id: u32 },
-    }
+    pub type BleCommand = super::messages::Command<Address>;
 
     /// Events the BLE task publishes for the UI / main loop.
-    #[derive(Clone, Format)]
-    pub enum BleEvent {
-        /// Scan started.
-        ScanStarted,
-        /// A new peripheral was found during scanning.
-        DeviceFound(DiscoveredDevice),
-        /// Scan completed (no more results forthcoming).
-        ScanComplete,
-        /// Successfully connected & HID service ready.
-        Connected(String<32>),
-        /// Connection lost or intentionally closed.
-        Disconnected,
-        /// An error occurred (human-readable tag).
-        Error(super::BleErrorTag),
-        PairedDevices {
-            id: u32,
-            devices: heapless::Vec<DiscoveredDevice, { crate::config::MAX_PAIRED_DEVICES }>,
-        },
-        /// Correlated completion; success means the change reached persistent storage.
-        ManagementResult {
-            id: u32,
-            result: Result<(), super::BleErrorTag>,
-        },
-    }
+    pub type BleEvent = super::messages::Event<Address>;
 }
 
 #[cfg(feature = "embedded")]

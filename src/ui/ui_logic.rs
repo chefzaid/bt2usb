@@ -1,11 +1,12 @@
 //! Pure UI state-machine logic (functional core for the main UI loop).
 //!
-//! Holds the `Screen`/`ButtonEvent` types and the **button transition reducer**:
-//! given the current screen and a button press, it returns the next screen plus
-//! the side effects to perform (which BLE command to send, what to redraw) as
-//! data. The `main.rs` loop is the imperative shell that applies the outcome
-//! (channel send + OLED draw). Being I/O-free, this is host-unit-tested (it is
-//! in the pure-core layer, see
+//! Holds the `Screen`/`ButtonEvent` types, the **button transition reducer**,
+//! and the [`UiState`] view model. Given the current screen and a button press,
+//! the reducer returns the next screen and selection plus the command to send,
+//! as data. The UI controller (`ui::controller`) turns that command into a BLE
+//! request, and the display task renders the latest `UiState` whole, so the
+//! reducer does not say what to redraw. Being I/O-free, this is
+//! host-unit-tested (it is in the pure-core layer, see
 //! docs/architecture.md#module-layers-and-dependency-rules).
 
 /// Screens (views) the UI can be in.
@@ -54,75 +55,15 @@ pub enum UiCommand {
     Dismiss,
 }
 
-/// One management operation at a time, with stale replies rejected by identity
-/// and a deadline after which the UI stops waiting for the reply.
-#[derive(Default)]
-pub struct ManagementRequests {
-    next_id: u32,
-    pending: Option<PendingRequest>,
-}
-
-#[derive(Clone, Copy)]
-struct PendingRequest {
-    id: u32,
-    command: UiCommand,
-    deadline_ms: u64,
-}
-
-impl ManagementRequests {
-    /// Start `command` and return its request ID, or `None` while another
-    /// request is pending. The UI waits for the reply until `deadline_ms`.
-    pub fn begin(&mut self, command: UiCommand, deadline_ms: u64) -> Option<u32> {
-        if self.pending.is_some() {
-            return None;
-        }
-        self.next_id = self.next_id.wrapping_add(1);
-        self.pending = Some(PendingRequest {
-            id: self.next_id,
-            command,
-            deadline_ms,
-        });
-        Some(self.next_id)
+impl UiCommand {
+    /// Whether the command changes or reads the saved devices, which the UI
+    /// tracks as one management request at a time.
+    pub fn is_management(self) -> bool {
+        matches!(
+            self,
+            UiCommand::ListPaired | UiCommand::Forget(_) | UiCommand::FactoryReset
+        )
     }
-
-    pub fn is_pending(&self) -> bool {
-        self.pending.is_some()
-    }
-
-    /// Accept the reply to the pending request, identified by its ID. Any
-    /// other ID, including that of a request that already timed out, is
-    /// ignored.
-    pub fn complete(&mut self, id: u32) -> Option<UiCommand> {
-        if self.pending.is_some_and(|pending| pending.id == id) {
-            self.pending.take().map(|pending| pending.command)
-        } else {
-            None
-        }
-    }
-
-    /// Stop waiting once the deadline has passed, and return the abandoned
-    /// command. A reply that still arrives carries the abandoned ID, so
-    /// [`complete`](Self::complete) ignores it.
-    pub fn expire(&mut self, now_ms: u64) -> Option<UiCommand> {
-        match self.pending {
-            Some(pending) if now_ms >= pending.deadline_ms => {
-                self.pending = None;
-                Some(pending.command)
-            }
-            _ => None,
-        }
-    }
-}
-
-/// Which view the shell should redraw after applying an outcome. The shell owns
-/// the data (device list, connected name) needed to actually render.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Redraw {
-    None,
-    Scanning,
-    DeviceList,
-    Home,
-    Current,
 }
 
 /// The result of handling a button press: the new UI state plus the side
@@ -137,8 +78,6 @@ pub struct ButtonOutcome {
     pub reset_devices: bool,
     /// BLE command to send, if any.
     pub command: Option<UiCommand>,
-    /// What to redraw.
-    pub redraw: Redraw,
 }
 
 /// Decide the next UI state + side effects for a button press.
@@ -164,7 +103,6 @@ pub fn on_button(
         selected,
         reset_devices: false,
         command: None,
-        redraw: Redraw::None,
     };
 
     match (screen, btn) {
@@ -175,13 +113,11 @@ pub fn on_button(
             out.screen = Screen::Managing;
             out.selected = 0;
             out.command = Some(UiCommand::ListPaired);
-            out.redraw = Redraw::Current;
         }
         (Screen::Error, ButtonEvent::Down)
         | (Screen::Notice | Screen::NoReply, ButtonEvent::Select) => {
             out.screen = Screen::Home;
             out.command = Some(UiCommand::Dismiss);
-            out.redraw = Redraw::Current;
         }
         (Screen::SavedDevices, ButtonEvent::Up) => {
             if selected == 0 {
@@ -190,11 +126,9 @@ pub fn on_button(
             } else {
                 out.selected -= 1;
             }
-            out.redraw = Redraw::Current;
         }
         (Screen::SavedDevices, ButtonEvent::Down) => {
             out.selected = selected.saturating_add(1).min(device_count);
-            out.redraw = Redraw::Current;
         }
         (Screen::SavedDevices, ButtonEvent::Select) => {
             out.screen = if selected < device_count {
@@ -203,31 +137,25 @@ pub fn on_button(
                 Screen::ConfirmReset
             };
             out.selected = 0; // A repeated SELECT always cancels, never deletes.
-            out.redraw = Redraw::Current;
         }
         (Screen::ConfirmForget(_) | Screen::ConfirmReset, ButtonEvent::Up) => {
             out.selected = 0;
-            out.redraw = Redraw::Current;
         }
         (Screen::ConfirmForget(_) | Screen::ConfirmReset, ButtonEvent::Down) => {
             out.selected = 1;
-            out.redraw = Redraw::Current;
         }
         (Screen::ConfirmForget(_) | Screen::ConfirmReset, ButtonEvent::Select) if selected == 0 => {
             // The index isn't needed for cancellation; return to the saved list.
             out.screen = Screen::SavedDevices;
             out.selected = 0;
-            out.redraw = Redraw::Current;
         }
         (Screen::ConfirmForget(index), ButtonEvent::Select) => {
             out.screen = Screen::Managing;
             out.command = Some(UiCommand::Forget(index));
-            out.redraw = Redraw::Current;
         }
         (Screen::ConfirmReset, ButtonEvent::Select) => {
             out.screen = Screen::Managing;
             out.command = Some(UiCommand::FactoryReset);
-            out.redraw = Redraw::Current;
         }
         // Start a scan from Home or after an error.
         (Screen::Home, ButtonEvent::Select) | (Screen::Error, ButtonEvent::Select) => {
@@ -235,31 +163,20 @@ pub fn on_button(
             out.selected = 0;
             out.reset_devices = true;
             out.command = Some(UiCommand::StartScan);
-            out.redraw = Redraw::Scanning;
         }
 
         // Navigate the device list.
         (Screen::DeviceList, ButtonEvent::Up) => {
             out.selected = selected.saturating_sub(1);
-            out.redraw = Redraw::DeviceList;
         }
-        (Screen::DeviceList, ButtonEvent::Down) => {
-            let next = if selected < device_count.saturating_sub(1) {
-                selected + 1
-            } else {
-                selected
-            };
-            if next != selected {
-                out.selected = next;
-                out.redraw = Redraw::DeviceList;
-            }
+        (Screen::DeviceList, ButtonEvent::Down) if selected < device_count.saturating_sub(1) => {
+            out.selected = selected + 1;
         }
 
         // Connect to the highlighted device.
         (Screen::DeviceList, ButtonEvent::Select) if device_count > 0 => {
             out.screen = Screen::Connecting;
             out.command = Some(UiCommand::Connect(selected));
-            out.redraw = Redraw::Scanning;
         }
 
         // From Connected: SELECT rescans (to add another device)...
@@ -268,13 +185,11 @@ pub fn on_button(
             out.selected = 0;
             out.reset_devices = true;
             out.command = Some(UiCommand::StartScan);
-            out.redraw = Redraw::Scanning;
         }
         // ...DOWN disconnects and returns home.
         (Screen::Connected, ButtonEvent::Down) => {
             out.screen = Screen::Home;
             out.command = Some(UiCommand::Disconnect);
-            out.redraw = Redraw::Home;
         }
 
         _ => {}

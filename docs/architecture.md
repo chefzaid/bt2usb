@@ -54,8 +54,9 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 
 | Area | Layer | Responsibility |
 | --- | --- | --- |
-| [main.rs](../src/main.rs) | Entry point | Hardware setup, task spawning, channels, UI loop |
-| [sim.rs](../src/sim.rs) | Entry point | SoftDevice-free Renode entry point and synthetic BLE scenario |
+| [main.rs](../src/main.rs) | Entry point | Hardware setup, task spawning, channels, and the UI loop that runs the UI controller |
+| [sim.rs](../src/sim.rs) | Entry point | SoftDevice-free Renode entry point: UART console, button tasks, and the UI loop over the UI controller |
+| [sim_ble.rs](../src/sim_ble.rs) | Simulation shell | Renode stand-in for the BLE coordinator task: the real coordinator reducers, scan merging, management barrier and commit, and device list, with workers, radio, and flash that answer at once |
 | [selftest.rs](../src/selftest.rs) | Entry point | Staged board bring-up image |
 | [lib.rs](../src/lib.rs) | Host crate | Host-test entry point for hardware-free logic |
 | [config.rs](../src/config.rs) | Constants | Timing, scan, connection, USB identity, and storage constants |
@@ -63,13 +64,14 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [power.rs](../src/power.rs) | Board shell | Activity tracking and power state over `embassy-time` |
 | [power_logic.rs](../src/power_logic.rs) | Pure core | Pure power/display policy |
 | [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement |
-| [ble/mod.rs](../src/ble/mod.rs) | Board shell | BLE command/event types and the GAP procedure lock |
+| [ble/mod.rs](../src/ble/mod.rs) | Board shell | `BleCommand`, `BleEvent`, and `DiscoveredDevice` over the SoftDevice `Address`, and the GAP procedure lock |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot and event reducers |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
-| [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management quiescence and transactional commit primitives |
+| [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives |
+| [ble/messages.rs](../src/ble/messages.rs) | Pure core | UI-to-coordinator commands and coordinator-to-UI events, generic over the address type |
 | [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator task, slot command and event types, user scans, saved-device management |
 | [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | Connection worker run once per slot: connect, secure, HID client, background reconnect |
 | [ble/bonder.rs](../src/ble/bonder.rs) | Board shell | SoftDevice security handler: bond storage and the answer to connection-parameter requests |
@@ -89,7 +91,8 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [storage/devices.rs](../src/storage/devices.rs) | Pure core | Paired-device list: fail-closed load, legacy format, identity merge, eviction, forget, factory reset |
 | [storage/framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs) | Pure core | Versioned frame and record validation |
 | [storage/codec.rs](../src/storage/codec.rs) | Pure core | Device, address, and bond record codec |
-| [ui/ui_logic.rs](../src/ui/ui_logic.rs) | Pure core | Screens, button reducer, view model, management request IDs |
+| [ui/controller.rs](../src/ui/controller.rs) | Pure core | UI loop decisions: the command each button press sends, how each coordinator event changes the view, management request IDs and deadlines, error messages |
+| [ui/ui_logic.rs](../src/ui/ui_logic.rs) | Pure core | Screens, button reducer, view model |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | Pure core | Device-list window and scan spinner |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | Pure core | OLED retry backoff policy |
 | [ui/display.rs](../src/ui/display.rs) | Board shell | OLED task, rendering, STOP-safe I2C wrapper |
@@ -104,9 +107,9 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests |
+| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
-| Entry points | `main.rs`, `selftest.rs`, `sim.rs` | One binary each | Embedded or simulation build; Renode for `sim.rs` |
+| Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
 `lib.rs` mounts the shared files with `#[path]` attributes and re-exports them
@@ -123,7 +126,7 @@ flowchart TD
     subgraph entry [Entry points]
         MAIN["main.rs"]
         SELF["selftest.rs"]
-        SIM["sim.rs"]
+        SIM["sim.rs and sim_ble.rs"]
     end
     subgraph shell [Board shell]
         MC["ble::multi_conn"]
@@ -139,15 +142,15 @@ flowchart TD
         SDS["sd_setup and stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, reconnect, conn_params, management, long_read, adv_parser"]
+        BC["ble::coordinator, messages, reconnect, conn_params, management, long_read, adv_parser"]
         HID["hid modules"]
-        UIL["ui::ui_logic, input_logic, display_logic"]
+        UIL["ui::controller, ui_logic, input_logic, display_logic"]
         PL["power_logic"]
         SF["storage::devices, codec, framing, record"]
     end
     MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & UIL & HID
     SELF --> USB & DSP & SDS & BC & HID
-    SIM --> BC & UIL & BTN
+    SIM --> BC & UIL & BTN & SF
     MC --> BND & SC & ST & BC
     SW --> MC & BND & HC & SC & USB & BC & HID
     BND --> ST & BC
@@ -158,6 +161,7 @@ flowchart TD
     PWR --> PL
     DSP --> UIL
     BTN --> UIL
+    UIL --> BC
 ```
 
 The edges above come from the `use` statements in each file. The rules they
@@ -276,7 +280,8 @@ appear in the code and reach the host through RTT; see
 7. Creates TWIM0 on P0.26/P0.27 with internal pull-ups and a 64-byte RAM
    transmit buffer, spawns `display_task` and the three button tasks, and logs
    `"UI and isolated OLED tasks started"`.
-8. Creates the `UiState`, `PowerManager`, management request tracker, and a
+8. Creates the `UiController` (which holds the `UiState`, the management
+   request tracker, and the saved-device addresses), the `PowerManager`, and a
    1-second housekeeping ticker, publishes the first frame, and enters the UI
    loop.
 
@@ -344,9 +349,11 @@ which can be too late for a firmware setup key.
 ### User Scan, Connect, Pairing And HID Discovery
 
 1. SELECT on Home, on an error screen, or on Connected (to add a second device)
-   moves the UI to Scanning and yields `UiCommand::StartScan`. `main` uses
+   moves the UI to Scanning and yields `UiCommand::StartScan`, which
+   `UiController::button` returns as `BleCommand::StartScan`. `main` uses
    `try_send` for every BLE command; a full command channel shows
-   "Busy; try again" instead of blocking the UI loop.
+   "Busy; try again" (`UiController::command_not_sent`) instead of blocking
+   the UI loop.
 2. The coordinator runs `plan_start_scan`, which disconnects both slots only
    when both are occupied, including slots that are reconnecting in the
    background. It then calls `scanner::scan`, which sends `ScanStarted`
@@ -783,16 +790,17 @@ sequenceDiagram
 ```
 
 1. UP on Home, Connected, an error, or a notice shows "Please wait..." and sends
-   `ListPaired`. `ManagementRequests::begin` assigns the next request ID and a
-   deadline `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) away, and allows one
-   outstanding request. While it is pending, `main` ignores button actions.
-   The 1 s housekeeping tick calls `ManagementRequests::expire`; past the
+   `ListPaired`. In `UiController::button`, `ManagementRequests::begin`
+   assigns the next request ID and a deadline `UI_MANAGEMENT_TIMEOUT_SECS`
+   (30 s) away, and allows one outstanding request. While it is pending, the
+   controller ignores button actions. The 1 s housekeeping tick calls
+   `UiController::tick`, which calls `ManagementRequests::expire`; past the
    deadline it drops the request and its saved-device snapshot, and
    `UiState::management_timed_out` shows **No reply** with a message that names
    no outcome (or keeps an error already showing). A later reply carries the
    dropped ID and is ignored.
 2. The coordinator replies with `PairedDevices`, most recently added first.
-   `main` accepts only the reply whose ID matches, keeps the list with its
+   The controller accepts only the reply whose ID matches, keeps the
    addresses, and shows Saved devices unless an error is visible.
 3. Choosing a device, or the final "Factory reset" row, opens a confirmation
    with Cancel selected. Confirming sends `Forget { id, address }`, using the
@@ -803,8 +811,8 @@ sequenceDiagram
    `manage_devices`. Forget finds the record by stable identity, matching the
    stored address or resolving through its IRK; a missing record fails with
    `ManagementFailed`. Forget targets the slots whose reserved address matches
-   that peer; Factory reset targets both slots. Each target receives
-   `Quiesce(token)`.
+   that peer (`management::forget_targets`); Factory reset targets both slots.
+   Each target receives `Quiesce(token)`.
 5. A worker acknowledges once it holds nothing. An idle worker acknowledges at
    once. A worker in backoff or a reconnect scan drops its target, and its entry in the shared reconnect table, first. A
    worker in security, discovery, or the run phase closes the link, waits until
@@ -829,9 +837,13 @@ sequenceDiagram
    "Pairings reset", or the error message. A success notice does not replace
    an error already on screen.
 
-The barrier and commit are host-tested in
-[management.rs](../src/ble/management.rs) and the confirmation and request-ID
-rules in [ui_logic.rs](../src/ui/ui_logic.rs). The worker shutdown on a board
+The targets, barrier, and commit are host-tested in
+[management.rs](../src/ble/management.rs), the confirmation rules in
+[ui_logic.rs](../src/ui/ui_logic.rs), and the request-ID, reply, and timeout
+rules in [controller.rs](../src/ui/controller.rs). The Renode scenario runs
+the same UI controller, targets, barrier, commit, and device list on the
+simulated target, with connection workers that acknowledge at once
+([testing](testing.md#renode-scenario-map)). The worker shutdown on a board
 and power loss during deletion are open
 [TODO.md](../TODO.md) items. Storage rules are in the
 [data model](data-model.md#write-rules).
@@ -856,7 +868,7 @@ flowchart LR
 ```
 
 1. After every event it handles, including the 1-second tick, `main` calls
-   `ui::display::publish(&state, power.display_on())`. That overwrites a
+   `ui::display::publish(&ui.state, power.display_on())`. That overwrites a
    `Signal` with a copy of the view model; `main` never waits for I2C
    ([ADR 0009](adr/0009-isolated-display-task.md)).
 2. `display_task` owns TWIM0 and the panel. It renders only when the newest
@@ -984,7 +996,7 @@ The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
 
 | Task | Role | Mainly waits on |
 | --- | --- | --- |
-| `main` | Setup, then the UI loop: owns `UiState`, `PowerManager`, management IDs, and the saved-device snapshot | Suspend signal, 1 s ticker, `BUTTON_CHANNEL`, `BLE_EVENT_CHANNEL` |
+| `main` | Setup, then the UI loop: owns the `UiController` (view model, management request, saved-device addresses) and the `PowerManager` | Suspend signal, 1 s ticker, `BUTTON_CHANNEL`, `BLE_EVENT_CHANNEL` |
 | `softdevice_task` | Pulls SoftDevice BLE and SoC events and dispatches them; forwards USB power events to the VBUS detector; scan and GATT callbacks run inside it | SWI2/EGU2 wake-ups |
 | `ble_task` | Coordinator: owns the `ConnManager`, flash handle, scan snapshot, and management token; runs scans itself | `BLE_CMD_CHANNEL`, `BLE_SLOT_EVENT_CHANNEL` |
 | `ble_slot_task` (one per link, slots 0 and 1) | Connection workers: connect, secure, discover, then the notification loop, coalescer drain, and LED writer | Slot command channel, SoftDevice, `HID_REPORT_CHANNEL` space |
@@ -995,8 +1007,8 @@ The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
 
 `bt2usb-selftest` spawns only `softdevice_task` and `usb_device_task` and runs
 its stages in `main`. `bt2usb-sim` spawns three instances of one
-`button_task` declared with `pool_size = 3` and runs its scenario loop in
-`main`.
+`button_task` declared with `pool_size = 3` and runs its UI loop and the
+simulated coordinator (`sim_ble::SimBle`) in `main`.
 
 ### Interrupt Priorities
 
@@ -1097,8 +1109,8 @@ Ownership of the data behind them is listed in the
 
 BLE and storage failures reach the UI as `BleErrorTag` values (re-exported
 from `coordinator::ErrorTag`), carried by `BleEvent::Error` or a
-`ManagementResult`; `main` maps each tag to one fixed OLED message in
-`ble_error_message`, and the UI adds a few messages of its own. `DeviceStore`
+`ManagementResult`; the UI controller maps each tag to one fixed OLED message
+in `controller::error_message`, and the UI adds a few messages of its own. `DeviceStore`
 returns `StoreError::{Unreadable, Serialization, Flash, NotFound}`, and the
 coordinator collapses every one of them into `StorageFailed`; a load failure
 produces no `StoreError` but disables writes and raises `StorageFailed` once at
@@ -1123,7 +1135,7 @@ should do about each message is in
 | Flash write | 3 attempts, 20 ms apart | `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
 | USB endpoint write | 100 ms deadline | Replay current state; back off 20 ms doubling to 1 s | [delivery.rs](../src/hid/delivery.rs) |
 | OLED operation | 500 ms, then STOP and keep waiting | Re-initialize after 1 s doubling to 30 s | [display.rs](../src/ui/display.rs), [display_logic.rs](../src/ui/display_logic.rs) |
-| Management request | None | UI waits for the reply | [main.rs](../src/main.rs) |
+| Management request | `UI_MANAGEMENT_TIMEOUT_SECS` (30 s), checked on the 1 s tick | The UI stops waiting and shows No reply; a late reply carries the abandoned ID and is ignored | [controller.rs](../src/ui/controller.rs) |
 
 What is retried is current state, not a stale packet or a stale address: USB
 recovery replays the latest held input, and every bonded reconnect resolves the

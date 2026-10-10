@@ -1,6 +1,6 @@
 //! Management transaction primitives shared by the live BLE tasks and tests.
 
-use crate::ble::coordinator::MAX_CONNECTIONS;
+use crate::ble::coordinator::{ConnManager, MAX_CONNECTIONS};
 
 /// A command-specific barrier prevents a queued Connected/LinkLost event from
 /// recreating a forgotten bond while connection workers are cancelling. Workers
@@ -36,6 +36,17 @@ impl Quiescence {
     pub fn complete(&self) -> bool {
         !self.pending.iter().any(|&pending| pending)
     }
+}
+
+/// The slots a Forget must quiesce before the store changes: those whose
+/// connected or reserved address belongs to the forgotten peer, as `is_peer`
+/// decides (the firmware also resolves the peer's private addresses there).
+/// A factory reset quiesces every slot instead.
+pub fn forget_targets<A: Clone + PartialEq>(
+    manager: &ConnManager<A>,
+    is_peer: impl Fn(&A) -> bool,
+) -> [bool; MAX_CONNECTIONS] {
+    core::array::from_fn(|slot| manager.slot_address(slot).is_some_and(&is_peer))
 }
 
 /// Publish a new in-memory store only after persistence succeeds. The live
@@ -113,6 +124,23 @@ mod tests {
         assert!(barrier.acknowledge(0, 41));
         assert!(barrier.complete());
         assert!(barrier.suppresses(0));
+    }
+
+    #[test]
+    fn forget_targets_connected_and_reconnecting_slots_of_the_peer_only() {
+        use crate::ble::coordinator::DeviceInfo;
+        let device = |address: u8| DeviceInfo {
+            address,
+            name: heapless::String::new(),
+            rssi: -50,
+        };
+        let mut manager = ConnManager::new();
+        assert_eq!(forget_targets(&manager, |_: &u8| true), [false, false]);
+        manager.connect_slot(0, &device(7));
+        manager.reserve_slot(1, &device(9)); // link lost, retrying in the background
+        assert_eq!(forget_targets(&manager, |a| *a == 9), [false, true]);
+        assert_eq!(forget_targets(&manager, |a| *a == 7), [true, false]);
+        assert_eq!(forget_targets(&manager, |a| *a == 8), [false, false]);
     }
 
     #[test]

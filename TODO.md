@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 28 | 0 | 0 |
+| [FIXME](#fixme) | 30 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **113** | **73** | **21** |
+| **Total** | **115** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -309,6 +309,20 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the fact-check of ADR 0019. Fixed: all three use `FlashBuffer`, a
   `#[repr(align(4))]` wrapper in `src/sd_setup.rs`
   ([write rules](docs/data-model.md#write-rules)).
+- [x] **P3** **The button reducer computed a redraw hint nothing read.**
+  `ui_logic::on_button` returned `ButtonOutcome::redraw` (`Redraw::{None,
+  Scanning, DeviceList, Home, Current}`) for every press, and seven host-test
+  assertions checked it, but since the display task began rendering the whole
+  latest `UiState` ([ADR 0009](docs/adr/0009-isolated-display-task.md)) no
+  firmware path read it; only the Renode build logged it. Found while moving
+  the UI loop into `ui::controller`; fixed by removing `Redraw` and the field.
+- [x] **P3** **The architecture retry table said management requests wait
+  forever.** Its "Management request" row read "None | UI waits for the reply",
+  although the UI has given up after `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) and
+  shown **No reply** since the bounded management wait landed. Found while
+  updating the guide for the controller; fixed: the row names the deadline,
+  the No reply screen, and `controller.rs`
+  ([retries](docs/architecture.md#retries-deadlines-and-backoff)).
 
 ## Needs Your Input
 
@@ -733,7 +747,7 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   *(hardware evidence pending)*
 - [x] Tag saved-device list, Forget, and reset requests with a unique ID and
   allow one at a time, so a delayed or duplicate reply cannot complete a newer
-  action (`src/ui/ui_logic.rs` `ManagementRequests`, `src/main.rs`,
+  action (`ManagementRequests`, in `src/ui/controller.rs` since 2026-10-10,
   `src/ble/multi_conn.rs`). Reducer tests cover stale IDs and ID wraparound.
 - [x] Hold TWIM NACK/overrun errors until the peripheral reports STOPPED. The
   pinned driver returns before STOPPED, which could release display-interface's
@@ -769,7 +783,7 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   failure, bond replacement, full-store eviction, unsupported reports, and
   security failures with useful user actions. Today a failed save shows only
   the generic `Storage failed` error, and a link that cannot be secured shows
-  `Connect failed` (`ble_error_message` in `src/main.rs`). Three cases do not
+  `Connect failed` (`controller::error_message` in `src/ui/controller.rs`). Three cases do not
   reach the user at all. A newly paired device whose identity address matches
   a stored peer replaces that peer's record and bond (`DeviceStore::add` in
   `src/storage.rs`, `Bonder::on_bonded` in `src/ble/bonder.rs`), leaving
@@ -1065,16 +1079,23 @@ Host tests, simulation, and code-health work. Context:
   the log lines; host line coverage rose to 97.90%
   ([testing](docs/testing.md#pairing-storage); [data model](docs/data-model.md#pairing-store);
   `src/storage.rs`, `src/lib.rs`).
-- [ ] **P1** **Broaden the Renode scenarios.** The Robot test runs one scripted
-  scenario; it does not exercise the OLED task or the saved-device management
-  screens. It also does not exercise link loss: step 2 of the scenario logs
-  `scenario: slot 0 link lost` but calls `coordinator::on_slot_disconnected`,
-  which frees the slot, instead of `coordinator::on_slot_link_lost`, which keeps
-  it reserved for reconnection (`src/sim.rs` `scenario_step`). Make step 2 call
-  `on_slot_link_lost` and add scenarios for the other two paths. Accept when
-  `mask sim-test` and the CI simulation job assert the reserved slot after a
-  link loss, the OLED task, and the management screens through UART output
-  ([testing](docs/testing.md#renode-scenario-map)).
+- [ ] **P1** **Broaden the Renode scenarios.** Since 2026-10-10 the Robot
+  test covers link loss and the saved-device management screens. Step 2 of the
+  scenario now calls `coordinator::on_slot_link_lost`, and the test asserts
+  `slot 0 kept reserved for 0xa1` with `active_count=1 occupied_count=2`; until
+  then it called `on_slot_disconnected`, which frees the slot, under a "link
+  lost" label. The simulation runs the firmware's UI loop decisions, moved
+  out of `main.rs` into the host-tested `ui::controller` (16 tests), and a
+  simulated coordinator (`src/sim_ble.rs`) that calls the real coordinator
+  reducers, `merge_advertisement`, `management::{forget_targets, Quiescence,
+  commit}`, and `DeviceList` with its codec, reading every saved item back.
+  The test lists the saved devices, cancels and then confirms a Forget of the
+  device whose slot is reserved, and confirms a Factory reset; it passed
+  locally with Renode 1.16.1
+  ([scenario map](docs/testing.md#renode-scenario-map)). Still open: the
+  OLED task. Renode's nRF52840 model has no TWIM (EasyDMA I2C) or SSD1306, so
+  `display::run` cannot run there yet. Accept when `mask sim-test` and the CI
+  simulation job also assert the OLED task's output.
 - [x] **P1** **Coverage and firmware documentation in CI.** Since 2026-10-10
   the Host coverage job runs `cargo llvm-cov` 0.9.1, uploads the summary,
   lcov, and HTML reports as `coverage-report-<attempt>`, and then fails below

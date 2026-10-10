@@ -10,9 +10,11 @@
 //! - the GPIO button driver (real `ui::buttons` code, on P0.11/12/24), driven
 //!   by edges injected on the simulated pins (`gpio0 OnGPIO <pin> <level>`;
 //!   buttons are active-low, so `false` = pressed, `true` = released),
-//! - the **real** host-tested logic — `ui::ui_logic` (screen transitions) and
-//!   `ble::coordinator` (connection-slot state machine + reducers) — driven by a
-//!   synthetic BLE scenario, with `Address` substituted by a `u32` stand-in.
+//! - the firmware's UI loop decisions (`ui::controller`, with `ui::ui_logic`
+//!   underneath), fed by the buttons and by the simulated BLE side in
+//!   [`sim_ble`], which runs the **real** host-tested coordinator reducers, scan
+//!   merging, management barrier and commit, and paired-device list with its
+//!   flash record codec, with `Address` substituted by a `u32` stand-in.
 //!
 //! Output is written to **UART0** (Renode's `uart0`), which Renode shows on its
 //! console / analyzer with no probe or decoder. See docs/testing.md.
@@ -26,6 +28,16 @@
 mod ble;
 mod config;
 mod ui;
+
+// The pure parts of the paired-device store, mounted as the host library mounts
+// them: inside this inline module the files resolve to `src/storage/`. The
+// flash shell (`storage.rs`) needs the SoftDevice and is not part of this build.
+mod storage {
+    pub mod codec;
+    pub mod devices;
+    pub mod framing;
+    pub mod record;
+}
 
 use core::fmt::Write as _;
 
@@ -41,21 +53,16 @@ use embassy_nrf::uarte::{self, Uarte};
 use embassy_nrf::{bind_interrupts, peripherals, Peri};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use embassy_time::{Duration, Timer};
+use embassy_time::{Duration, Instant, Timer};
 use heapless::String;
 
-use crate::ble::coordinator::{self, Action, ConnManager, DeviceInfo, UiEvent};
-use crate::ui::ui_logic::{self, Redraw, UiCommand};
-use crate::ui::{ButtonEvent, Screen};
+use crate::ble::messages::{Command, Event};
+use crate::ui::controller::UiController;
+use crate::ui::ButtonEvent;
 
 bind_interrupts!(struct Irqs {
     UARTE0 => uarte::InterruptHandler<peripherals::UARTE0>;
 });
-
-/// Stand-in for the SoftDevice `Address` type, which is unavailable without the
-/// radio stack. The coordinator is generic over the address type precisely so
-/// the same logic runs here and in the real firmware.
-type SimAddr = u32;
 
 static BUTTON_CHANNEL: Channel<CriticalSectionRawMutex, ButtonEvent, 4> = Channel::new();
 
@@ -69,96 +76,90 @@ async fn button_task(pin: Peri<'static, AnyPin>, event: ButtonEvent) -> ! {
     ui::buttons::button_task(pin, event, &BUTTON_CHANNEL.sender()).await
 }
 
-/// Format a line and write it to UART0 (Renode console). EasyDMA needs the
-/// source buffer in RAM, which a stack `String` satisfies.
-macro_rules! slog {
-    ($uart:expr, $($arg:tt)*) => {{
-        let mut line: String<160> = String::new();
-        let _ = write!(line, $($arg)*);
+/// UART0, which Renode shows as the simulation's console.
+pub struct Console(Uarte<'static, UARTE0>);
+
+impl Console {
+    /// Write one line. EasyDMA needs the source buffer in RAM, which a stack
+    /// `String` satisfies; a line longer than the buffer is cut short.
+    pub fn line(&mut self, args: core::fmt::Arguments<'_>) {
+        let mut line: String<200> = String::new();
+        let _ = line.write_fmt(args);
         let _ = line.push_str("\r\n");
-        let _ = $uart.blocking_write(line.as_bytes());
-    }};
-}
-
-fn name32(s: &str) -> String<32> {
-    let mut n = String::new();
-    let _ = n.push_str(s);
-    n
-}
-
-fn log_action(uart: &mut Uarte<'static, UARTE0>, action: &Action<SimAddr>) {
-    match action {
-        Action::DisconnectSlot(slot) => slog!(uart, "  action: DisconnectSlot({})", slot),
-        Action::ConnectSlot { slot, device } => {
-            slog!(
-                uart,
-                "  action: ConnectSlot slot={} addr={:#x}",
-                slot,
-                device.address
-            )
-        }
-        Action::PersistDevice(device) => {
-            slog!(uart, "  action: PersistDevice addr={:#x}", device.address)
-        }
-        Action::Emit(UiEvent::Connected(name)) => {
-            slog!(uart, "  action: UI Connected '{}'", name.as_str())
-        }
-        Action::Emit(UiEvent::Disconnected) => slog!(uart, "  action: UI Disconnected"),
-        Action::Emit(UiEvent::Error(_)) => slog!(uart, "  action: UI Error"),
+        let _ = self.0.blocking_write(line.as_bytes());
     }
 }
 
-/// Drive one step of a synthetic BLE scenario through the real coordinator
-/// reducers, logging the decisions. This runs the exact host-tested logic on the
-/// simulated MCU (connect kbd → connect mouse → drop one → disconnect all).
-fn scenario_step(
-    uart: &mut Uarte<'static, UARTE0>,
-    step: u32,
-    manager: &mut ConnManager<SimAddr>,
-    devices: &[DeviceInfo<SimAddr>],
+/// Format a line and write it to the console.
+macro_rules! slog {
+    ($console:expr, $($arg:tt)*) => {
+        $console.line(format_args!($($arg)*))
+    };
+}
+
+// Declared after `slog!` so the macro is in scope there.
+mod sim_ble;
+
+use crate::sim_ble::{SimAddr, SimBle};
+
+fn log_command(console: &mut Console, command: &Command<SimAddr>) {
+    match command {
+        Command::StartScan => slog!(console, "  cmd: StartScan"),
+        Command::Connect(index) => slog!(console, "  cmd: Connect({})", index),
+        Command::Disconnect => slog!(console, "  cmd: Disconnect"),
+        Command::ListPaired { id } => slog!(console, "  cmd: ListPaired id={}", id),
+        Command::Forget { id, address } => {
+            slog!(console, "  cmd: Forget id={} addr={:#x}", id, address)
+        }
+        Command::FactoryReset { id } => slog!(console, "  cmd: FactoryReset id={}", id),
+    }
+}
+
+fn describe(out: &mut impl core::fmt::Write, event: &Event<SimAddr>) -> core::fmt::Result {
+    match event {
+        Event::ScanStarted => write!(out, "ScanStarted"),
+        Event::DeviceFound(device) => write!(
+            out,
+            "DeviceFound '{}' addr={:#x} rssi={}",
+            device.name, device.address, device.rssi
+        ),
+        Event::ScanComplete => write!(out, "ScanComplete"),
+        Event::Connected(summary) => write!(out, "Connected '{}'", summary),
+        Event::Disconnected => write!(out, "Disconnected"),
+        Event::Error(tag) => write!(out, "Error {:?}", tag),
+        Event::PairedDevices { id, devices } => {
+            write!(out, "PairedDevices id={} [", id)?;
+            for (index, device) in devices.iter().enumerate() {
+                let separator = if index == 0 { "" } else { ", " };
+                write!(out, "{}'{}'", separator, device.name)?;
+            }
+            write!(out, "]")
+        }
+        Event::ManagementResult { id, result } => {
+            write!(out, "ManagementResult id={} {:?}", id, result)
+        }
+    }
+}
+
+/// Hand each event to the UI controller, as the firmware's loop does when it
+/// receives one, and log the screen it leads to.
+fn apply(
+    console: &mut Console,
+    ui: &mut UiController<SimAddr>,
+    events: impl IntoIterator<Item = Event<SimAddr>>,
 ) {
-    match step % 4 {
-        0 => {
-            slog!(uart, "scenario: connect device 0 (Keyboard)");
-            for a in coordinator::plan_connect(manager, devices, 0) {
-                log_action(uart, &a);
-                if let Action::ConnectSlot { slot, device } = a {
-                    for b in coordinator::on_slot_connected(manager, slot, &device) {
-                        log_action(uart, &b);
-                    }
-                }
-            }
-        }
-        1 => {
-            slog!(uart, "scenario: connect device 1 (Mouse)");
-            for a in coordinator::plan_connect(manager, devices, 1) {
-                log_action(uart, &a);
-                if let Action::ConnectSlot { slot, device } = a {
-                    for b in coordinator::on_slot_connected(manager, slot, &device) {
-                        log_action(uart, &b);
-                    }
-                }
-            }
-        }
-        2 => {
-            slog!(uart, "scenario: slot 0 link lost");
-            for a in coordinator::on_slot_disconnected(manager, 0) {
-                log_action(uart, &a);
-            }
-        }
-        _ => {
-            slog!(uart, "scenario: disconnect all");
-            for a in coordinator::plan_disconnect(manager) {
-                log_action(uart, &a);
-                if let Action::DisconnectSlot(slot) = a {
-                    for b in coordinator::on_slot_disconnected(manager, slot) {
-                        log_action(uart, &b);
-                    }
-                }
-            }
-        }
+    for event in events {
+        let mut text: String<120> = String::new();
+        let _ = describe(&mut text, &event);
+        ui.event(event);
+        slog!(
+            console,
+            "  event: {} -> screen {:?} (selected {})",
+            text,
+            ui.state.screen,
+            ui.state.selected
+        );
     }
-    slog!(uart, "scenario: active_count={}", manager.active_count());
 }
 
 #[embassy_executor::main]
@@ -168,98 +169,64 @@ async fn main(spawner: Spawner) {
     // UART0 for human-readable output (TX=P0.06, RX=P0.08). Renode's uart0
     // model emits the TX bytes regardless of physical pin routing.
     // embassy-nrf 0.7 reordered Uarte::new args to (uarte, rxd, txd, irq, config).
-    let mut uart = Uarte::new(p.UARTE0, p.P0_08, p.P0_06, Irqs, uarte::Config::default());
+    let mut console = Console(Uarte::new(
+        p.UARTE0,
+        p.P0_08,
+        p.P0_06,
+        Irqs,
+        uarte::Config::default(),
+    ));
 
     slog!(
-        &mut uart,
+        console,
         "bt2usb-sim starting (SoftDevice-free Renode build)"
     );
 
     spawner.spawn(unwrap!(button_task(p.P0_11.into(), ButtonEvent::Up)));
     spawner.spawn(unwrap!(button_task(p.P0_12.into(), ButtonEvent::Down)));
     spawner.spawn(unwrap!(button_task(p.P0_24.into(), ButtonEvent::Select)));
+    slog!(console, "buttons ready (UP=P0.11 DOWN=P0.12 SELECT=P0.24)");
+
+    let mut ui = UiController::<SimAddr>::new();
+    let mut ble = SimBle::new();
+
     slog!(
-        &mut uart,
-        "buttons ready (UP=P0.11 DOWN=P0.12 SELECT=P0.24)"
+        console,
+        "entering sim UI loop (screen={:?})",
+        ui.state.screen
     );
-
-    let devices = [
-        DeviceInfo {
-            address: 0xA1,
-            name: name32("Keyboard"),
-            rssi: -42,
-        },
-        DeviceInfo {
-            address: 0xB2,
-            name: name32("Mouse"),
-            rssi: -55,
-        },
-    ];
-    let mut manager: ConnManager<SimAddr> = ConnManager::new();
-
-    let mut screen = Screen::Home;
-    let mut selected: usize = 0;
-    let device_count: usize = devices.len();
-    let mut step: u32 = 0;
-
-    slog!(&mut uart, "entering sim UI loop (screen=Home)");
     loop {
-        // A button press exercises the UI reducer; the 2 s tick advances the
-        // synthetic BLE scenario through the coordinator reducers.
+        // A button press runs the UI controller, and the command it sends, if
+        // any, runs through the simulated BLE side at once. Two seconds without
+        // a press advance the scripted peripheral scenario, so a tick is
+        // "2 s since the last press or tick", not a fixed period.
         match select(
             BUTTON_CHANNEL.receive(),
             Timer::after(Duration::from_secs(2)),
         )
         .await
         {
-            Either::First(btn) => {
-                let outcome = ui_logic::on_button(screen, btn, selected, device_count);
-                screen = outcome.screen;
-                selected = outcome.selected;
+            Either::First(button) => {
+                let command = ui.button(button, Instant::now().as_millis());
                 slog!(
-                    &mut uart,
+                    console,
                     "button {:?} -> screen {:?} (selected {})",
-                    btn,
-                    screen,
-                    selected
+                    button,
+                    ui.state.screen,
+                    ui.state.selected
                 );
-                match outcome.redraw {
-                    Redraw::Scanning => slog!(&mut uart, "  redraw: Scanning"),
-                    Redraw::DeviceList => slog!(&mut uart, "  redraw: DeviceList"),
-                    Redraw::Home => slog!(&mut uart, "  redraw: Home"),
-                    Redraw::Current => slog!(&mut uart, "  redraw: Current"),
-                    Redraw::None => {}
-                }
-                if let Some(cmd) = outcome.command {
-                    match cmd {
-                        UiCommand::StartScan => {
-                            slog!(&mut uart, "  cmd: StartScan");
-                            // No radio here: the scan "finds" the scenario's
-                            // devices at once, via the real scan-complete reducer.
-                            screen = ui_logic::on_scan_complete(device_count);
-                            slog!(
-                                &mut uart,
-                                "  scan: {} devices -> screen {:?}",
-                                device_count,
-                                screen
-                            );
-                        }
-                        UiCommand::Connect(i) => slog!(&mut uart, "  cmd: Connect({})", i),
-                        UiCommand::Disconnect => slog!(&mut uart, "  cmd: Disconnect"),
-                        UiCommand::ListPaired => {
-                            slog!(&mut uart, "  cmd: ListPaired");
-                            screen = Screen::SavedDevices;
-                            selected = 0;
-                        }
-                        UiCommand::Forget(i) => slog!(&mut uart, "  cmd: Forget({})", i),
-                        UiCommand::FactoryReset => slog!(&mut uart, "  cmd: FactoryReset"),
-                        UiCommand::Dismiss => slog!(&mut uart, "  cmd: Dismiss"),
-                    }
+                if let Some(command) = command {
+                    log_command(&mut console, &command);
+                    let events = ble.command(&mut console, command).await;
+                    apply(&mut console, &mut ui, events);
                 }
             }
-            Either::Second(_) => {
-                scenario_step(&mut uart, step, &mut manager, &devices);
-                step = step.wrapping_add(1);
+            Either::Second(()) => {
+                let events = ble.scenario_step(&mut console);
+                apply(&mut console, &mut ui, events);
+                if ui.tick(Instant::now().as_millis(), true) {
+                    slog!(console, "ui: management request got no reply");
+                }
             }
         }
     }

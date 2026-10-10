@@ -55,8 +55,8 @@ are not translated.
 | Coalescing and independent endpoint workers | Software-verified (including async workers with fake sinks) | [`hid/coalesce.rs`](../src/hid/coalesce.rs), [`hid/delivery.rs`](../src/hid/delivery.rs) | [Endpoint Workers](#endpoint-workers) |
 | Remote wakeup on new presses only | Software-verified (policy) | [`hid/wake.rs`](../src/hid/wake.rs), [`usb/hid_device.rs`](../src/usb/hid_device.rs) | [Remote Wakeup](#remote-wakeup) |
 | Versioned, fail-closed pairing store | Software-verified (framing, record validation, commit) | [`storage.rs`](../src/storage.rs), [`storage/`](../src/storage/) | [Pairing Storage](#pairing-storage), [ADR 0006](adr/0006-fail-closed-pairing-store.md) |
-| Saved-device Forget and Factory reset | Software-verified (UI reducer, request IDs, quiescence, commit) | [`ui/ui_logic.rs`](../src/ui/ui_logic.rs), [`ble/management.rs`](../src/ble/management.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Saved-Device Management](#saved-device-management) |
-| OLED screens and three-button navigation | Software-verified (reducer; Renode drives the button driver) | [`ui/`](../src/ui/), [`main.rs`](../src/main.rs) | [Using The Bridge](#using-the-bridge) |
+| Saved-device Forget and Factory reset | Software-verified (UI reducer, request IDs, quiescence, commit; Renode runs them on the target) | [`ui/ui_logic.rs`](../src/ui/ui_logic.rs), [`ui/controller.rs`](../src/ui/controller.rs), [`ble/management.rs`](../src/ble/management.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Saved-Device Management](#saved-device-management) |
+| OLED screens and three-button navigation | Software-verified (reducer and controller; Renode drives the button driver through them) | [`ui/`](../src/ui/), [`main.rs`](../src/main.rs) | [Using The Bridge](#using-the-bridge) |
 | Isolated display task with fault recovery | Software-verified (backoff policy) | [`ui/display.rs`](../src/ui/display.rs), [`ui/display_logic.rs`](../src/ui/display_logic.rs) | [Local UI And Power](#local-ui-and-power), [ADR 0009](adr/0009-isolated-display-task.md) |
 | Activity-driven display power, no System-OFF | Software-verified (policy) | [`power_logic.rs`](../src/power_logic.rs), [`power.rs`](../src/power.rs) | [Wake and display](#wake-and-display), [ADR 0012](adr/0012-bus-powered-no-system-off.md) |
 | Board self-test image | Implemented | [`selftest.rs`](../src/selftest.rs) | [Bring-Up And Diagnostics](#bring-up-and-diagnostics) |
@@ -765,7 +765,7 @@ sequenceDiagram
   request only if its ID matches, so a late or duplicate reply cannot finish a
   newer request; IDs stay distinct across wraparound. The UI gives up on a
   request after 30 seconds, so a reply to it that arrives later is ignored too
-  ([`ui/ui_logic.rs`](../src/ui/ui_logic.rs) `ManagementRequests`).
+  ([`ui/controller.rs`](../src/ui/controller.rs) `ManagementRequests`).
 - **Stable targets.** Forget carries the device's address from the list
   snapshot, never a list index. The coordinator targets any slot holding that
   address or an address its identity key resolves.
@@ -780,14 +780,19 @@ sequenceDiagram
   erases unreadable data. Factory reset also discards the last scan list.
 
 Host tests cover stale and wrapped request IDs, default-Cancel confirmations,
-the quiescence barrier, and failed or cancelled commits. Hardware evidence still
+the quiescence barrier, and failed or cancelled commits. The Renode scenario
+lists the saved devices, cancels and then confirms a Forget of a device whose
+link dropped while its slot was still reserved, and confirms a Factory reset,
+on the simulated target with connection workers that acknowledge at once
+([testing](testing.md#renode-scenario-map)). Hardware evidence still
 needed: a forgotten device must not reconnect across a reboot, and an
 interrupted write must leave a documented state ([TODO.md](../TODO.md)).
 
 ## Local UI And Power
 
 - **Latest-frame display.** The UI loop in [`main.rs`](../src/main.rs) owns the
-  screen state and publishes a snapshot after every event; it never waits for
+  UI controller, which holds the screen state, and publishes a snapshot after
+  every event; it never waits for
   I2C. A separate display task owns the TWIM0 bus and the SSD1306, and renders
   only the newest snapshot it has not yet drawn
   ([ADR 0009](adr/0009-isolated-display-task.md)).
@@ -876,13 +881,18 @@ are open work.
   fails when host line coverage drops below 97%
   ([coverage in CI](code-quality.md#coverage-in-ci)).
 - The `bt2usb-sim` binary boots without the SoftDevice or USB on Renode's
-  nRF52840 model. It runs the real button driver and the real UI and
-  coordinator logic against a synthetic BLE scenario, writing to UART0. Custom
-  GPIO and GPIOTE models implement the pin SENSE, LATCH, and PORT event chain
-  that embassy-nrf waits on ([ADR 0014](adr/0014-renode-gpio-models.md)). The
-  headless Robot test `Sim Boots And Runs Coordinator And UI Logic` presses the
-  three buttons and checks the scenario output (`mask sim-test`,
-  [testing](testing.md#renode-simulation)).
+  nRF52840 model. It runs the real button driver, the firmware's UI
+  controller, and the real coordinator reducers, scan merging, management
+  barrier and commit, and paired-device list with its flash record codec,
+  against a scripted BLE scenario, writing to UART0. Custom GPIO and GPIOTE
+  models implement the pin SENSE, LATCH, and PORT event chain that
+  embassy-nrf waits on ([ADR 0014](adr/0014-renode-gpio-models.md)). The
+  headless Robot test
+  `Sim Runs The UI Controller, Coordinator, Management, And Store` presses the
+  three buttons through a scan and connect, a link loss that keeps its slot
+  reserved, a cancelled and a confirmed Forget, and a Factory reset, and checks
+  the output (`mask sim-test`,
+  [testing](testing.md#renode-scenario-map)).
 
 ### Builds, Toolchain And Tasks
 

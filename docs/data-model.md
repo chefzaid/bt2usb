@@ -69,11 +69,11 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
 | Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 12 merge, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
 | Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
-| Persist-then-publish commit and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 5 host tests | None recorded |
+| Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
 | USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs), [usb/host_requests.rs](../src/usb/host_requests.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
-| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs) | 26 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs); Renode scenario | None recorded |
-| UI state model | [ui/ui_logic.rs](../src/ui/ui_logic.rs) | 19 host tests; Renode scenario | None recorded |
+| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/messages.rs](../src/ble/messages.rs) | 32 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and 3 in `messages.rs`; Renode scenario | None recorded |
+| UI state model and request tracking | [ui/ui_logic.rs](../src/ui/ui_logic.rs), [ui/controller.rs](../src/ui/controller.rs) | 30 host tests in [ui_logic_tests.rs](../src/ui/ui_logic_tests.rs) and 16 in [controller_tests.rs](../src/ui/controller_tests.rs); Renode scenario | None recorded |
 
 [Testing](testing.md#known-verification-gaps) lists the missing fuzzing, fault
 injection, and hardware evidence. The `mask selftest` flash stage exercises the
@@ -516,8 +516,12 @@ backpressure ([hid/coalesce.rs](../src/hid/coalesce.rs)).
 
 ### BleCommand
 
-UI to coordinator, defined in [ble/mod.rs](../src/ble/mod.rs). The UI loop
-builds it from a `UiCommand`.
+UI to coordinator. The variants are `messages::Command<A>` in
+[ble/messages.rs](../src/ble/messages.rs), generic over the address type;
+`BleCommand` in [ble/mod.rs](../src/ble/mod.rs) is that type over the
+SoftDevice `Address`, and the host tests and the Renode build use stand-ins.
+`UiController::button` in [ui/controller.rs](../src/ui/controller.rs) builds it
+from the reducer's `UiCommand`.
 
 | Variant | Fields | Meaning | Reply |
 | --- | --- | --- | --- |
@@ -533,7 +537,11 @@ A Factory reset also discards the coordinator's last scan result, so a later
 
 ### BleEvent
 
-Coordinator to UI, defined in [ble/mod.rs](../src/ble/mod.rs).
+Coordinator to UI: `messages::Event<A>` in
+[ble/messages.rs](../src/ble/messages.rs), aliased over `Address` as
+`BleEvent` in [ble/mod.rs](../src/ble/mod.rs). `UiController::event` applies
+it to the view; the coordinator's own `UiEvent` (link status and errors)
+converts into it with `From`.
 
 | Variant | Fields | Produced when |
 | --- | --- | --- |
@@ -603,7 +611,9 @@ debounced press. Electrical details are in
 This table is the contract for user-visible errors. `BleErrorTag` is the
 coordinator's `ErrorTag` ([ble/coordinator.rs](../src/ble/coordinator.rs)),
 re-exported in [ble/mod.rs](../src/ble/mod.rs); the OLED text comes from
-`ble_error_message` in [main.rs](../src/main.rs). How errors propagate is in
+`controller::error_message` in [ui/controller.rs](../src/ui/controller.rs),
+which a host test keeps distinct for every tag and within the 21 characters a
+display line holds. How errors propagate is in
 [architecture](architecture.md#how-errors-surface); what a user should do is in
 [features](features.md#notices-and-errors).
 
@@ -622,7 +632,7 @@ re-exported in [ble/mod.rs](../src/ble/mod.rs); the OLED text comes from
 The UI raises three error messages without a tag: `Busy; try again` when
 `try_send` finds `BLE_CMD_CHANNEL` full and `Device changed; retry` when the
 chosen saved device is no longer in the UI's snapshot (both in
-[main.rs](../src/main.rs)), and `No devices found` when a scan ends with an
+[ui/controller.rs](../src/ui/controller.rs)), and `No devices found` when a scan ends with an
 empty list ([ui/ui_logic.rs](../src/ui/ui_logic.rs)). The completion notices
 `Device forgotten` and `Pairings reset`, and the timeout messages
 `Forget result unknown`, `Reset result unknown`, and `List not loaded`, also
@@ -630,8 +640,8 @@ come from `ui_logic.rs`.
 
 ### Management Request Lifecycle
 
-`ManagementRequests` in [ui/ui_logic.rs](../src/ui/ui_logic.rs) allows one
-request at a time. IDs increase with wrapping arithmetic; a reply whose ID does
+`ManagementRequests`, private to the UI controller in
+[ui/controller.rs](../src/ui/controller.rs), allows one request at a time. IDs increase with wrapping arithmetic; a reply whose ID does
 not match the pending request is ignored. Each request also carries a deadline,
 `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) after it starts. While a request is
 pending the UI ignores every button. Once the deadline passes, `expire` drops
@@ -670,8 +680,9 @@ that are not targeted keep running. Factory reset targets both slots and calls
 
 ## UI State Model
 
-The main loop owns a `UiState` and publishes a copy with the display power flag
-to the display task after every event
+The main loop owns a `UiController` ([ui/controller.rs](../src/ui/controller.rs)),
+which holds the `UiState`, and publishes a copy of the state with the display
+power flag to the display task after every event
 ([ADR 0009](adr/0009-isolated-display-task.md)). User-facing flows are in
 [features](features.md#using-the-bridge).
 
@@ -685,9 +696,9 @@ to the display task after every event
 | `message` | `String<32>` | Error or notice text, truncated by characters |
 | `scan_dots` | `u8` | Scanning animation, advanced once per second while scanning with the display on |
 
-The loop also keeps the `DiscoveredDevice` list from the last `PairedDevices`
-reply to turn a Forget index into an address, a `ManagementRequests` tracker,
-and a `PowerManager`. RSSI and addresses are never rendered.
+The controller also keeps the addresses from the last `PairedDevices` reply,
+to turn a Forget index into an address, and its `ManagementRequests` tracker;
+the loop keeps the `PowerManager`. RSSI and addresses are never rendered.
 
 `Screen` has the variants `Home`, `Scanning`, `DeviceList`, `Connecting`,
 `Connected`, `Error`, `SavedDevices`, `ConfirmForget(usize)`, `ConfirmReset`,

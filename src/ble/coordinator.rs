@@ -250,6 +250,16 @@ pub fn connection_summary<A: Clone + PartialEq>(manager: &ConnManager<A>) -> Str
     }
 }
 
+/// The UI event that reports the links now up: `Disconnected` when none is,
+/// otherwise `Connected` with the [`connection_summary`].
+pub fn link_state<A: Clone + PartialEq>(manager: &ConnManager<A>) -> UiEvent {
+    if manager.active_count() == 0 {
+        UiEvent::Disconnected
+    } else {
+        UiEvent::Connected(connection_summary(manager))
+    }
+}
+
 /// UI-facing events the coordinator wants emitted.
 #[derive(Clone, PartialEq, Debug)]
 pub enum UiEvent {
@@ -371,12 +381,7 @@ pub fn on_slot_disconnected<A: Clone + PartialEq>(
 ) -> Vec<Action<A>, 1> {
     let mut actions = Vec::new();
     manager.disconnect_slot(slot);
-    let event = if manager.active_count() == 0 {
-        UiEvent::Disconnected
-    } else {
-        UiEvent::Connected(connection_summary(manager))
-    };
-    let _ = actions.push(Action::Emit(event));
+    let _ = actions.push(Action::Emit(link_state(manager)));
     actions
 }
 
@@ -393,12 +398,7 @@ pub fn on_slot_link_lost<A: Clone + PartialEq>(
 ) -> Vec<Action<A>, 1> {
     let mut actions = Vec::new();
     manager.reserve_slot(slot, device);
-    let event = if manager.active_count() == 0 {
-        UiEvent::Disconnected
-    } else {
-        UiEvent::Connected(connection_summary(manager))
-    };
-    let _ = actions.push(Action::Emit(event));
+    let _ = actions.push(Action::Emit(link_state(manager)));
     actions
 }
 
@@ -411,12 +411,7 @@ pub fn on_slot_error<A: Clone + PartialEq>(
     let mut actions = Vec::new();
     manager.disconnect_slot(slot);
     let _ = actions.push(Action::Emit(UiEvent::Error(tag)));
-    let event = if manager.active_count() == 0 {
-        UiEvent::Disconnected
-    } else {
-        UiEvent::Connected(connection_summary(manager))
-    };
-    let _ = actions.push(Action::Emit(event));
+    let _ = actions.push(Action::Emit(link_state(manager)));
     actions
 }
 

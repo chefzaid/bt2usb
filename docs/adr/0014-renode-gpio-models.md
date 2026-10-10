@@ -90,9 +90,10 @@ injected edges in both interactive runs and the headless Robot test.
   unregister `sysbus.gpiote`, `sysbus.gpio0`, and `sysbus.gpio1`, and then load
   the overlay.
 - **Simulation binary.** The `sim` feature in [Cargo.toml](../../Cargo.toml)
-  builds `bt2usb-sim` from [sim.rs](../../src/sim.rs) with Embassy, the GPIO
-  driver, and the shared `ble` and `ui` modules, but without `nrf-softdevice`,
-  USB, or flash storage. It brings its own critical-section implementation
+  builds `bt2usb-sim` from [sim.rs](../../src/sim.rs) and
+  [sim_ble.rs](../../src/sim_ble.rs) with Embassy, the GPIO driver, the shared
+  `ble` and `ui` modules, and the pure `storage` modules, but without
+  `nrf-softdevice`, USB, or the flash shell. It brings its own critical-section implementation
   (`cortex-m/critical-section-single-core`) and links with
   [memory_sim.x](../../memory_sim.x) ([ADR 0010](0010-static-memory-layout.md)).
   `embedded` and `sim` cannot be enabled together. The binary:
@@ -100,22 +101,30 @@ injected edges in both interactive runs and the headless Robot test.
     and P0.24 (SELECT), active-low with pull-ups, feeding `BUTTON_CHANNEL`
   - writes readable log lines to UART0 (TX P0.06, RX P0.08), which Renode
     shows without a probe or defmt decoder
-  - runs button events through `ui_logic::on_button`; a scan "completes" at
-    once with the two scenario devices through `ui_logic::on_scan_complete`
+  - runs button events through the firmware's UI controller
+    (`ui::controller::UiController`, since 2026-10-10; before that, through
+    `ui_logic::on_button` alone), and each command it returns through a
+    simulated coordinator that calls the real `ble::coordinator`,
+    `ble::management`, and `storage::devices` code with connection workers,
+    a radio, and flash that answer at once; a scan merges three fixed
+    advertisements through `merge_advertisement`
   - every 2 s without a button press, advances a scripted BLE scenario through
     the real `ble::coordinator` reducers, with a `u32` standing in for the
     SoftDevice `Address`: connect device 0 ("Keyboard", `0xA1`), connect
-    device 1 ("Mouse", `0xB2`), lose slot 0's link, disconnect all, and repeat
+    device 1 ("Mouse", `0xB2`), lose slot 0's link (`on_slot_link_lost`, which
+    keeps the slot reserved; until 2026-10-10 the step called
+    `on_slot_disconnected` and freed it), disconnect all, and repeat
 - **Robot test.** [bt2usb-sim.robot](../../renode/bt2usb-sim.robot) builds the
   machine the same way, starts emulation, and asserts UART lines in order:
-  boot (`bt2usb-sim starting`, `buttons ready`, `entering sim UI loop`), the
-  first scenario connection (`action: UI Connected 'Keyboard'`, pausing
-  emulation there), then real presses on P0.24, P0.12, P0.11, and P0.24
-  with the expected screen transitions (Home to Scanning to DeviceList,
-  selection down and up, then Connecting and `cmd: Connect(0)`), and finally
-  the scenario's two-link and all-disconnected states. Each press waits for
-  its UART line with emulation paused before releasing, so presses land at
-  deterministic points and always outlast the 50 ms debounce.
+  boot, the first scenario connection (pausing emulation there), a scan and
+  a connect driven by real presses on P0.24, P0.12, and P0.11, the link loss
+  that keeps slot 0 reserved, the saved-device list, a cancelled and a
+  confirmed Forget, a Factory reset, and the next scenario cycle; the
+  [scenario map](../testing.md#renode-scenario-map) lists every step. Each
+  press waits for its UART line with emulation paused before releasing, so
+  presses land at deterministic points and always outlast the 50 ms debounce;
+  since 2026-10-10 the emulation then runs 100 ms so the release is debounced
+  too, which lets the same button be pressed twice in a row.
 - **Tooling.** `mask sim-setup` runs
   [install-renode.sh](../../scripts/install-renode.sh), which installs portable
   Renode 1.16.1, Robot Framework 6.1, and the other `renode-test` Python
@@ -185,12 +194,12 @@ Negative:
 - The models are written from the Product Specification, not checked against
   silicon. Agreement between the model and a real nRF52840 is assumed, and
   the board self-test's button stage remains the hardware check.
-- The simulation covers no BLE radio, SoftDevice, USB, flash storage, OLED,
-  scan timing, or advertisement handling. Its BLE events are a script, and a
-  simulated scan completes at once.
-- `sim.rs` calls `ui_logic::on_button` directly. The firmware's `UiState`
-  wrapper around it, management requests, error retention, and the power
-  manager in `main` are not exercised in Renode.
+- The simulation covers no BLE radio, SoftDevice, USB, flash writes, OLED, or
+  scan timing. Its BLE events are a script and the commands the buttons send,
+  answered at once, and a simulated scan hears three fixed advertisements.
+- Since 2026-10-10 the simulation runs the same `UiController` as `main`, so
+  management requests and error retention are exercised; the power manager,
+  the command and event channels, and the display task in `main` are not.
 - Renode is downloaded without a checksum by `install-renode.sh`.
 - A check of the upstream Renode source on its `master` branch, made outside
   the repository while writing this record on 2026-10-09, found `LATCH` and
@@ -201,9 +210,9 @@ Negative:
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
-- "Broaden the Renode scenarios": the one scripted scenario does not exercise
-  the OLED task, the saved-device management screens, or the link-loss
-  slot-reservation path.
+- "Broaden the Renode scenarios": since 2026-10-10 the scenario covers the
+  saved-device management screens and the link-loss slot reservation; the
+  OLED task is still not exercised.
 - "Supply-chain and tooling maintenance": verify digests for downloaded
   non-Cargo tooling, which includes Renode.
 - "Async task fault tests": deterministic tests for cancellation, full
@@ -217,7 +226,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Platform overlay | [nrf52840-sense-gpio.repl](../../renode/nrf52840-sense-gpio.repl) |
 | Interactive script | [bt2usb-sim.resc](../../renode/bt2usb-sim.resc) |
 | Headless test | [bt2usb-sim.robot](../../renode/bt2usb-sim.robot) |
-| Simulation binary | [sim.rs](../../src/sim.rs); `bt2usb-sim` and the `sim` feature in [Cargo.toml](../../Cargo.toml) |
+| Simulation binary | [sim.rs](../../src/sim.rs) and [sim_ble.rs](../../src/sim_ble.rs); `bt2usb-sim` and the `sim` feature in [Cargo.toml](../../Cargo.toml) |
 | Shared button task | `button_task` in [buttons.rs](../../src/ui/buttons.rs) |
 | Memory map and feature guard | [memory_sim.x](../../memory_sim.x), [build.rs](../../build.rs) |
 | Installer | [install-renode.sh](../../scripts/install-renode.sh) |
@@ -233,7 +242,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   through WSL. The CI "Renode simulation test" job, which installs Renode
   1.16.1 by default and runs the same Robot file, passed on GitHub-hosted
   runners in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
-  (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05).
+  (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The
+  broadened scenario of 2026-10-10 passed locally with Renode 1.16.1 on Linux
+  ([2026-10-10 controller record](../testing.md#validation-record--2026-10-10-ui-controller-and-renode-scenario)).
 - **Hardware-verified:** not applicable to the models themselves. The button
   path they emulate is checked on a board by the self-test's button stage,
   for which the repository holds no board record.

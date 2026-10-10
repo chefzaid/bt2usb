@@ -115,7 +115,7 @@ the tag check, or release staging. Run the ones your change can affect:
 | A Python file, a `*.sh` script, a `maskfile.md` recipe, or `ruff.toml` | `mask lint-scripts` |
 | `scripts/release.py` or the release jobs | `python -m unittest discover -s scripts -p "release_test.py" -v` |
 | `Cargo.toml` or `Cargo.lock` | `cargo audit` |
-| UI, buttons, coordinator, `sim.rs`, `memory_sim.x`, or `renode/` | `mask sim-test` |
+| UI, buttons, coordinator, management, BLE messages, the pure `storage` modules, `sim.rs`, `sim_ble.rs`, `memory_sim.x`, or `renode/` | `mask sim-test` |
 
 The [testing guide](testing.md#local-and-ci-coverage-compared) has the full
 comparison, and the [development guide](development.md#checks-by-change)
@@ -184,7 +184,7 @@ different code:
 | --- | --- | --- |
 | Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs` | `#[cfg(test)]` modules and test files |
 | Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, and GATT HID client modules |
-| Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs` and its UART output path |
+| Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs`, `src/sim_ble.rs`, and their UART output path |
 | Embedded with the opt-in (`--features embedded,log-sensitive-data`) | Library; `bt2usb`; `bt2usb-selftest` | No bt2usb code. It compiles the opt-in branches of three log lines in the vendored `nrf-softdevice` ([dependency logs](security.md#dependency-logs)); Clippy does not lint that crate, which is a path dependency rather than a workspace member |
 
 The display driver and button tasks in `src/ui/` are compiled by both the

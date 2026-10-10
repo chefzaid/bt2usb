@@ -61,7 +61,7 @@ use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::Peri;
 use embassy_nrf::{self, bind_interrupts, interrupt, peripherals, twim};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
+use embassy_sync::channel::{Channel, TrySendError};
 use nrf_softdevice::SocEvent;
 
 use crate::ble::coordinator::MAX_CONNECTIONS;
@@ -70,10 +70,10 @@ use crate::ble::slot_worker;
 use crate::ble::{BleCommand, BleEvent};
 use crate::hid::delivery::HidEvent;
 use crate::power::PowerManager;
-use crate::ui::{ButtonEvent, Screen};
+use crate::ui::controller::UiController;
+use crate::ui::ButtonEvent;
 use crate::usb::hid_device;
 use embassy_time::{Duration, Instant, Ticker};
-use heapless::Vec;
 
 /// BLE HID reports → USB HID writer.
 static HID_REPORT_CHANNEL: Channel<CriticalSectionRawMutex, HidEvent, 16> = Channel::new();
@@ -233,13 +233,11 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(button_select_task(p.P0_24.into())));
     info!("UI and isolated OLED tasks started");
 
-    let mut state = ui::ui_logic::UiState::new();
-    let mut paired: Vec<ble::DiscoveredDevice, { config::MAX_PAIRED_DEVICES }> = Vec::new();
-    let mut management = ui::ui_logic::ManagementRequests::default();
+    let mut ui = UiController::<nrf_softdevice::ble::Address>::new();
     let mut power = PowerManager::new();
     let mut stack_reported = 0;
     let mut housekeeping = Ticker::every(Duration::from_secs(1));
-    ui::display::publish(&state, power.display_on());
+    ui::display::publish(&ui.state, power.display_on());
 
     loop {
         // Prioritize bus power and maintenance; display work is in another
@@ -262,130 +260,32 @@ async fn main(spawner: Spawner) {
                     stack_reported = used;
                     info!("stack high-water: {} of {} bytes", used, total);
                 }
-                if state.screen == Screen::Scanning && power.display_on() {
-                    state.scan_dots = ui::input_logic::next_scan_dots(state.scan_dots);
-                }
-                // A coordinator that never answers must not lock the buttons.
-                if let Some(command) = management.expire(Instant::now().as_millis()) {
+                if ui.tick(Instant::now().as_millis(), power.display_on()) {
                     warn!("management request got no reply; result unknown");
-                    paired.clear();
-                    state.management_timed_out(command);
                 }
             }
             embassy_futures::select::Either4::Third(button) => {
                 let was_off = !power.display_on();
                 power.activity();
                 // First press only wakes the screen. USB suspend still wins.
-                if !was_off && !management.is_pending() {
-                    if let Some(command) = state.button(button) {
-                        use ui::ui_logic::UiCommand;
-                        let request_id = if matches!(
-                            command,
-                            UiCommand::ListPaired | UiCommand::Forget(_) | UiCommand::FactoryReset
-                        ) {
-                            management.begin(
-                                command,
-                                Instant::now().as_millis()
-                                    + config::UI_MANAGEMENT_TIMEOUT_SECS * 1000,
-                            )
-                        } else {
-                            None
-                        };
-                        let ble_command = match command {
-                            UiCommand::StartScan => Some(BleCommand::StartScan),
-                            UiCommand::Connect(index) => Some(BleCommand::Connect(index)),
-                            UiCommand::Disconnect => Some(BleCommand::Disconnect),
-                            UiCommand::ListPaired => {
-                                request_id.map(|id| BleCommand::ListPaired { id })
-                            }
-                            UiCommand::Forget(index) => paired.get(index).and_then(|peer| {
-                                request_id.map(|id| BleCommand::Forget {
-                                    id,
-                                    address: peer.address,
-                                })
-                            }),
-                            UiCommand::FactoryReset => {
-                                request_id.map(|id| BleCommand::FactoryReset { id })
-                            }
-                            UiCommand::Dismiss => None,
-                        };
-                        if let Some(ble_command) = ble_command {
-                            // Never deadlock UI and BLE by awaiting a full command
-                            // channel while BLE is awaiting a full event channel.
-                            if BLE_CMD_CHANNEL.try_send(ble_command).is_err() {
-                                state.error("Busy; try again");
-                                if let Some(id) = request_id {
-                                    management.complete(id);
-                                }
-                            }
-                        } else if command != UiCommand::Dismiss {
-                            if let Some(id) = request_id {
-                                management.complete(id);
-                            }
-                            state.error("Device changed; retry");
+                if !was_off {
+                    if let Some(command) = ui.button(button, Instant::now().as_millis()) {
+                        // Never deadlock UI and BLE by awaiting a full command
+                        // channel while BLE is awaiting a full event channel.
+                        if let Err(TrySendError::Full(command)) = BLE_CMD_CHANNEL.try_send(command)
+                        {
+                            ui.command_not_sent(&command);
                         }
                     }
                 }
             }
-            embassy_futures::select::Either4::Fourth(event) => match event {
-                BleEvent::ScanStarted => state.scan_started(),
-                BleEvent::DeviceFound(device) => {
-                    if state.screen == Screen::Scanning {
-                        let _ = state.devices.push(device.name);
-                    }
+            embassy_futures::select::Either4::Fourth(event) => {
+                if let Some(connected) = event.link_up() {
+                    power.set_ble_connected(connected);
                 }
-                BleEvent::ScanComplete => state.scan_complete(),
-                BleEvent::Connected(name) => {
-                    power.set_ble_connected(true);
-                    state.connection_status(Some(name));
-                }
-                BleEvent::Disconnected => {
-                    power.set_ble_connected(false);
-                    state.connection_status(None);
-                }
-                BleEvent::Error(tag) => {
-                    state.error(ble_error_message(tag));
-                }
-                BleEvent::PairedDevices { id, devices } => {
-                    if management.complete(id) == Some(ui::ui_logic::UiCommand::ListPaired) {
-                        paired = devices;
-                        state.paired_names.clear();
-                        for peer in &paired {
-                            let _ = state.paired_names.push(peer.name.clone());
-                        }
-                        if state.screen != Screen::Error {
-                            state.screen = Screen::SavedDevices;
-                            state.selected = 0;
-                        }
-                    }
-                }
-                BleEvent::ManagementResult { id, result } => {
-                    if let Some(command) = management.complete(id) {
-                        match result {
-                            Ok(()) => {
-                                paired.clear();
-                                state.management_completed(command);
-                            }
-                            Err(tag) => state.error(ble_error_message(tag)),
-                        }
-                    }
-                }
-            },
+                ui.event(event);
+            }
         }
-        ui::display::publish(&state, power.display_on());
-    }
-}
-
-fn ble_error_message(tag: ble::BleErrorTag) -> &'static str {
-    match tag {
-        ble::BleErrorTag::ScanFailed => "Scan failed",
-        ble::BleErrorTag::ConnectFailed => "Connect failed",
-        ble::BleErrorTag::HidNotFound => "No HID service",
-        ble::BleErrorTag::NotifyFailed => "Notify failed",
-        ble::BleErrorTag::StorageFailed => "Storage failed",
-        ble::BleErrorTag::ManagementFailed => "Action failed; retry",
-        ble::BleErrorTag::ReportMapReadFailed => "HID map read failed",
-        ble::BleErrorTag::ReportMapTooLarge => "HID map too large",
-        ble::BleErrorTag::ReportMapInvalid => "Unsupported HID map",
+        ui::display::publish(&ui.state, power.display_on());
     }
 }

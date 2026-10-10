@@ -1,4 +1,4 @@
-//! Host tests for the UI reducer, management requests, and `UiState`.
+//! Host tests for the UI reducer and `UiState`.
 
 use super::*;
 
@@ -8,7 +8,6 @@ fn home_select_starts_scan() {
     assert_eq!(out.screen, Screen::Scanning);
     assert_eq!(out.command, Some(UiCommand::StartScan));
     assert!(out.reset_devices);
-    assert_eq!(out.redraw, Redraw::Scanning);
 }
 
 #[test]
@@ -20,10 +19,9 @@ fn error_select_starts_scan() {
 }
 
 #[test]
-fn device_list_up_moves_selection_and_redraws() {
+fn device_list_up_moves_selection() {
     let out = on_button(Screen::DeviceList, ButtonEvent::Up, 2, 4);
     assert_eq!(out.selected, 1);
-    assert_eq!(out.redraw, Redraw::DeviceList);
     assert_eq!(out.command, None);
 }
 
@@ -31,26 +29,18 @@ fn device_list_up_moves_selection_and_redraws() {
 fn device_list_up_at_top_clamps() {
     let out = on_button(Screen::DeviceList, ButtonEvent::Up, 0, 4);
     assert_eq!(out.selected, 0);
-    // Original redraws unconditionally on Up.
-    assert_eq!(out.redraw, Redraw::DeviceList);
 }
 
 #[test]
 fn device_list_down_advances_within_bounds() {
     let out = on_button(Screen::DeviceList, ButtonEvent::Down, 1, 4);
     assert_eq!(out.selected, 2);
-    assert_eq!(out.redraw, Redraw::DeviceList);
 }
 
 #[test]
 fn device_list_down_at_end_is_noop() {
     let out = on_button(Screen::DeviceList, ButtonEvent::Down, 3, 4);
     assert_eq!(out.selected, 3);
-    assert_eq!(
-        out.redraw,
-        Redraw::None,
-        "no redraw when selection unchanged"
-    );
     assert_eq!(out.command, None);
 }
 
@@ -90,7 +80,6 @@ fn connected_down_disconnects_home() {
     let out = on_button(Screen::Connected, ButtonEvent::Down, 0, 0);
     assert_eq!(out.screen, Screen::Home);
     assert_eq!(out.command, Some(UiCommand::Disconnect));
-    assert_eq!(out.redraw, Redraw::Home);
 }
 
 #[test]
@@ -99,7 +88,6 @@ fn ignored_combinations_are_noops() {
     let out = on_button(Screen::Scanning, ButtonEvent::Up, 0, 0);
     assert_eq!(out.screen, Screen::Scanning);
     assert_eq!(out.command, None);
-    assert_eq!(out.redraw, Redraw::None);
 
     let out = on_button(Screen::Home, ButtonEvent::Down, 0, 0);
     assert_eq!(out.command, None);
@@ -128,39 +116,6 @@ fn management_requires_explicit_confirmation_and_defaults_to_cancel() {
     assert_eq!(
         on_button(confirmed.screen, ButtonEvent::Select, 0, 2).command,
         None
-    );
-}
-
-#[test]
-fn management_requests_are_exclusive_and_reject_stale_replies() {
-    let mut requests = ManagementRequests::default();
-    assert!(!requests.is_pending());
-    let first = requests.begin(UiCommand::ListPaired, u64::MAX).unwrap();
-    assert!(requests.is_pending());
-    assert_eq!(requests.begin(UiCommand::FactoryReset, u64::MAX), None);
-    assert_eq!(requests.complete(first.wrapping_add(1)), None);
-    assert!(requests.is_pending());
-    assert_eq!(requests.complete(first), Some(UiCommand::ListPaired));
-    assert!(!requests.is_pending());
-    // A late duplicate of the finished reply cannot complete a newer request.
-    let second = requests.begin(UiCommand::Forget(0), u64::MAX).unwrap();
-    assert_ne!(second, first);
-    assert_eq!(requests.complete(first), None);
-    assert_eq!(requests.complete(second), Some(UiCommand::Forget(0)));
-}
-
-#[test]
-fn management_request_ids_stay_unique_across_wraparound() {
-    let mut requests = ManagementRequests {
-        next_id: u32::MAX,
-        pending: None,
-    };
-    let wrapped = requests.begin(UiCommand::ListPaired, u64::MAX).unwrap();
-    assert_eq!(requests.complete(u32::MAX), None);
-    assert_eq!(requests.complete(wrapped), Some(UiCommand::ListPaired));
-    assert_ne!(
-        requests.begin(UiCommand::ListPaired, u64::MAX),
-        Some(wrapped)
     );
 }
 
@@ -205,33 +160,6 @@ fn background_status_and_scan_do_not_dismiss_confirmation() {
     state.scan_complete();
     assert_eq!(state.screen, Screen::ConfirmReset);
     assert_eq!(state.selected, 1);
-}
-
-#[test]
-fn unanswered_request_expires_at_its_deadline_and_late_reply_is_ignored() {
-    let mut requests = ManagementRequests::default();
-    let id = requests.begin(UiCommand::Forget(1), 30_000).unwrap();
-    assert_eq!(requests.expire(29_999), None);
-    assert!(requests.is_pending());
-    assert_eq!(requests.expire(30_000), Some(UiCommand::Forget(1)));
-    assert!(!requests.is_pending());
-    assert_eq!(requests.expire(u64::MAX), None);
-    // The coordinator's late reply to the abandoned request changes nothing,
-    // before or after a new request starts.
-    assert_eq!(requests.complete(id), None);
-    let next = requests.begin(UiCommand::ListPaired, 70_000).unwrap();
-    assert_ne!(next, id);
-    assert_eq!(requests.complete(id), None);
-    assert!(requests.is_pending());
-    assert_eq!(requests.complete(next), Some(UiCommand::ListPaired));
-}
-
-#[test]
-fn answered_request_does_not_expire() {
-    let mut requests = ManagementRequests::default();
-    let id = requests.begin(UiCommand::FactoryReset, 1_000).unwrap();
-    assert_eq!(requests.complete(id), Some(UiCommand::FactoryReset));
-    assert_eq!(requests.expire(2_000), None);
 }
 
 #[test]
@@ -425,4 +353,23 @@ fn long_messages_are_cut_to_the_message_capacity() {
     assert_eq!(state.screen, Screen::Notice);
     assert_eq!(state.message.len(), 32);
     assert!("This notice is much longer than thirty-two bytes".starts_with(state.message.as_str()));
+}
+
+#[test]
+fn only_saved_device_commands_are_management_requests() {
+    for command in [
+        UiCommand::ListPaired,
+        UiCommand::Forget(0),
+        UiCommand::FactoryReset,
+    ] {
+        assert!(command.is_management());
+    }
+    for command in [
+        UiCommand::StartScan,
+        UiCommand::Connect(0),
+        UiCommand::Disconnect,
+        UiCommand::Dismiss,
+    ] {
+        assert!(!command.is_management());
+    }
 }

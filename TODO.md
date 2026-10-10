@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 10 | 9 | 0 |
+| [FIXME](#fixme) | 11 | 8 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **86** | **91** | **22** |
+| **Total** | **87** | **90** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -158,13 +158,16 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   (`cargo doc --features embedded` warns), and a "Unit Tests" banner was left
   at the end of the file when its tests moved to `adv_parser.rs`. Close when
   firmware rustdoc is warning-free and the banner is gone.
-- [ ] **P3** **Duplicated and dead logic in `conn_params.rs`.** Reversed
-  interval bounds are normalized twice in two styles (`bound_request` and
-  `interval_within_request`); the step-back loop in `max_latency_for` can never
-  run for a nonzero timeout and its comment ("can overshoot by one event") is
-  false; and the tests copy the Core-rule check three times. Close when one
-  helper normalizes the range, `max_latency_for` uses the closed form with a
-  correct comment, and the tests share one Core-rule helper.
+- [x] **P3** **Duplicated and dead logic in `conn_params.rs`.** Reversed
+  interval bounds were normalized twice in two styles (`bound_request` and
+  `interval_within_request`); the step-back loop in `max_latency_for` could
+  never run for a nonzero timeout and its comment ("can overshoot by one
+  event") was false; and the tests copied the Core-rule check three times.
+  Fixed: `requested_range` normalizes the range for both functions and the
+  sweep test, `max_latency_for` is the closed form `(4 × timeout − 1) /
+  interval − 1` with its derivation, and the tests share `meets_core_rule`. A
+  new test checks the closed form against the Core rule for every timeout up to
+  33 s at twelve intervals; answers are unchanged.
 - [ ] **P3** **`SIGHTING_TTL_MS` sits outside `config.rs` unlisted.** The
   other `ReconnectTable` timings come from `config.rs`; the 2 s sighting
   lifetime is a constant in `src/ble/reconnect.rs` and is missing from

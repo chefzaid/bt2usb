@@ -61,11 +61,7 @@ pub struct ConnParamLimits {
 /// A request with its interval bounds reversed is read as the range between
 /// them.
 pub fn bound_request(request: ConnParams, limits: &ConnParamLimits) -> ConnParams {
-    let (req_min, req_max) = if request.min_interval <= request.max_interval {
-        (request.min_interval, request.max_interval)
-    } else {
-        (request.max_interval, request.min_interval)
-    };
+    let (req_min, req_max) = requested_range(&request);
 
     let low = req_min.max(limits.min_interval);
     let high = req_max.min(limits.max_interval);
@@ -106,9 +102,17 @@ pub fn bound_request(request: ConnParams, limits: &ConnParamLimits) -> ConnParam
 /// for, reading reversed bounds as a range. A peripheral given an interval
 /// outside its range may disconnect.
 pub fn interval_within_request(request: ConnParams, granted: ConnParams) -> bool {
-    let low = request.min_interval.min(request.max_interval);
-    let high = request.min_interval.max(request.max_interval);
+    let (low, high) = requested_range(&request);
     low <= granted.min_interval && granted.max_interval <= high
+}
+
+/// The interval range `request` asks for as `(shortest, longest)`, reading
+/// reversed bounds as the range between them.
+fn requested_range(request: &ConnParams) -> (u16, u16) {
+    (
+        request.min_interval.min(request.max_interval),
+        request.min_interval.max(request.max_interval),
+    )
 }
 
 /// The shortest supervision timeout (10 ms units) the Core rule allows:
@@ -125,21 +129,15 @@ fn max_latency_for(timeout: u16, max_interval: u16) -> u16 {
     if max_interval == 0 {
         return u16::MAX;
     }
-    // Largest n = latency + 1 with n * interval / 4 + 1 <= timeout.
-    let budget = u32::from(timeout).saturating_sub(1);
-    let events = (budget * 4 + 3) / u32::from(max_interval);
-    let mut latency = events.saturating_sub(1);
-    // The integer division above can overshoot by one event; step back until
-    // the rule holds.
-    while latency > 0
-        && u32::from(min_supervision_timeout(
-            u16::try_from(latency).unwrap_or(u16::MAX),
-            max_interval,
-        )) > u32::from(timeout)
-    {
-        latency -= 1;
+    if timeout == 0 {
+        // No latency satisfies the rule; the caller raises the timeout.
+        return 0;
     }
-    u16::try_from(latency).unwrap_or(u16::MAX)
+    // With n = latency + 1, `min_supervision_timeout` <= timeout reads
+    // floor(n * interval / 4) + 1 <= timeout, that is n * interval < 4 * timeout,
+    // so the largest n is exactly (4 * timeout - 1) / interval.
+    let events = (4 * u32::from(timeout) - 1) / u32::from(max_interval);
+    u16::try_from(events.saturating_sub(1)).unwrap_or(u16::MAX)
 }
 
 #[cfg(test)]
@@ -167,6 +165,13 @@ mod tests {
         }
     }
 
+    /// The Bluetooth Core rule, in microseconds:
+    /// `timeout > (1 + latency) * max interval * 2`.
+    fn meets_core_rule(p: ConnParams) -> bool {
+        u32::from(p.supervision_timeout) * 10_000
+            > (u32::from(p.latency) + 1) * u32::from(p.max_interval) * 1_250 * 2
+    }
+
     /// Every answer must satisfy the Core rule and stay inside the limits.
     fn assert_valid(answer: ConnParams) {
         assert!(answer.min_interval <= answer.max_interval);
@@ -175,10 +180,7 @@ mod tests {
         assert!(answer.latency <= LIMITS.max_latency);
         assert!(answer.supervision_timeout >= LIMITS.min_supervision_timeout);
         assert!(answer.supervision_timeout <= LIMITS.max_supervision_timeout);
-        let timeout_us = u32::from(answer.supervision_timeout) * 10_000;
-        let needed_us =
-            (u32::from(answer.latency) + 1) * u32::from(answer.max_interval) * 1_250 * 2;
-        assert!(timeout_us > needed_us, "{answer:?} breaks the Core rule");
+        assert!(meets_core_rule(answer), "{answer:?} breaks the Core rule");
     }
 
     #[test]
@@ -291,10 +293,7 @@ mod tests {
             ..LIMITS
         };
         let answer = bound_request(request(6, 12, 499, 3200), &limits);
-        let timeout_us = u32::from(answer.supervision_timeout) * 10_000;
-        let needed_us =
-            (u32::from(answer.latency) + 1) * u32::from(answer.max_interval) * 1_250 * 2;
-        assert!(timeout_us > needed_us);
+        assert!(meets_core_rule(answer));
         assert_eq!(answer.supervision_timeout, 100);
         // The largest latency that still fits: (n) * 15 ms * 2 < 1 s → n <= 33.
         assert_eq!(answer.latency, 32);
@@ -310,8 +309,22 @@ mod tests {
         };
         let answer = bound_request(request(12, 12, 20, 10), &limits);
         assert_eq!(answer.supervision_timeout, min_supervision_timeout(20, 12));
-        let timeout_us = u32::from(answer.supervision_timeout) * 10_000;
-        assert!(timeout_us > 21 * 12 * 1_250 * 2);
+        assert!(meets_core_rule(answer));
+    }
+
+    #[test]
+    fn max_latency_for_is_the_largest_latency_the_timeout_covers() {
+        for interval in [1, 2, 3, 5, 6, 7, 12, 13, 24, 100, 3200, u16::MAX] {
+            assert_eq!(max_latency_for(0, interval), 0);
+            for timeout in 1..=3300 {
+                let latency = max_latency_for(timeout, interval);
+                let fits = |latency| min_supervision_timeout(latency, interval) <= timeout;
+                // Latency 0 is the floor even when the timeout cannot cover it;
+                // the caller then raises the timeout.
+                assert!(latency == 0 || fits(latency), "{timeout} {interval}");
+                assert!(!fits(latency + 1), "{timeout} {interval}");
+            }
+        }
     }
 
     #[test]
@@ -340,7 +353,7 @@ mod tests {
         const TIMEOUTS: [u16; 10] = [0, 9, 10, 99, 100, 101, 400, 401, 3200, u16::MAX];
         for min in INTERVALS {
             for max in INTERVALS {
-                let (low, high) = (min.min(max), min.max(max));
+                let (low, high) = requested_range(&request(min, max, 0, 0));
                 for latency in LATENCIES {
                     for timeout in TIMEOUTS {
                         let asked = request(min, max, latency, timeout);

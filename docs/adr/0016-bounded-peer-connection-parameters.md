@@ -173,7 +173,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 ### Verification Status
 
 - **Implemented:** everything in the table above.
-- **Software-verified:** 13 host tests in `conn_params.rs` cover a request
+- **Software-verified:** 14 host tests in `conn_params.rs` cover a request
   granted unchanged, a 20–40 ms request granted 20 ms, a 50–100 ms request
   granted 30 ms and flagged as outside its range, a request whose fastest
   interval is 30 ms granted it inside its range, an overlapping range
@@ -181,7 +181,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   timeout raised to 1 second, latency capped at 20, reversed interval bounds
   (also in `interval_within_request`), a request entirely below 7.5 ms
   granted 7.5 ms and flagged, a request below a raised floor, latency
-  lowered when the timeout cap cannot cover it, and the timeout raised to meet
+  lowered when the timeout cap cannot cover it, the latency limit checked as
+  the largest the timeout covers, and the timeout raised to meet
   the Core rule. A sweep of 18,000 requests, over every boundary of the policy
   and over values outside the Core's legal ranges (interval 0 and 0xFFFF,
   latency 500 and 0xFFFF, timeout 0 and 0xFFFF), checks that every answer

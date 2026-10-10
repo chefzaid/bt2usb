@@ -43,9 +43,9 @@ Clippy warning into an error.
 | Host Clippy | `cargo clippy --locked --lib --tests -- -D warnings` | `mask ci` | Host tests, Linux and Windows | Fails on any warning |
 | Embedded Clippy | `cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings` | `mask ci`, `mask clippy` | Embedded build & clippy | Fails on any warning |
 | Simulation Clippy | `cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings` | `mask ci` | Renode simulation test | Fails on any warning |
-| Host rustdoc | `cargo doc --locked --no-deps --document-private-items --lib` with `RUSTDOCFLAGS=-D warnings` | `mask ci`, `mask doc-check` | Host tests, Linux and Windows | Fails on any rustdoc warning |
-| Firmware rustdoc | The same flags with `--features embedded --target thumbv7em-none-eabihf`, once for `--lib` and once for `--bin bt2usb --bin bt2usb-selftest` | `mask ci`, `mask doc-check` | Embedded build & clippy | Fails on any rustdoc warning |
-| Simulation rustdoc | The same flags with `--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim` | `mask ci`, `mask doc-check` | Renode simulation test | Fails on any rustdoc warning |
+| Host rustdoc | `cargo doc --locked --no-deps --document-private-items --lib` with `RUSTDOCFLAGS=-D warnings` | `mask ci`, `mask rustdoc-check` | Host tests, Linux and Windows | Fails on any rustdoc warning |
+| Firmware rustdoc | The same flags with `--features embedded --target thumbv7em-none-eabihf`, once for `--lib` and once for `--bin bt2usb --bin bt2usb-selftest` | `mask ci`, `mask rustdoc-check` | Embedded build & clippy | Fails on any rustdoc warning |
+| Simulation rustdoc | The same flags with `--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim` | `mask ci`, `mask rustdoc-check` | Renode simulation test | Fails on any rustdoc warning |
 | Coverage floor | `cargo llvm-cov --locked --lib --tests --no-report`, then `cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"` (97), cargo-llvm-cov 0.9.1 | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` | Host coverage | Fails when host line coverage drops below the floor; the report uploads first ([Coverage In CI](#coverage-in-ci)) |
 | Host tests | `cargo test --locked --lib --tests` | `mask ci`, `mask test` | Host tests, Linux and Windows | Fails on any failed test |
 | Release firmware build | `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` | `mask ci`, `mask build-release` | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest` |
@@ -54,6 +54,8 @@ Clippy warning into an error.
 | Dependency audit | `cargo audit`, cargo-audit 0.22.2 | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory; unmaintained-crate warnings do not fail it |
 | Workflow lint | `actionlint`, 1.7.12, SHA-256 checked before use | None | Host tests, Linux only | Fails the Linux job |
 | File length | `find src tests build.rs -name '*.rs' -exec wc -l {} +`, failing above 500 lines ([File Length](#file-length)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file over the limit |
+| Documentation checks | `python scripts/check_docs.py` ([Markdown Checks](#markdown-checks)) | `mask ci`, `mask docs-check` | Host tests, Linux only | Fails the Linux job and lists each finding as file, line, and the value or name the repository has instead |
+| Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
 | Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 12 tests (`grep -c 'def test' scripts/release_test.py`) |
 | Tag matches version | `python scripts/release.py validate-tag --tag "$RELEASE_TAG"` | None | Host tests and the packaging job, `v*` tags only | Fails the tag run |
 | Release staging | `python scripts/release.py stage …` | None | Embedded build & clippy | Refuses a modified tracked source tree, an existing output directory, an empty firmware file, or a commit that differs from `GITHUB_SHA` |
@@ -92,15 +94,16 @@ jobs reuse the embedded job's bytes instead of rebuilding.
 ### Local Checks Before A Pull Request
 
 `mask ci` covers formatting, the three Clippy configurations, host tests,
-rustdoc for every build with warnings denied, and both firmware builds. It does
-not run the coverage floor, actionlint, the release-helper tests, the audit, or
-Renode, and it has no equivalent of the Windows host job, the tag check, or
+rustdoc for every build with warnings denied, the Markdown checks, and both
+firmware builds. It does not run the coverage floor, actionlint, the
+release-helper or documentation-checker tests, the audit, or Renode, and it has no equivalent of the Windows host job, the tag check, or
 release staging. Run the ones your change
 can affect:
 
 | Change touches | Also run |
 | --- | --- |
-| `///` or `//!` comments only | `mask doc-check`, which runs the four rustdoc builds without the rest of `mask ci` |
+| `///` or `//!` comments only | `mask rustdoc-check`, which runs the four rustdoc builds without the rest of `mask ci` |
+| Markdown only, `src/config.rs`, `memory_sd.x`, `memory_sim.x`, `maskfile.md`, or a renamed file | `mask docs-check` |
 | Pure logic in `src/lib.rs` modules, or their tests | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` |
 | `.github/workflows/ci.yml` | `actionlint` |
 | `scripts/release.py` or the release jobs | `python -m unittest discover -s scripts -p "release_test.py" -v` |
@@ -226,7 +229,7 @@ plus one of these:
 
 The library and the bridge binary are both named `bt2usb`, so they are
 documented in separate runs; one run would write both to the same output
-directory. `mask doc-check` runs all four, and `mask ci` includes them.
+directory. `mask rustdoc-check` runs all four, and `mask ci` includes them.
 `mask doc` still builds the embedded documentation with dependencies and
 without denying warnings, for reading. `--no-deps` keeps the vendored
 `nrf-softdevice` crates out of the check: their documentation is upstream's.
@@ -251,8 +254,36 @@ modules carry `///` comments that state units, bounds, and error meanings.
 | `.github/workflows/ci.yml` | actionlint 1.7.12 in the Linux host job | Enforced |
 | `scripts/release.py` | 12 unit tests in `scripts/release_test.py`; no linter or type checker | Tests enforced; style not checked |
 | `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash blocks in `maskfile.md` | None. actionlint checks workflow `run:` blocks with ShellCheck when `shellcheck` is installed; the workflow does not install it, and whether the hosted runner image provides it is not recorded | Gap |
-| Markdown in `docs/` | None; links and quoted constants are checked by hand | Gap |
+| Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, and commands ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
 | Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job; not linted | Partial |
+
+### Markdown Checks
+
+[scripts/check_docs.py](../scripts/check_docs.py) checks every tracked
+Markdown file against the repository it describes, using the standard library
+only. It skips `vendor/` except `vendor/nrf-softdevice/README.bt2usb.md`, and
+prints each finding as `path:line: [check] message`, where the message gives
+both what the document says and what the repository has.
+
+| Check | What fails it |
+| --- | --- |
+| `links` | A relative link whose file does not exist or that leaves the repository, and a `#fragment` that matches no heading or `<a id>` in the target Markdown file. Anchors follow GitHub's rules: lower case, punctuation dropped, spaces to hyphens, and `-1`, `-2` for repeated headings. External links are not fetched |
+| `config` | A `pub const` in [config.rs](../src/config.rs) missing from the [Configuration Defaults](hardware.md#configuration-defaults) table, a table name that is not a constant, a table value that differs from the evaluated constant (derived values such as `STORAGE_FLASH_END` included), and an inline mention of the form ``` `NAME` (8 s) ``` or ``` 4 seconds (`NAME`) ``` whose number disagrees. Inline values in seconds or milliseconds are converted with the constant's unit: `_SECS`, `_MS`, 10 ms for the supervision timeouts, 1.25 ms for connection intervals and event length, and 0.625 ms for the scan interval and window |
+| `memory` | A memory-map table row (Application flash, Pairing/bond storage, Application RAM, and the other region labels in [hardware](hardware.md#memory-layout) and [ADR 0010](adr/0010-static-memory-layout.md)) whose range or KiB size differs from `memory_sd.x`, `memory_sim.x`, and the storage constants; a code-formatted address range that starts at a region's first address but ends elsewhere; and "pages N–M" near the words pairing, bond, or storage that differ from `STORAGE_FLASH_PAGE_START`/`COUNT` |
+| `commands` | `mask <name>` in code with no such recipe, `--bin` or `--features` names that `Cargo.toml` does not define, and a code-formatted path (with a directory, or a `.rs` file name) that matches no tracked file |
+
+Two kinds of text are exempt from the `config`, `memory`, and `commands`
+checks, because they quote the tree as it was: everything under a heading that
+starts with "Validation Record", and a line ending in
+`<!-- check-docs: ignore -->`. A proposed ADR is exempt from the path check,
+since it names files it would add. File names that may appear although no
+tracked file has them, such as a removed module that an ADR's history
+discusses, are listed in `KNOWN_ABSENT` in the script with the reason for each.
+
+What it does not check: values written without the constant's name ("a 7.5 ms
+interval"), test and file counts, firmware sizes, coverage figures, and the
+content of external links. Those remain the reviewer's job, as the
+[review checklist](#review-checklist) says.
 
 ## Unsafe Code Policy
 
@@ -710,7 +741,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | Two action pin comments (`Swatinem/rust-cache`, `taiki-e/install-action`) say `# v2` instead of an exact release | [CI runtime maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
-| No automated check of documentation links or documented constants | [Automated documentation checks](../TODO.md#documentation) (P1) |
 | No linter for the Python release helper or the shell scripts | [Lint the release helper and shell scripts](../TODO.md#verification-and-code-quality) (P2) |
 
 ## Related Guides

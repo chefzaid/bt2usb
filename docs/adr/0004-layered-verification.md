@@ -44,7 +44,7 @@ layer before it cannot see.
 | Layer | What runs | Failure class it owns | Where |
 | --- | --- | --- | --- |
 | 1. Host tests | Unit and integration tests of the shared hardware-free modules ([ADR 0003](0003-pure-core-and-task-shell.md)) | Wrong decisions: parsing, reducers, aggregation, delivery and replay, storage validation, UI and power rules | CI on Linux and Windows, plus a line-coverage floor on Linux ([ADR 0023](0023-host-coverage-floor.md)); `mask test` |
-| 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with private items and warnings denied for every build; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; `cargo audit` | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow or release-helper mistakes, known vulnerable dependencies | CI; `mask ci` runs the formatting, Clippy, test, rustdoc, and build subset |
+| 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with private items and warnings denied for every build; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; `cargo audit`; the Markdown checks | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow or release-helper mistakes, known vulnerable dependencies, and documentation that disagrees with the code | CI; `mask ci` runs the formatting, Clippy, test, rustdoc, Markdown, and build subset |
 | 3. Renode simulation | `bt2usb-sim` on an emulated nRF52840, with injected GPIO edges and a scripted BLE scenario | Boot, the executor and time driver, the GPIO and GPIOTE path, and the real UI and coordinator reducers running on the ARM target | CI `simulation` job; `mask sim-test` |
 | 4. Board self-test | `bt2usb-selftest` brings up each peripheral in stages and prints PASS, FAIL, or SKIP | SoftDevice RAM and enable, pairing-region flash, USB enumeration and an endpoint write, OLED, buttons, radio reception, stack margin | A board and probe; `mask selftest` |
 | 5. Hardware acceptance | The [first-flash checklist](../first-flash.md) on real peripherals, hosts, and hubs | Pairing, reconnect, held-input release, two active slots, LEDs, monitor hubs, sleep and wake, pre-OS use | A board and a person; a dated result record |
@@ -140,8 +140,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   compatibility baseline").
 - Add the missing layers listed as known gaps: "Parser fuzzing and property
   tests", "Async task fault tests", "Power-loss-safe persistence", "Soak and
-  latency measurements", "Reproducible firmware evidence", and "Automated
-  documentation checks".
+  latency measurements", and "Reproducible firmware evidence". "Automated
+  documentation checks" was closed on 2026-10-10 by `scripts/check_docs.py`
+  in the Linux host job.
 
 ## Implementation
 

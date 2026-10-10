@@ -55,6 +55,12 @@ jobs:
           fi
       - name: Test release consistency and artifact integrity helpers
         run: python -m unittest discover -s scripts -p "release_test.py" -v
+      - name: Test the documentation checker
+        if: runner.os == 'Linux'
+        run: python -m unittest discover -s scripts -p "check_docs_test.py" -v
+      - name: Check documentation links, constants, memory map, and commands
+        if: runner.os == 'Linux'
+        run: python scripts/check_docs.py
       # install-action has no actionlint manifest; its cargo-binstall fallback
       # looks for a nonexistent crate. Fetch the upstream release, pinned by digest.
       - name: Install workflow linter

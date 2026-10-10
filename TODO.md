@@ -37,9 +37,9 @@ probe, or USB host to close.
 | [Verification And Code Quality](#verification-and-code-quality) | 9 | 7 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
-| [Documentation](#documentation) | 6 | 1 | 0 |
+| [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **98** | **80** | **22** |
+| **Total** | **99** | **79** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -974,7 +974,7 @@ Host tests, simulation, and code-health work. Context:
   [coverage in CI](docs/code-quality.md#coverage-in-ci)). The embedded and
   simulation jobs document the embedded library, `bt2usb`, `bt2usb-selftest`,
   and `bt2usb-sim` with private items and warnings denied, the host job adds
-  private items, and `mask doc-check` and `mask ci` run the same four builds
+  private items, and `mask rustdoc-check` and `mask ci` run the same four builds
   ([documentation comments](docs/code-quality.md#documentation-comments)).
   Checked locally: `--fail-under-lines 99` exits 1, and a broken intra-doc
   link in `src/ble/bonder.rs` fails the firmware rustdoc run
@@ -994,7 +994,7 @@ Host tests, simulation, and code-health work. Context:
   or shell linter: CI runs `scripts/release.py` and its unit tests in
   `scripts/release_test.py` but does not lint them, and
   `scripts/install-renode.sh`,
-  `scripts/run-tool.sh`, `.devcontainer/post-create.sh`, and the 31 Bash
+  `scripts/run-tool.sh`, `.devcontainer/post-create.sh`, and the 33 Bash
   recipes in `maskfile.md` are not checked at all. Add Ruff (or an equivalent)
   for the Python files and ShellCheck for the scripts and the extracted
   `maskfile.md` recipes. Accept when a lint finding in any of them fails CI
@@ -1140,8 +1140,9 @@ Tasks, tooling, and environments for working on the firmware. Context:
 - [x] WSL-aware task tooling and a VS Code devcontainer
   (`scripts/run-tool.sh`, `.devcontainer/`).
 - [x] Wrap build, flash, self-test, host tests, coverage, size, simulation,
-  SoftDevice, and probe tasks as 32 Bash `mask` recipes; `mask ci` runs the
-  local formatting, lint, test, rustdoc, and build subset (`maskfile.md`).
+  SoftDevice, and probe tasks as 33 Bash `mask` recipes; `mask ci` runs the
+  local formatting, lint, test, rustdoc, Markdown, and build subset
+  (`maskfile.md`).
 - [x] Build host tests for the native platform by leaving `build.target` unset,
   and scope the probe-rs runner and ARM linker flags to
   `cfg(all(target_arch = "arm", target_os = "none"))` (`.cargo/config.toml`).
@@ -1215,10 +1216,20 @@ Guides, ADRs, and this plan. Context:
   behavior in [features](docs/features.md) follow the code, and
   [first flash](docs/first-flash.md) gained cold-start, lock-key, and
   connection-parameter checks (2026-10-09).
-- [ ] **P1** **Automated documentation checks.** Validate local links, command
-  examples, and configuration/memory-map consistency in CI. Accept when a broken
-  link or stale documented constant produces a targeted failure
-  ([testing](docs/testing.md#known-verification-gaps)).
+- [x] **P1** **Automated documentation checks.** Since 2026-10-10
+  `scripts/check_docs.py` runs in the Linux host job and in `mask ci` and
+  `mask docs-check`. It fails, with the file and line, on a broken link or
+  anchor; a `config.rs` constant missing from, or disagreeing with, the
+  [Configuration Defaults](docs/hardware.md#configuration-defaults) table; an
+  inline `` `NAME` (value) `` mention that disagrees; a memory-map row, address
+  range, or pairing page range that disagrees with the linker scripts; an
+  unknown `mask` recipe, binary, or feature; and a code-formatted path that no
+  longer exists. 27 unit tests cover each check, and a mutated copy of the
+  repository (a changed table value, constant, flash length, page range,
+  recipe, binary, feature, and path) failed on every change
+  ([Markdown checks](docs/code-quality.md#markdown-checks);
+  `scripts/check_docs.py`, `scripts/check_docs_test.py`,
+  `.github/workflows/ci.yml`, `maskfile.md`).
 
 ## Product Extensions
 

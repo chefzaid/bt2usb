@@ -246,9 +246,10 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask probe-list` | Discover available probes |
 | `mask size` / `mask bloat` | Inspect release size |
 | `mask doc` | Generate embedded API documentation |
-| `mask doc-check` | Check every rustdoc build with warnings denied, as CI does |
+| `mask rustdoc-check` | Check every rustdoc build with warnings denied, as CI does |
+| `mask docs-check` | Check Markdown links, documented constants, memory map, and commands |
 
-The [mask command reference](#mask-command-reference) below lists all 32
+The [mask command reference](#mask-command-reference) below lists all 33
 recipes with their exact commands and options.
 
 Flashing the bridge requires S140 to have been installed. Complete
@@ -301,10 +302,10 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | `mask clippy` | `cargo clippy --locked --features embedded --target <arm> -- -D warnings` | Embedded configuration only; host and simulation Clippy run in `mask ci` |
 | `mask fmt` | `cargo fmt` | Formats the bt2usb package only |
 | `mask fmt-check` | `cargo fmt -- --check` | Same files as CI's `--package bt2usb` with the current manifest |
-| `mask ci` | Format check; Clippy for host, embedded, and simulation; host tests; the four rustdoc builds of `mask doc-check`; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
+| `mask ci` | Format check; Clippy for host, embedded, and simulation; host tests; the four rustdoc builds of `mask rustdoc-check`; `scripts/check_docs.py`; release firmware build; simulation build | `set -e` stops at the first failure; success prints `=== All checks passed! ===` |
 
-`mask ci` does not run the release-helper tests, actionlint, the coverage
-floor, the audit, or Renode. The [testing guide](testing.md#local-and-ci-coverage-compared)
+`mask ci` does not run the release-helper or documentation-checker tests,
+actionlint, the coverage floor, the audit, or Renode. The [testing guide](testing.md#local-and-ci-coverage-compared)
 compares it with CI.
 
 ### Coverage
@@ -345,7 +346,8 @@ keeps the SoftDevice. The scenario and assertions are described in
 | `mask size` | `cargo size --locked --features embedded --target <arm> --release --bin bt2usb -- -A` | Per-section sizes of the release bridge; needs cargo-binutils and the LLVM tools component |
 | `mask bloat` | `cargo bloat --locked --features embedded --target <arm> --release --bin bt2usb -n 30` | The 30 largest functions |
 | `mask doc` | `cargo doc --locked --features embedded --target <arm> --open` | Firmware API documentation, dependencies included, for reading. Warnings are not denied here |
-| `mask doc-check` | With `RUSTDOCFLAGS="-D warnings"`, `cargo doc --locked --no-deps --document-private-items` for `--lib`, for `--features embedded --target <arm> --lib`, for `--features embedded --target <arm> --bin bt2usb --bin bt2usb-selftest`, and for `--features sim --target <arm> --bin bt2usb-sim` | The same four builds CI checks ([code quality](code-quality.md#documentation-comments)); fails on the first warning |
+| `mask docs-check` | `python3 -m unittest discover -s scripts -p "check_docs_test.py"`, then `python3 scripts/check_docs.py` (or `python` where `python3` is missing) | Fails with `path:line: [check] message` for each broken link or anchor, value that disagrees with `config.rs` or the linker scripts, unknown recipe, binary, or feature, and missing file ([code quality](code-quality.md#markdown-checks)) |
+| `mask rustdoc-check` | With `RUSTDOCFLAGS="-D warnings"`, `cargo doc --locked --no-deps --document-private-items` for `--lib`, for `--features embedded --target <arm> --lib`, for `--features embedded --target <arm> --bin bt2usb --bin bt2usb-selftest`, and for `--features sim --target <arm> --bin bt2usb-sim` | The same four builds CI checks ([code quality](code-quality.md#documentation-comments)); fails on the first warning |
 
 ### Environment Setup
 
@@ -558,11 +560,11 @@ in a public issue. See the [security policy](../SECURITY.md).
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
 | `sim.rs`, `ui/buttons.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
 | `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
-| `memory_sd.x`, storage constants, or `build.rs` | `mask ci`, `mask size` | Self-test flash stage and the `softdevice RAM` log |
+| `memory_sd.x`, storage constants, or `build.rs` | `mask ci` (its Markdown check compares the documented memory map), `mask size` | Self-test flash stage and the `softdevice RAM` log |
 | `.github/workflows/ci.yml` | `actionlint` | A hosted run |
 | `scripts/release.py` | Release-helper tests | The first hosted tag run ([deployment](deployment.md#validation-limits)) |
 | `maskfile.md` or `scripts/*.sh` | Run the changed recipe or script in Bash | |
-| Documentation only | Check links and quoted constants by hand | `mask doc-check` when `///` or `//!` comments changed |
+| Documentation only | `mask docs-check` | `mask rustdoc-check` when `///` or `//!` comments changed; figures the checker does not cover, such as counts and sizes, by hand |
 
 The [code-quality review checklist](code-quality.md#review-checklist) lists
 what a reviewer checks.

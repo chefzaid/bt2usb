@@ -375,13 +375,13 @@ devcontainer build --workspace-folder .
 > Generate and open the firmware API documentation
 
 Builds rustdoc for the `embedded` configuration, dependencies included, without
-denying warnings. `mask doc-check` runs the checks CI runs instead.
+denying warnings. `mask rustdoc-check` runs the checks CI runs instead.
 
 ```bash
 ./scripts/run-tool.sh cargo doc --locked --features embedded --target thumbv7em-none-eabihf --open
 ```
 
-## doc-check
+## rustdoc-check
 
 > Check every rustdoc build with private items and warnings denied, as CI does
 
@@ -402,9 +402,26 @@ $doc --features sim $arm --bin bt2usb-sim
 echo "All documentation builds are free of warnings."
 ```
 
+## docs-check
+
+> Check the Markdown guides' links, documented constants, memory map, and commands
+
+Runs [scripts/check_docs.py](scripts/check_docs.py) over every tracked
+Markdown file and its unit tests. A broken link or anchor, a value that
+disagrees with `src/config.rs` or the linker scripts, an unknown `mask` recipe,
+binary, or feature, or a file path that no longer exists fails the task, with
+the file and line of each finding.
+
+```bash
+set -e
+py="$(command -v python3 || command -v python)"
+"$py" -m unittest discover -s scripts -p "check_docs_test.py"
+"$py" scripts/check_docs.py
+```
+
 ## ci
 
-> Run local formatting, lint, host tests, documentation checks, and firmware builds
+> Run local formatting, lint, host tests, rustdoc and Markdown checks, and firmware builds
 
 ```bash
 set -e
@@ -425,6 +442,8 @@ $doc --features embedded $arm --lib
 $doc --features embedded $arm --bin bt2usb --bin bt2usb-selftest
 $doc --features sim $arm --bin bt2usb-sim
 unset RUSTDOCFLAGS
+echo "=== Checking Markdown documentation ==="
+"$(command -v python3 || command -v python)" scripts/check_docs.py
 echo "=== Building release ==="
 ./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 ./scripts/run-tool.sh cargo build --locked --features sim --target thumbv7em-none-eabihf

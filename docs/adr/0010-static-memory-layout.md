@@ -200,8 +200,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   persistence, and record reviewed margins before changing `memory_sd.x`.
 - "Stack overflow detection": evaluate a guard compatible with the SoftDevice
   RAM layout, so an overflow faults with a diagnosable message.
-- "Automated documentation checks": catch disagreement between the storage
-  constants, the linker map, and the documented memory map.
+- Keep the documentation checker's `memory` check passing: since 2026-10-10
+  it fails CI when the documented memory map, address ranges, or pairing page
+  numbers disagree with the storage constants and the linker scripts
+  ([Markdown checks](../code-quality.md#markdown-checks)).
 - "Signed USB/BLE DFU": choose a bootloader and flash partition layout around
   the regions above, and record it in a new ADR.
 

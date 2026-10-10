@@ -186,8 +186,10 @@ Follow-up obligations:
   as the change they describe.
 - Never describe an open item as a feature, and never check off a hardware
   gate without board evidence.
-- Close the "Automated documentation checks" item in [TODO.md](../../TODO.md)
-  so a broken link or a stale constant fails CI.
+- Keep [scripts/check_docs.py](../../scripts/check_docs.py) passing: since
+  2026-10-10 a broken link or anchor, or a documented constant, memory-map
+  value, command, or file path that disagrees with the repository, fails CI
+  ([Markdown checks](../code-quality.md#markdown-checks)).
 
 ## Implementation
 
@@ -204,6 +206,10 @@ Follow-up obligations:
   `src/selftest.rs`, `src/ble/coordinator.rs` and `src/ui/ui_logic.rs`, three
   recipes in `maskfile.md`, and the closing message of
   `.devcontainer/post-create.sh`.
+- Checks: `scripts/check_docs.py` and its 27 tests in
+  `scripts/check_docs_test.py` run in the Linux host job of
+  [ci.yml](../../.github/workflows/ci.yml); `mask docs-check` runs both, and
+  `mask ci` runs the checker.
 - Issue templates: `.github/ISSUE_TEMPLATE/bug.md`, `feature.md`, and
   `hardware-result.md` (labelled `hardware-evidence`, it asks for the commit,
   ELF hash, SoftDevice version, and every checklist result); `config.yml` links
@@ -217,9 +223,10 @@ Follow-up obligations:
   relative link between Markdown files, including its `#anchor`, resolves.
   The 2026-10-09 check of the restructured documents found no broken link.
   The [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
-  also lists local links as validated for the earlier layout. No CI job checks
-  links or documented constants, so nothing catches a link or constant that
-  goes stale on a later commit.
+  also lists local links as validated for the earlier layout. Since
+  2026-10-10 the documentation checker re-checks every link and anchor, the
+  configuration table, named constants, the memory map, and commands on each
+  CI run; prose values without a constant's name are still checked by hand.
 - **Hardware-verified:** not applicable.
 
 ## Related

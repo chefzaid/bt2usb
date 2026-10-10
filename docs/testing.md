@@ -60,8 +60,9 @@ PowerShell, use the direct command.
 | Headless Renode test | `mask sim-test` | `renode-test renode/bt2usb-sim.robot` |
 | Interactive Renode | `mask sim` | `renode renode/bt2usb-sim.resc` |
 | Release helper tests | — | `python -m unittest discover -s scripts -p "release_test.py" -v` |
+| Markdown links, constants, memory map, and commands | `mask docs-check` | `python scripts/check_docs.py`, and its tests with `python -m unittest discover -s scripts -p "check_docs_test.py" -v` |
 | Format check | `mask fmt-check` | `cargo fmt --package bt2usb -- --check` |
-| API documentation, every build, warnings denied | `mask doc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
+| API documentation, every build, warnings denied | `mask rustdoc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
 | Workflow lint | — | `actionlint` |
 | Dependency audit | — | `cargo audit` |
 | Board self-test | `mask selftest` | `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest` |
@@ -442,7 +443,7 @@ cancels an in-progress one, except for tag refs. The default token permission is
 
 | Job | Runner and limit | Checks, in order |
 | --- | --- | --- |
-| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
+| Host tests (`ubuntu-latest`, `windows-latest`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs`; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12 (SHA-256 verified) and run it; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
 | Dependency security audit | Ubuntu, 10 min | `cargo audit` with cargo-audit 0.22.2 |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
@@ -495,8 +496,9 @@ tracks it.
 | Host unit and integration tests | Yes | Yes, Linux and Windows |
 | Release firmware and simulation builds | Yes | Yes |
 | Release-helper tests | No | Yes, Linux and Windows |
+| Markdown checks (`scripts/check_docs.py`) | Yes (also `mask docs-check`, which adds its tests) | Yes, Linux, with its tests |
 | actionlint | No | Yes, Linux |
-| rustdoc with private items and warnings denied, every build | Yes (also `mask doc-check`) | Yes |
+| rustdoc with private items and warnings denied, every build | Yes (also `mask rustdoc-check`) | Yes |
 | Coverage with the line floor | No (`mask coverage` reports without a floor) | Yes, Linux |
 | Dependency audit | No | Yes |
 | Headless Renode test | No (`mask sim-test`) | Yes |
@@ -601,7 +603,10 @@ Not yet first-class:
 - power-loss and flash fault injection
 - USB conformance captures and a peripheral/host/hub compatibility matrix
 - soak, latency, and reconnect-time measurements
-- automated documentation link and constant checks
+- documentation checks beyond links, the configuration table, named
+  constants, the memory map, and commands: prose values without a constant's
+  name, test counts, sizes, and coverage figures are checked by hand
+  ([Markdown checks](code-quality.md#markdown-checks))
 - reproducible-build comparison across clean environments
 
 Specific to the current workflow and test tree:

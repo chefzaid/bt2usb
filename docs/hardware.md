@@ -304,6 +304,7 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `BLE_RECONNECT_BACKOFF_MS` | 500 | Pause between reconnect attempts |
 | `BLE_FAST_SCAN_INTERVAL` / `WINDOW` | 160 / 80 | A 50 ms window every 100 ms, in 0.625 ms units, for connection attempts and fast reconnect scans |
 | `BLE_FAST_RECONNECT_SECS` | 30 | How long reconnect scans stay fast after power-up or a lost link |
+| `BLE_RECONNECT_SIGHTING_TTL_MS` | 2000 | How long a sighting one slot's scan hands to the other stays usable |
 | `BLE_FAILED_RECONNECT_HOLDOFF_MS` | 6500 | How long the other slot's reconnect scans ignore a device after a failed attempt; derived from `BLE_CONNECT_TIMEOUT_SECS` and `BLE_RECONNECT_BACKOFF_MS` |
 | `BLE_PEER_MAX_CONN_INTERVAL` | 24 | Longest interval (30 ms) granted to a peripheral that asks only for intervals slower than 15 ms |
 | `BLE_MAX_PERIPHERAL_LATENCY` | 20 | Largest peripheral latency granted to a peripheral's request |

@@ -73,6 +73,12 @@ pub const BLE_FAST_SCAN_WINDOW: u32 = 80;
 /// 312.5 ms window every 1.7 s) until the device returns.
 pub const BLE_FAST_RECONNECT_SECS: u64 = 30;
 
+/// How long a reconnect scan's sighting of another slot's device stays usable
+/// (ms). The device was advertising when it was seen, so a connection the
+/// woken slot starts shortly afterwards finds it; an older sighting may carry
+/// a private address that has rotated, and the slot scans for itself instead.
+pub const BLE_RECONNECT_SIGHTING_TTL_MS: u64 = 2_000;
+
 /// Longest connection interval granted, as a single value, to a peripheral
 /// that asks only for intervals slower than [`BLE_CONN_INTERVAL_MAX`] (in
 /// 1.25 ms units). 24 = 30 ms. Such a peripheral gets its own shortest interval

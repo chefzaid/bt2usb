@@ -68,7 +68,7 @@ that stops retries.
 `scanner::find_saved_peer(sd, slot)` takes the GAP lock and:
 
 1. returns a sighting that the other slot's scan recorded for this slot in the
-   last `SIGHTING_TTL_MS` (2 s), without scanning; a sighting is used once and
+   last `BLE_RECONNECT_SIGHTING_TTL_MS` (2 s), without scanning; a sighting is used once and
    a stale one is discarded;
 2. otherwise runs one passive scan, bounded by `BLE_CONNECT_TIMEOUT_SECS`,
    whose callback skips non-connectable advertising reports (added on
@@ -241,11 +241,11 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Concern | Where |
 | --- | --- |
 | Boot assignment without a scan | `ble_task` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
-| Shared table, sighting lifetime, duty window, failure holdoff, tie-break, wakes | `ReconnectTable` (`register`, `clear`, `attempt_failed`, `targets`, `record_sighting`, `take_sighting`, `wake_pending`, `duty`), `Recorded`, `SIGHTING_TTL_MS`, `ScanDuty`, and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs) |
+| Shared table, sighting lifetime, duty window, failure holdoff, tie-break, wakes | `ReconnectTable` (`register`, `clear`, `attempt_failed`, `targets`, `record_sighting`, `take_sighting`, `wake_pending`, `duty`), `Recorded`, `ScanDuty`, and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs) |
 | Saved-device identity and matching | `reconnect::SavedPeer` (equality by identity key, otherwise by address; `matches` with a key resolver) in `reconnect.rs`; the `SavedPeer` alias and the `IdentityKey::is_match` resolver in [scanner.rs](../../src/ble/scanner.rs) |
 | Shared reconnect scan and handover | `RECONNECTS`, `RECONNECT_WAKE`, `update`, `register_reconnect`, `clear_reconnect`, `reconnect_attempt_failed`, `reconnect_sighted`, and `find_saved_peer` in `scanner.rs`; the log line `slot {} scan found slot {}'s device` |
 | Registration lifecycle | `connection_slot_task` (including the `attempt_failed` call on a silent `ConnectFailed`) and `connect_and_run_secure` in `multi_conn.rs` |
-| Timing constants | `BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`, `BLE_FAST_RECONNECT_SECS`, `BLE_FAILED_RECONNECT_HOLDOFF_MS`, `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS` in [config.rs](../../src/config.rs) |
+| Timing constants | `BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`, `BLE_FAST_RECONNECT_SECS`, `BLE_RECONNECT_SIGHTING_TTL_MS` (in `reconnect.rs` as `SIGHTING_TTL_MS` until 2026-10-10), `BLE_FAILED_RECONNECT_HOLDOFF_MS`, `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS` in [config.rs](../../src/config.rs) |
 | UI at power-up | `UiState::connection_status` in [ui_logic.rs](../../src/ui/ui_logic.rs) no longer special-cases a boot scan |
 
 ### Verification Status

@@ -12,7 +12,8 @@ use crate::ble::reconnect::{self, owner_of, ReconnectTable, Recorded, ScanDuty};
 use crate::ble::{BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::{
     BLE_FAILED_RECONNECT_HOLDOFF_MS, BLE_FAST_RECONNECT_SECS, BLE_FAST_SCAN_INTERVAL,
-    BLE_FAST_SCAN_WINDOW, BLE_MAX_DISCOVERED, BLE_SCAN_DURATION_SECS,
+    BLE_FAST_SCAN_WINDOW, BLE_MAX_DISCOVERED, BLE_RECONNECT_SIGHTING_TTL_MS,
+    BLE_SCAN_DURATION_SECS,
 };
 use defmt::info;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -36,6 +37,7 @@ static RECONNECTS: BlockingMutex<CriticalSectionRawMutex, RefCell<Table>> =
     BlockingMutex::new(RefCell::new(ReconnectTable::new(
         BLE_FAST_RECONNECT_SECS * 1000,
         BLE_FAILED_RECONNECT_HOLDOFF_MS,
+        BLE_RECONNECT_SIGHTING_TTL_MS,
     )));
 
 /// Wakes a slot waiting between reconnect attempts when another slot's scan

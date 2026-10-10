@@ -463,7 +463,7 @@ flowchart TD
   stops retries, so a connected or released slot never claims an
   advertisement.
 - `scanner::find_saved_peer` first takes a sighting that the other slot's scan
-  recorded for this slot in the last 2 seconds (`SIGHTING_TTL_MS`), and
+  recorded for this slot in the last 2 seconds (`BLE_RECONNECT_SIGHTING_TTL_MS`), and
   connects to it without scanning. Otherwise it runs one passive scan, bounded
   by `BLE_CONNECT_TIMEOUT_SECS`, that ignores non-connectable advertisements
   and matches every connectable one against every registered target: through the identity key, which follows a rotated

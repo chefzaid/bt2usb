@@ -21,11 +21,6 @@
 
 use crate::ble::coordinator::MAX_CONNECTIONS;
 
-/// How long a sighting stays usable, in milliseconds. The device was
-/// advertising when it was seen, so a connection started shortly afterwards
-/// finds it; an older sighting may carry a private address that has rotated.
-pub const SIGHTING_TTL_MS: u64 = 2_000;
-
 /// A saved device a connection slot is reconnecting to in the background.
 ///
 /// `A` is the over-the-air address type and `K` the identity key a bond
@@ -118,17 +113,20 @@ pub struct ReconnectTable<T, A> {
     entries: [Option<Entry<T, A>>; MAX_CONNECTIONS],
     fast_window_ms: u64,
     failed_holdoff_ms: u64,
+    sighting_ttl_ms: u64,
 }
 
 impl<T: Copy + PartialEq, A: Copy> ReconnectTable<T, A> {
     /// An empty table whose fast duty cycle lasts `fast_window_ms` after a
-    /// target is registered, and which hides a target from the other slots'
-    /// scans for `failed_holdoff_ms` after an attempt to connect to it fails.
-    pub const fn new(fast_window_ms: u64, failed_holdoff_ms: u64) -> Self {
+    /// target is registered, which hides a target from the other slots' scans
+    /// for `failed_holdoff_ms` after an attempt to connect to it fails, and
+    /// whose sightings stay usable for `sighting_ttl_ms`.
+    pub const fn new(fast_window_ms: u64, failed_holdoff_ms: u64, sighting_ttl_ms: u64) -> Self {
         Self {
             entries: [None; MAX_CONNECTIONS],
             fast_window_ms,
             failed_holdoff_ms,
+            sighting_ttl_ms,
         }
     }
 
@@ -216,13 +214,15 @@ impl<T: Copy + PartialEq, A: Copy> ReconnectTable<T, A> {
         }
     }
 
-    /// Take `slot`'s sighting if it is still fresh. A sighting is used at
+    /// Take `slot`'s sighting if it is at most `sighting_ttl_ms` old. A
+    /// sighting is used at
     /// most once; a stale one is discarded. Either way, any wake due for it
     /// lapses.
     pub fn take_sighting(&mut self, slot: usize, now_ms: u64) -> Option<A> {
         let entry = self.entries.get_mut(slot)?.as_mut()?;
         let sighting = entry.sighting.take()?;
-        (now_ms.saturating_sub(sighting.seen_ms) <= SIGHTING_TTL_MS).then_some(sighting.address)
+        (now_ms.saturating_sub(sighting.seen_ms) <= self.sighting_ttl_ms)
+            .then_some(sighting.address)
     }
 
     /// Whether `slot`, if it is pausing between attempts, should be woken:

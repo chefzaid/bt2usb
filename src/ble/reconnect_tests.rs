@@ -6,6 +6,7 @@ use super::*;
 
 const WINDOW: u64 = 30_000;
 const HOLDOFF: u64 = 6_500;
+const TTL: u64 = 2_000;
 
 /// Targets and addresses are plain ids in these tests.
 type Table = ReconnectTable<u8, u8>;
@@ -34,14 +35,14 @@ fn see(table: &mut Table, address: u8, now_ms: u64) -> Option<usize> {
 
 #[test]
 fn a_new_table_has_no_targets_and_scans_slowly() {
-    let table = Table::new(WINDOW, HOLDOFF);
+    let table = Table::new(WINDOW, HOLDOFF, TTL);
     assert_eq!(table.targets(0, 0), [None; MAX_CONNECTIONS]);
     assert_eq!(table.duty(0), ScanDuty::Slow);
 }
 
 #[test]
 fn a_sighting_goes_to_the_slot_that_owns_the_device() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     table.register(1, 20, 0);
     // Slot 0's scan sees slot 1's device: it is recorded for slot 1.
@@ -52,7 +53,7 @@ fn a_sighting_goes_to_the_slot_that_owns_the_device() {
 
 #[test]
 fn unregistered_devices_are_ignored() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     assert_eq!(see(&mut table, 99, 100), None);
     assert_eq!(table.take_sighting(0, 100), None);
@@ -60,7 +61,7 @@ fn unregistered_devices_are_ignored() {
 
 #[test]
 fn a_sighting_for_an_unregistered_slot_is_not_recorded() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     assert_eq!(
         table.record_sighting(0, 0, 10, 100),
         Recorded::NotRegistered
@@ -79,7 +80,7 @@ fn a_sighting_for_an_unregistered_slot_is_not_recorded() {
 
 #[test]
 fn a_sighting_is_used_once() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     see(&mut table, 10, 100);
     assert_eq!(table.take_sighting(0, 100), Some(10));
@@ -88,7 +89,7 @@ fn a_sighting_is_used_once() {
 
 #[test]
 fn a_newer_sighting_replaces_an_older_one() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     assert_eq!(table.record_sighting(0, 0, 10, 100), Recorded::Own);
     assert_eq!(table.record_sighting(0, 0, 11, 200), Recorded::Own);
@@ -97,25 +98,25 @@ fn a_newer_sighting_replaces_an_older_one() {
 
 #[test]
 fn a_stale_sighting_is_discarded() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     see(&mut table, 10, 100);
-    assert_eq!(table.take_sighting(0, 100 + SIGHTING_TTL_MS + 1), None);
+    assert_eq!(table.take_sighting(0, 100 + TTL + 1), None);
     // Discarded, not kept for later.
     assert_eq!(table.take_sighting(0, 100), None);
 }
 
 #[test]
 fn a_sighting_at_the_ttl_is_still_fresh() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     see(&mut table, 10, 100);
-    assert_eq!(table.take_sighting(0, 100 + SIGHTING_TTL_MS), Some(10));
+    assert_eq!(table.take_sighting(0, 100 + TTL), Some(10));
 }
 
 #[test]
 fn clearing_a_slot_drops_its_target_and_sighting() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     see(&mut table, 20, 100);
     table.clear(1);
@@ -127,7 +128,7 @@ fn clearing_a_slot_drops_its_target_and_sighting() {
 
 #[test]
 fn re_registering_the_same_target_keeps_the_outage_start_and_sighting() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     see(&mut table, 10, 100);
     table.register(0, 10, 5_000);
@@ -139,7 +140,7 @@ fn re_registering_the_same_target_keeps_the_outage_start_and_sighting() {
 
 #[test]
 fn a_different_target_drops_the_old_sighting() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     see(&mut table, 10, 100);
     // Still fresh, but it belongs to the previous device.
@@ -149,7 +150,7 @@ fn a_different_target_drops_the_old_sighting() {
 
 #[test]
 fn a_different_target_starts_a_new_window() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     table.register(0, 11, 40_000);
     assert_eq!(table.duty(40_000 + WINDOW - 1), ScanDuty::Fast);
@@ -158,7 +159,7 @@ fn a_different_target_starts_a_new_window() {
 
 #[test]
 fn duty_is_fast_while_any_target_is_inside_its_window() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     assert_eq!(table.duty(WINDOW + 1), ScanDuty::Slow);
     // A second device lost later brings back the fast duty cycle.
@@ -170,7 +171,7 @@ fn duty_is_fast_while_any_target_is_inside_its_window() {
 
 #[test]
 fn the_lower_slot_wins_when_both_would_match() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     table.register(1, 10, 0);
     assert_eq!(see(&mut table, 10, 100), Some(0));
@@ -178,7 +179,7 @@ fn the_lower_slot_wins_when_both_would_match() {
 
 #[test]
 fn targets_reflect_registrations() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     assert_eq!(table.targets(0, 0), [None, Some(20)]);
     assert_eq!(table.targets(1, 0), [None, Some(20)]);
@@ -186,7 +187,7 @@ fn targets_reflect_registrations() {
 
 #[test]
 fn a_failed_attempt_hides_the_device_from_other_slots_scans() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     table.register(1, 20, 0);
     table.attempt_failed(1, 1_000);
@@ -202,7 +203,7 @@ fn a_failed_attempt_hides_the_device_from_other_slots_scans() {
 
 #[test]
 fn the_holdoff_ends_after_its_duration() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     table.attempt_failed(1, 1_000);
     assert_eq!(table.targets(0, 1_000 + HOLDOFF - 1), [None, None]);
@@ -212,7 +213,7 @@ fn the_holdoff_ends_after_its_duration() {
 
 #[test]
 fn a_failed_attempt_drops_the_pending_sighting() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     see(&mut table, 20, 100);
     table.attempt_failed(1, 200);
@@ -221,7 +222,7 @@ fn a_failed_attempt_drops_the_pending_sighting() {
 
 #[test]
 fn re_registering_keeps_the_holdoff_and_a_new_target_ends_it() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     table.attempt_failed(1, 1_000);
     // The retry after the pause registers the same device again.
@@ -234,7 +235,7 @@ fn re_registering_keeps_the_holdoff_and_a_new_target_ends_it() {
 
 #[test]
 fn a_new_failure_extends_the_holdoff() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     table.attempt_failed(1, 1_000);
     table.attempt_failed(1, 5_000);
@@ -244,7 +245,7 @@ fn a_new_failure_extends_the_holdoff() {
 
 #[test]
 fn a_failure_for_an_unregistered_slot_is_ignored() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.attempt_failed(0, 1_000);
     table.attempt_failed(MAX_CONNECTIONS, 1_000);
     // A device registered afterwards is not held off.
@@ -254,7 +255,7 @@ fn a_failure_for_an_unregistered_slot_is_ignored() {
 
 #[test]
 fn out_of_range_slots_are_ignored() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(MAX_CONNECTIONS, 10, 0);
     assert_eq!(table.targets(0, 0), [None; MAX_CONNECTIONS]);
     assert_eq!(
@@ -269,7 +270,7 @@ fn out_of_range_slots_are_ignored() {
 
 #[test]
 fn the_clock_going_backwards_does_not_underflow() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 1_000);
     see(&mut table, 10, 1_000);
     assert_eq!(table.duty(0), ScanDuty::Fast);
@@ -280,7 +281,7 @@ fn the_clock_going_backwards_does_not_underflow() {
 
 #[test]
 fn a_handover_wakes_only_the_owner() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(0, 10, 0);
     table.register(1, 20, 0);
     assert_eq!(table.record_sighting(0, 1, 20, 100), Recorded::HandedOver);
@@ -294,19 +295,19 @@ fn a_handover_wakes_only_the_owner() {
 
 #[test]
 fn taking_the_sighting_ends_the_wake_fresh_or_stale() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     table.record_sighting(0, 1, 20, 100);
     assert_eq!(table.take_sighting(1, 200), Some(20));
     assert!(!table.wake_pending(1));
     table.record_sighting(0, 1, 20, 300);
-    assert_eq!(table.take_sighting(1, 300 + SIGHTING_TTL_MS + 1), None);
+    assert_eq!(table.take_sighting(1, 300 + TTL + 1), None);
     assert!(!table.wake_pending(1));
 }
 
 #[test]
 fn a_failed_attempt_or_clearing_ends_the_wake() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     table.record_sighting(0, 1, 20, 100);
     table.attempt_failed(1, 200);
@@ -318,7 +319,7 @@ fn a_failed_attempt_or_clearing_ends_the_wake() {
 
 #[test]
 fn re_registering_keeps_the_wake_and_a_new_target_ends_it() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     table.record_sighting(0, 1, 20, 100);
     table.register(1, 20, 150);
@@ -329,7 +330,7 @@ fn re_registering_keeps_the_wake_and_a_new_target_ends_it() {
 
 #[test]
 fn a_sighting_for_a_slot_cleared_meanwhile_wakes_nobody() {
-    let mut table = Table::new(WINDOW, HOLDOFF);
+    let mut table = Table::new(WINDOW, HOLDOFF, TTL);
     table.register(1, 20, 0);
     // Slot 0's scan matched against a copy taken before slot 1 stopped.
     let owner = owner_of(&table.targets(0, 100), 20, same);
@@ -390,7 +391,7 @@ fn a_saved_peer_matches_its_resolved_or_stored_address() {
 
 #[test]
 fn a_retry_at_a_new_private_address_keeps_the_holdoff_and_window() {
-    let mut table = ReconnectTable::<Peer, u8>::new(WINDOW, HOLDOFF);
+    let mut table = ReconnectTable::<Peer, u8>::new(WINDOW, HOLDOFF, TTL);
     table.register(1, bonded(20, 7), 0);
     table.attempt_failed(1, 1_000);
     // The slot retries with the live address it last connected to.

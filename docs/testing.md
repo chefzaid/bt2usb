@@ -903,7 +903,7 @@ commit; nothing ran on a board.
 | Documentation checker | `python3 scripts/check_docs.py` | Passed: 44 Markdown files |
 | Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 18.49 s and the model checks in 1.36 s. With the RAM clear removed from `display::initialize`, the scenario failed at boot with 2 noisy bytes. The run used a local copy of `platforms/cpus/nrf52840.repl` without its `ApplySVD` line, because this container's proxy blocks the SVD download; hosted CI uses the stock platform |
 | Dependency audit, actionlint | — | Not run locally; `Cargo.lock` and the workflows did not change (`embedded-graphics`, already a dependency, is added as a dev-dependency) |
-| Hosted CI | GitHub Actions | Runs on the push; not recorded here |
+| Hosted CI | GitHub Actions | Push run 38085444796 for `bbe5a83` failed one job: the Windows host tests read the glyph table with CRLF line endings (FIXME "The glyph-table test failed on Windows" in [TODO.md](../TODO.md#fixme)); the fix landed in the next commit |
 | Board/radio/USB acceptance | Physical hardware | Not performed; the display change needs the OLED checks in the first-flash checklist, including a power-up without noise ([6. Device management and degraded display](first-flash.md#6-device-management-and-degraded-display)) |
 
 ## Validation Record — 2026-10-10, UI Controller And Renode Scenario

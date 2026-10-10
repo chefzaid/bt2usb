@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 31 | 0 | 0 |
+| [FIXME](#fixme) | 32 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **117** | **72** | **21** |
+| **Total** | **118** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -338,6 +338,13 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   deadline. The Robot test asserts that the panel receives no byte while lit
   with noise, at boot and after it is plugged back in
   ([OLED checks](docs/testing.md#oled-checks)).
+- [x] **P2** **The glyph-table test failed on Windows.** The Windows host job
+  of CI run 38085444796 (`bbe5a83`) failed
+  `renode_glyph_table_matches_the_firmware_font`: `.gitattributes` kept
+  Renode scripts and models LF but not `renode/oled-font-6x10.txt`, so the
+  Windows checkout converted the table to CRLF and the byte-for-byte
+  comparison failed. Fixed: `.gitattributes` keeps `renode/*.txt` LF, and the
+  test compares the table with CRLF read as LF (`tests/oled_font.rs`).
 
 ## Needs Your Input
 

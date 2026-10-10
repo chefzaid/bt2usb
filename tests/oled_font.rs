@@ -95,7 +95,10 @@ fn renode_glyph_table_matches_the_firmware_font() {
     if std::env::var_os("UPDATE_OLED_FONT").is_some() {
         std::fs::write(TABLE, &expected).expect("write renode/oled-font-6x10.txt");
     }
-    let actual = std::fs::read_to_string(TABLE).unwrap_or_default();
+    // A checkout that converted the table to CRLF still holds the same glyphs.
+    let actual = std::fs::read_to_string(TABLE)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     assert!(
         actual == expected,
         "renode/oled-font-6x10.txt does not match FONT_6X10; rewrite it with \

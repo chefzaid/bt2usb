@@ -11,11 +11,13 @@
 *.bash  text eol=lf
 maskfile.md text eol=lf
 
-# Renode scripts are consumed on Linux/WSL — keep them LF.
+# Renode scripts are consumed on Linux/WSL — keep them LF. The OLED glyph
+# table is compared byte for byte with what tests/oled_font.rs generates.
 *.resc   text eol=lf
 *.robot  text eol=lf
 *.repl   text eol=lf
 *.cs     text eol=lf
+renode/*.txt text eol=lf
 
 # Rust sources and configs: LF for consistency across Windows/WSL/CI.
 *.rs    text eol=lf

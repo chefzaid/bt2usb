@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 12 | 7 | 0 |
+| [FIXME](#fixme) | 13 | 6 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 14 | 6 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **88** | **89** | **22** |
+| **Total** | **89** | **88** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -179,10 +179,11 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   lifetime is a constant in `src/ble/reconnect.rs` and is missing from
   [constants outside config.rs](docs/hardware.md#constants-outside-configrs).
   Close when it is passed in from `config.rs` like the others.
-- [ ] **P3** **A redundant `Disconnect` arm in `connection_slot_task`.** The
-  arm for a `Disconnect` that arrives between reconnect attempts repeats what
-  the fall-through path does (`clear_reconnect`, then `Disconnected`). Close
-  when the arm is removed and the behavior is unchanged.
+- [x] **P3** **A redundant `Disconnect` arm in `connection_slot_task`.** The
+  arm for a `Disconnect` that arrives between reconnect attempts repeated what
+  the fall-through path does (`clear_reconnect`, then `Disconnected`). Fixed:
+  the arm is gone and its comment moved to the one `Disconnect` arm, which now
+  handles both cases with the same calls in the same order.
 - [ ] **P3** **`BLE_CONNECT_TIMEOUT_SECS` cites a scan rate attempts no longer
   use.** Its doc justifies 6 s with three default 1.7 s scan intervals, but
   connection attempts now always scan at the fast duty, and the constant also

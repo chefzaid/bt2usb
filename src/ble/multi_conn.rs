@@ -585,13 +585,6 @@ pub async fn connection_slot_task(
             (None, Some(device)) => {
                 let backoff = Timer::after(Duration::from_millis(config::BLE_RECONNECT_BACKOFF_MS));
                 match select3(cmd_rx.receive(), backoff, scanner::reconnect_sighted(slot)).await {
-                    Either3::First(SlotCommand::Disconnect) => {
-                        scanner::clear_reconnect(slot);
-                        // The coordinator still counts this slot as reserved;
-                        // tell it the slot is free now that retrying stopped.
-                        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-                        continue;
-                    }
                     Either3::First(cmd) => cmd,
                     Either3::Second(()) | Either3::Third(()) => SlotCommand::Reconnect(device),
                 }
@@ -606,6 +599,8 @@ pub async fn connection_slot_task(
             SlotCommand::Connect(device) => (device, false),
             SlotCommand::Reconnect(device) => (device, true),
             SlotCommand::Disconnect => {
+                // Also ends a retry between attempts: the coordinator still
+                // counts this slot as reserved, so tell it the slot is free.
                 slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
                 continue;
             }

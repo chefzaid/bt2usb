@@ -950,11 +950,19 @@ Releases follow [ADR 0008](adr/0008-attested-draft-releases.md) and
    pinned compiler against `SHA256SUMS` and `BUILD-INFO.json`, renames the
    files with the tag, and creates a GitHub provenance attestation whose
    bundle ships as `provenance.sigstore.json`.
-4. The publishing job has no signing permission and runs no checked-out
+4. The packaging job fills the release notes template
+   ([`.github/release-notes.md`](../.github/release-notes.md)) from the
+   verified package and the tagged source: the exact SoftDevice prerequisite,
+   compiled connection, saved-device, and USB identity limits, the pairing
+   storage version, rollback constraints, and the checksums, with a `REVIEW:`
+   line for supported versions, tested hardware, migrations, and the oldest
+   rollback target ([release notes](deployment.md#release-notes)).
+5. The publishing job has no signing permission and runs no checked-out
    script. It refuses to touch a release that is already published and creates
-   or refreshes only a draft.
+   or refreshes only a draft, whose description is the filled notes followed by
+   GitHub's generated change list.
 
-Twelve regression tests cover the helper in
+Seventeen regression tests cover the helper in
 [`scripts/release_test.py`](../scripts/release_test.py). Hosted attestation
 issuance and verification of a downloaded release are open work.
 

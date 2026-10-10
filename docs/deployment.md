@@ -93,8 +93,8 @@ tag for a stable version, versions such as `01.2.3`, `1.2`, or `1.2.3-01`, and
 tags with trailing newlines or path characters.
 
 The check does not enforce that the tag is on `main`, that the version
-increased, that the tag is annotated or signed, or that release notes exist.
-Those are review steps.
+increased, that the tag is annotated or signed, or that the draft's
+[release notes](#release-notes) were reviewed. Those are review steps.
 
 Check a proposed tag without creating or pushing it, and run the helper's
 regression tests:
@@ -135,13 +135,46 @@ release.
 6. [Verify the draft's assets](#verify-before-flashing), flash a unit with
    them, complete the [first-flash checklist](first-flash.md), and attach the
    evidence to the draft.
-7. Complete the [release gates](#release-gates) and edit the generated release
-   notes. Publish a prerelease only as a prerelease.
+7. Complete the [release gates](#release-gates), replace every `REVIEW:` line
+   in the draft's [release notes](#release-notes), and check the change list
+   GitHub generated below them. Publish a prerelease only as a prerelease.
 
 A published tag is final. The `release` job refuses to change a published
 release, so a correction needs a new version. If a tag was pushed by mistake
 and its draft was never published, delete the draft and the tag before tagging
 again; never move a tag whose release is published.
+
+### Release Notes
+
+Each draft's description starts from
+[.github/release-notes.md](../.github/release-notes.md). After packaging, the
+`release-package` job runs `release.py notes`, which fills the template from
+the verified package and the tagged source and fails the job if any of them
+disagree; the `release` job then creates the draft with that text as its body,
+and GitHub appends its generated list of merged changes. Run the command
+locally against a package directory to preview a draft's text:
+
+```sh
+python scripts/release.py notes --package dist --tag v0.2.0-rc.1 --output RELEASE-NOTES.md
+```
+
+| Section | Filled from | Left to the reviewer |
+| --- | --- | --- |
+| Heading | Tag, prerelease flag, source commit, repository, and workflow run ID from `BUILD-INFO.json` | |
+| Supported Versions | | Which releases receive fixes, per [SECURITY.md](../SECURITY.md), and the hardware acceptance record for this build |
+| SoftDevice Prerequisite | The SoftDevice name and version in the header of [memory_sd.x](../memory_sd.x), and its `FLASH` and `RAM` origins; the command fails unless the `softdevice` recipe in `maskfile.md` installs the HEX of that same version | |
+| Compatibility Limits | `BLE_MAX_CONNECTIONS`, `MAX_PAIRED_DEVICES`, `USB_VID`, and `USB_PID` in [config.rs](../src/config.rs) | The peripherals, hosts, hubs, and KVMs tested, and limits found in testing |
+| Pairing Storage And Migrations | Storage pages from `config.rs`; frame magic and version from [framing.rs](../src/storage/framing.rs) | Whether this release migrates the store, and whether an older release can read the result |
+| Rollback Constraints | Fixed text and the storage version | The oldest release this one can roll back to without a factory reset |
+| Checksums | `SHA256SUMS`, after checking every entry against its file | |
+| Build | `rustc` and `defmt_log` from `BUILD-INFO.json` | |
+
+The template's links point at the guides as of the release tag. The notes are
+not a release file: they travel in their own workflow artifact
+(`bt2usb-release-notes-<run_attempt>`), so they are neither attested nor in
+`SHA256SUMS`, and a reviewer may edit them in the draft. The release helper
+tests check that every field is filled, that the template's guide links reach
+existing headings, and that a mismatched package or SoftDevice fails.
 
 ## Version And Build Policy
 
@@ -176,8 +209,11 @@ add code to the flashed image.
 4. The SHA-pinned official `actions/attest` action signs provenance for all
    package files, including `SHA256SUMS`, using GitHub's OIDC identity. The bundle
    is attached as `provenance.sigstore.json` after signing.
-5. A separate `release` job downloads the attested package by its immutable ID
-   and prepares the draft. This job has `contents: write` but no signing
+5. The packaging job then fills the [release notes](#release-notes) from the
+   attested package and uploads them as a separate artifact.
+6. A separate `release` job downloads the attested package and the notes by
+   their immutable IDs and prepares the draft, with the notes as its
+   description. This job has `contents: write` but no signing
    permissions. The packaging job has `contents: read`, `id-token: write`, and
    `attestations: write`; it cannot publish a release. Both run only on tag pushes.
 
@@ -206,7 +242,9 @@ Artifact names include the run attempt, so a rerun never collides with an
 earlier attempt's uploads. A rerun is intended to refresh the tag's existing
 **draft** with the rerun's attested package, through the pinned
 `softprops/action-gh-release` action; this has not yet been exercised by a
-hosted run. The `release` job fails before any upload if a **published**
+hosted run. A rerun also replaces the draft's description with freshly
+filled notes, discarding edits made in the draft, so edit the notes after the
+last rerun. The `release` job fails before any upload if a **published**
 release already exists for the tag, and it also fails if the release API cannot
 be queried. To change a published release, tag a new version; do not edit or
 re-run the old tag.
@@ -508,8 +546,9 @@ the [TODO.md](../TODO.md) items named with it, all of which are open today:
   "Power budget and USB suspend current" in
   [UI, display and power](../TODO.md#ui-display-and-power).
 - Release notes listing supported versions, compatibility limits, migrations,
-  rollback constraints, checksums, and the exact SoftDevice prerequisite:
-  "Release notes for deployment releases" in
+  rollback constraints, checksums, and the exact SoftDevice prerequisite: the
+  draft's [filled notes](#release-notes) with every `REVIEW:` line replaced.
+  The supported-version line depends on "Security maintenance ownership" in
   [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain).
 - A security contact, supported-version policy, ownership of support, and a
   dependency and license review
@@ -565,9 +604,11 @@ automated license check are the open items "Security maintenance ownership" and
 ## Validation Limits
 
 Local helper tests cover version mismatch/prerelease handling, tampered or missing
-files, build/source identity mismatch, input drift, and unchanged firmware bytes.
-`actionlint` checks workflow syntax and expressions. They cannot issue GitHub OIDC
-credentials or exercise the hosted attestation/release APIs. The first successful
+files, build/source identity mismatch, input drift, unchanged firmware bytes, and
+the filled release notes. `actionlint` checks workflow syntax and expressions. They
+cannot issue GitHub OIDC credentials or exercise the hosted attestation/release
+APIs, so whether the draft's description carries the filled notes followed by
+GitHub's generated list is first seen on a hosted tag run. The first successful
 tag workflow must be reviewed, and the downloaded assets must pass the commands
 above, before closing the hosted-provenance validation task.
 

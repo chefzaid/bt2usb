@@ -64,6 +64,14 @@ below.
   [deployment](../deployment.md#release-gates). A rerun may refresh an
   unpublished draft, but if the tag's release is already published, or the
   release API cannot be queried, the job fails before uploading anything.
+- **Filled release notes.** Added on 2026-10-10: after attestation,
+  `release-package` fills [.github/release-notes.md](../../.github/release-notes.md)
+  with `release.py notes` from the verified package and the tagged source
+  (SoftDevice prerequisite, compiled limits, storage version, checksums) and
+  uploads the text as its own artifact. `release` uses it as the draft's
+  description, followed by GitHub's generated notes. The notes are editable
+  text for reviewers, so they are not a package file and are not attested
+  ([release notes](../deployment.md#release-notes)).
 
 ## Alternatives Considered
 
@@ -117,6 +125,9 @@ Positive:
 - The released firmware is byte for byte the firmware that CI checked.
 - A compromised or buggy publishing step cannot sign, and the signing step
   cannot publish.
+- Each draft starts with the facts a deployment needs (the exact SoftDevice,
+  compiled limits, storage version, checksums) taken from the code that was
+  built, with a `REVIEW:` line for each fact only a person can supply.
 
 Negative:
 
@@ -130,6 +141,8 @@ Negative:
   compatibility, the absence of vulnerabilities, reproducibility, or anything
   the device enforces: there is no secure boot, signed update, or rollback
   protection.
+- A rerun replaces the draft's description with freshly filled notes, so
+  reviewer edits made before a rerun are lost.
 - The release path is configured but unproven: no tag has been pushed, so
   packaging, attestation, and publication have never run (see
   [Verification Status](#verification-status)). Local tests cannot issue OIDC
@@ -154,10 +167,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Staging | `stage_build` (`release.py stage`) in the `embedded` job, writing to `$RUNNER_TEMP/release-input` and refusing an existing directory; uploaded as `bt2usb-checked-firmware-<run_attempt>` with the job output `firmware-artifact-id` |
 | Packaging | `verify_staged` and `package_release` (`release.py package --expected-commit --expected-repository --expected-run-id`) in `release-package`, after `actions/download-artifact` with `artifact-ids` and `digest-mismatch: error` |
 | Attestation | `actions/attest` with `subject-path: dist/*` and `create-storage-record: false`; the bundle is copied to `dist/provenance.sigstore.json` and uploaded as `bt2usb-attested-release-<run_attempt>` |
-| Publication | The `release` job's "Refuse to modify a published release" step (`gh api --paginate .../releases`), then `softprops/action-gh-release` with `draft: true`, the prerelease flag, `target_commitish` set to the tagged commit, `fail_on_unmatched_files: true`, and generated notes |
+| Publication | The `release` job's "Refuse to modify a published release" step (`gh api --paginate .../releases`), then `softprops/action-gh-release` with `draft: true`, the prerelease flag, `target_commitish` set to the tagged commit, `fail_on_unmatched_files: true`, `body_path` pointing at the filled release notes, and generated notes appended after them |
 | Ordering and permissions | `release-package` needs `lint-and-test`, `coverage`, `audit`, `embedded`, and `simulation`; both release jobs run only for tag pushes; the workflow default is `contents: read`; tag runs are never cancelled by a newer run (`cancel-in-progress` is false for tags) |
 | Action pins | Every action is pinned to a commit SHA with a comment naming its exact upstream release, in [ci.yml](../../.github/workflows/ci.yml); the release jobs use `actions/download-artifact` v8.0.1, `actions/attest` v4.2.2, `actions/upload-artifact` v7.0.1, and `softprops/action-gh-release` v3.0.3, all on Node 24, on the pinned `ubuntu-24.04` image |
-| Helper tests | [release_test.py](../../scripts/release_test.py), run on Linux and Windows in CI; `grep -c 'def test_'` counts 12 tests covering exact and prerelease tags, tampering, metadata identity, changed lockfiles, rehashed artifacts, checksum entries, overwrites, staging identity, and dirty checkouts |
+| Helper tests | [release_test.py](../../scripts/release_test.py), run on Linux and Windows in CI; `grep -c 'def test_'` counts 17 tests covering exact and prerelease tags, tampering, metadata identity, changed lockfiles, rehashed artifacts, checksum entries, overwrites, staging identity, dirty checkouts, and the filled release notes |
 
 Error messages are specific, for example
 `release tag must be exactly v{version}; received {tag!r}`,
@@ -170,7 +183,7 @@ published release fails with
 ### Verification Status
 
 - **Implemented:** everything in the table above.
-- **Software-verified:** the 12 release-helper tests and actionlint pass in
+- **Software-verified:** the 17 release-helper tests and actionlint pass in
   the CI host-test job, and the `embedded` job stages and uploads the checked
   firmware on every run. Those check jobs passed on GitHub-hosted runners in
   push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`,

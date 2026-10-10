@@ -407,7 +407,7 @@ The ARM builds catch failures the host crate cannot:
 
 [release_test.py](../scripts/release_test.py) tests
 [release.py](../scripts/release.py), the helper CI uses to validate tags, stage
-the embedded build, and package a release. The tests build a fixture repository
+the embedded build, package a release, and fill its notes. The tests build a fixture repository
 and fake firmware in a temporary directory; they use no network, publish
 nothing, and build no firmware. `release.py` needs Python 3.11 or newer for
 `tomllib`.
@@ -430,6 +430,11 @@ python -m unittest discover -s scripts -p "release_test.py" -v
 | `test_existing_destination_is_not_overwritten` | Packaging refuses an existing output directory and keeps its contents |
 | `test_staging_records_exact_compiled_bytes_and_build_identity` | Staging records the compiled bytes' digests and build identity, and its output packages successfully |
 | `test_staging_refuses_dirty_source_or_wrong_checkout` | Modified tracked files, or a checkout whose `HEAD` differs from `GITHUB_SHA`, stop staging |
+| `test_notes_fill_every_field_from_the_package_and_source` | The repository's release notes template, filled from a fixture package, leaves no field unfilled, carries the commit, run, SoftDevice S140 v7.3.0 with its HEX and origins, the connection, saved-device, and USB identity limits, the storage pages, magic, and version, and the exact `SHA256SUMS`, and keeps its four `REVIEW:` lines |
+| `test_notes_links_reach_existing_guide_headings` | Each guide link in the filled notes names a heading that exists in that guide |
+| `test_prerelease_notes_say_so` | A prerelease tag fills the heading as a prerelease |
+| `test_notes_refuse_a_package_that_does_not_match` | A checksum entry for a missing or path-escaping file, a wrong digest, an empty manifest, or build metadata with another version, a short commit, or no compiler stops the notes |
+| `test_notes_require_the_softdevice_mask_installs` | The notes fail when the `softdevice` recipe installs a different SoftDevice version than `memory_sd.x` links against |
 
 These tests cannot issue GitHub OIDC credentials or exercise the hosted
 attestation and release APIs; see
@@ -455,8 +460,8 @@ Cargo command and install no toolchain.
 | Dependency security audit | Ubuntu, 10 min | `rustup install`; `cargo audit` with cargo-audit 0.22.2 and [.cargo/audit.toml](../.cargo/audit.toml), which denies warnings and ignores two advisories by ID |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`, without and with the `log-sensitive-data` opt-in; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
 | Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; rustdoc with private items and warnings denied for `bt2usb-sim`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
-| Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after every check job | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload |
-| Prepare draft firmware release | Ubuntu, 10 min, after packaging | Download the attested package; refuse if the tag's release is already published; create or update a draft release |
+| Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after every check job | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload; `release.py notes` from the package; upload the notes separately |
+| Prepare draft firmware release | Ubuntu, 10 min, after packaging | Download the attested package and the notes; refuse if the tag's release is already published; create or update a draft release with the notes as its description, followed by GitHub's generated notes |
 
 Artifacts:
 

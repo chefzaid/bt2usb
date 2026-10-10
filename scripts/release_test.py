@@ -1,12 +1,25 @@
 """Release policy regression tests; no network, publishing, or firmware build."""
 
 import json
+import re
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 import release
+from docs_checks.links import anchors
+from docs_checks.model import Document
+
+REPOSITORY = Path(__file__).resolve().parent.parent
+NOTES_SOURCES = (
+    release.NOTES_TEMPLATE,
+    Path("memory_sd.x"),
+    Path("maskfile.md"),
+    Path("src", "config.rs"),
+    Path("src", "storage", "framing.rs"),
+)
 
 
 class ReleaseTests(unittest.TestCase):
@@ -239,6 +252,80 @@ class ReleaseTests(unittest.TestCase):
             ):
                 release.stage_build(self.root, self.source, self.output, Path("llvm-objcopy"))
             self.assertFalse(self.output.exists())
+
+    def notes(self, tag="v0.1.0"):
+        for name in NOTES_SOURCES:
+            if not (self.root / name).exists():
+                (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(REPOSITORY / name, self.root / name)
+        return release.release_notes(self.root, self.output, tag)
+
+    def test_notes_fill_every_field_from_the_package_and_source(self):
+        self.package()
+        notes = self.notes()
+        self.assertNotIn("${", notes)
+        self.assertIn("**bt2usb 0.1.0** (Release)", notes)
+        self.assertIn(f"/commit/{self.commit})", notes)
+        self.assertIn("/actions/runs/123)", notes)
+        self.assertIn("**S140 v7.3.0**\n(`s140_nrf52_7.3.0_softdevice.hex`)", notes)
+        self.assertIn("`0x00027000` in flash and `0x20006000` in RAM", notes)
+        self.assertIn("at most\n  2 connected at once and 4 saved", notes)
+        self.assertIn("VID `0x1209` and PID `0x0001`", notes)
+        self.assertIn("pages 240 to 243 (from\n`0x000F0000`)", notes)
+        self.assertIn("magic `0xB2` and\nstorage version `0x01`", notes)
+        self.assertIn((self.output / "SHA256SUMS").read_text(encoding="utf-8"), notes)
+        self.assertIn('--source-digest "$approved_commit"', notes)
+        self.assertEqual(len(re.findall(r"^(?:- )?REVIEW: ", notes, re.MULTILINE)), 4)
+
+    def test_notes_links_reach_existing_guide_headings(self):
+        self.package()
+        links = re.findall(r"/blob/v0\.1\.0/(docs/[a-z-]+\.md)#([a-z0-9-]+)\)", self.notes())
+        self.assertGreaterEqual(len(links), 6)
+        for path, fragment in links:
+            with self.subTest(link=f"{path}#{fragment}"):
+                text = (REPOSITORY / path).read_text(encoding="utf-8")
+                self.assertIn(fragment, anchors(Document(path, text)))
+
+    def test_prerelease_notes_say_so(self):
+        version = "0.2.0-rc.1"
+        self.set_version(version)
+        self.output.mkdir()
+        (self.output / "BUILD-INFO.json").write_text(
+            json.dumps({**self.metadata, "version": version}), encoding="utf-8"
+        )
+        release.write_checksums(self.output, ("BUILD-INFO.json",))
+        self.assertIn(f"**bt2usb {version}** (Prerelease)", self.notes(f"v{version}"))
+
+    def test_notes_refuse_a_package_that_does_not_match(self):
+        self.package()
+        checksums = self.output / "SHA256SUMS"
+        original = checksums.read_text(encoding="utf-8")
+        for changed in (
+            original.replace("  bt2usb-v0.1.0.hex", "  missing.hex"),
+            original.replace("  bt2usb-v0.1.0.hex", "  ../bt2usb-v0.1.0.hex"),
+            "0" * 64 + "  bt2usb-v0.1.0.hex\n",
+            "",
+        ):
+            checksums.write_text(changed, encoding="utf-8")
+            with self.subTest(checksums=changed), self.assertRaises(release.ReleaseError):
+                self.notes()
+        checksums.write_text(original, encoding="utf-8")
+        metadata = self.output / "BUILD-INFO.json"
+        for field, value in (("version", "0.0.9"), ("source_commit", "abc"), ("rustc", None)):
+            metadata.write_text(json.dumps({**self.metadata, field: value}), encoding="utf-8")
+            with self.subTest(field=field), self.assertRaises(release.ReleaseError):
+                self.notes()
+
+    def test_notes_require_the_softdevice_mask_installs(self):
+        self.package()
+        self.notes()
+        maskfile = self.root / "maskfile.md"
+        maskfile.write_text(
+            maskfile.read_text(encoding="utf-8").replace("7.3.0_softdevice", "7.2.0_softdevice"),
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(release.ReleaseError, "mask softdevice"):
+            self.notes()
 
 
 if __name__ == "__main__":

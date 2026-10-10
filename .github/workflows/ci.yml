@@ -295,6 +295,7 @@ jobs:
       attestations: write
     outputs:
       release-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      notes-artifact-id: ${{ steps.notes.outputs.artifact-id }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -340,6 +341,21 @@ jobs:
           name: bt2usb-attested-release-${{ github.run_attempt }}
           path: dist/*
           if-no-files-found: error
+      # The notes are the draft's editable description, not a release file, so
+      # they travel in their own artifact and are neither attested nor attached.
+      - name: Fill the release notes template from the verified package
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python scripts/release.py notes --package dist --tag "$RELEASE_TAG" \
+            --output "$RUNNER_TEMP/release-notes/RELEASE-NOTES.md"
+      - name: Upload release notes
+        id: notes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: bt2usb-release-notes-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-notes/RELEASE-NOTES.md
+          if-no-files-found: error
 
   # Publication has no signing permissions and executes no checked-out scripts.
   release:
@@ -356,6 +372,12 @@ jobs:
         with:
           artifact-ids: ${{ needs.release-package.outputs.release-artifact-id }}
           path: dist
+          digest-mismatch: error
+      - name: Download the filled release notes
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.release-package.outputs.notes-artifact-id }}
+          path: notes
           digest-mismatch: error
       # A rerun may refresh this tag's unpublished draft, but must never change
       # a release that is already published. API errors fail the job (closed).
@@ -378,4 +400,6 @@ jobs:
           target_commitish: ${{ github.sha }}
           files: dist/*
           fail_on_unmatched_files: true
+          # GitHub appends its generated change list after this body.
+          body_path: notes/RELEASE-NOTES.md
           generate_release_notes: true

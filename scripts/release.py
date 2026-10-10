@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Validate release identity and package the exact successful CI build.
+"""Validate release identity, package the exact successful CI build, and fill
+the release notes template for its draft.
 
 Python 3.11+; standard library only. This helper never publishes a release.
 """
@@ -12,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import string
 import subprocess
 import tomllib
 from pathlib import Path
@@ -20,6 +22,7 @@ TARGET = "thumbv7em-none-eabihf"
 INPUTS = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
 FIRMWARE = ("bt2usb.elf", "bt2usb-selftest.elf", "bt2usb.hex")
 STAGED = (*FIRMWARE, *INPUTS, "BUILD-INFO.json")
+NOTES_TEMPLATE = Path(".github", "release-notes.md")
 SEMVER = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
     r"(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
@@ -203,6 +206,94 @@ def package_release(
     write_checksums(output, tuple(names.values()))
 
 
+def rust_constant(path: Path, name: str) -> str:
+    """The literal value of a top-level `const NAME: Type = value;` in `path`."""
+    found = re.search(
+        rf"^(?:pub )?const {name}: [^=]+= ([^;]+);$",
+        path.read_text(encoding="utf-8"),
+        re.MULTILINE,
+    )
+    if found is None:
+        raise ReleaseError(f"{path.name} does not define {name}")
+    return found[1]
+
+
+def softdevice_prerequisite(root: Path) -> dict[str, str]:
+    """The SoftDevice the linker script links against, which `mask softdevice` must install."""
+    linker = (root / "memory_sd.x").read_text(encoding="utf-8")
+    named = re.search(r"SoftDevice (S1[0-9]{2}) v([0-9]+\.[0-9]+\.[0-9]+)", linker)
+    flash = re.search(r"^\s*FLASH : ORIGIN = (0x[0-9A-Fa-f]{8}),", linker, re.MULTILINE)
+    ram = re.search(r"^\s*RAM : ORIGIN = (0x[0-9A-Fa-f]{8}),", linker, re.MULTILINE)
+    if named is None or flash is None or ram is None:
+        raise ReleaseError("memory_sd.x must name the SoftDevice and the FLASH and RAM origins")
+    hex_file = f"{named[1].lower()}_nrf52_{named[2]}_softdevice.hex"
+    if f'SD_HEX="{hex_file}"' not in (root / "maskfile.md").read_text(encoding="utf-8"):
+        raise ReleaseError(
+            f"mask softdevice does not install {hex_file}, which memory_sd.x expects"
+        )
+    return {
+        "softdevice": f"{named[1]} v{named[2]}",
+        "softdevice_hex": hex_file,
+        "app_flash_start": flash[1],
+        "app_ram_start": ram[1],
+    }
+
+
+def firmware_limits(root: Path) -> dict[str, str]:
+    """Capacity, USB identity, and pairing-store layout compiled into the firmware."""
+    config = root / "src" / "config.rs"
+    framing = root / "src" / "storage" / "framing.rs"
+    first = int(rust_constant(config, "STORAGE_FLASH_PAGE_START"))
+    count = int(rust_constant(config, "STORAGE_FLASH_PAGE_COUNT"))
+    page_size = int(rust_constant(config, "FLASH_PAGE_SIZE"))
+    return {
+        "max_paired": rust_constant(config, "MAX_PAIRED_DEVICES"),
+        "max_connections": rust_constant(config, "BLE_MAX_CONNECTIONS"),
+        "usb_vid": rust_constant(config, "USB_VID"),
+        "usb_pid": rust_constant(config, "USB_PID"),
+        "storage_pages": f"{first} to {first + count - 1}",
+        "storage_start": f"0x{first * page_size:08X}",
+        "storage_magic": rust_constant(framing, "MAGIC"),
+        "storage_version": rust_constant(framing, "VERSION"),
+    }
+
+
+def release_notes(root: Path, package: Path, tag: str) -> str:
+    """Fill the release notes template from a verified package and the tagged source."""
+    version, prerelease = validate_tag(root / "Cargo.toml", tag)
+    metadata = json.loads((package / "BUILD-INFO.json").read_text(encoding="utf-8"))
+    if not isinstance(metadata, dict) or metadata.get("version") != version:
+        raise ReleaseError("package build metadata does not match the release version")
+    fields = ("source_commit", "repository", "workflow_run_id", "rustc", "defmt_log")
+    if not all(isinstance(metadata.get(field), str) and metadata[field] for field in fields):
+        raise ReleaseError("package build metadata lacks the build identity")
+    commit = metadata["source_commit"]
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ReleaseError("package build metadata has no complete source commit")
+    checksums = (package / "SHA256SUMS").read_text(encoding="utf-8").rstrip("\n")
+    if not checksums:
+        raise ReleaseError("package checksum manifest is empty")
+    for line in checksums.split("\n"):
+        entry = re.fullmatch(r"([0-9a-f]{64})  ([A-Za-z0-9_.+-]+)", line)
+        if entry is None or digest(package / entry[2]) != entry[1]:
+            raise ReleaseError(f"package checksum entry does not match its file: {line!r}")
+    template = string.Template((root / NOTES_TEMPLATE).read_text(encoding="utf-8"))
+    return template.substitute(
+        kind="Prerelease" if prerelease else "Release",
+        tag=tag,
+        version=version,
+        commit=commit,
+        short_commit=commit[:7],
+        repository=metadata["repository"],
+        run_id=metadata["workflow_run_id"],
+        rustc=metadata["rustc"],
+        defmt_log=metadata["defmt_log"],
+        checksums=checksums,
+        **softdevice_prerequisite(root),
+        **firmware_limits(root),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
@@ -220,6 +311,10 @@ def main() -> None:
     package.add_argument("--expected-commit", required=True)
     package.add_argument("--expected-repository", required=True)
     package.add_argument("--expected-run-id", required=True)
+    notes = commands.add_parser("notes")
+    notes.add_argument("--package", type=Path, required=True)
+    notes.add_argument("--tag", required=True)
+    notes.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "validate-tag":
@@ -230,6 +325,12 @@ def main() -> None:
             print(f"Validated release tag {args.tag}")
         elif args.command == "stage":
             stage_build(args.root, args.build_dir, args.output, args.objcopy)
+        elif args.command == "notes":
+            text = release_notes(args.root, args.package, args.tag)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            with args.output.open("x", encoding="utf-8", newline="\n") as handle:
+                handle.write(text)
+            print(f"Wrote release notes for {args.tag} to {args.output}")
         else:
             package_release(
                 args.root,

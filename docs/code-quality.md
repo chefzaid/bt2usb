@@ -61,9 +61,10 @@ Clippy warning into an error.
 | Documentation checks | `python scripts/check_docs.py` ([Markdown Checks](#markdown-checks)) | `mask ci`, `mask docs-check` | Host tests, Linux only | Fails the Linux job and lists each finding as file, line, and the value or name the repository has instead |
 | Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
 | Module comments | `find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`, failing when it lists a file ([Documentation Comments](#documentation-comments)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file without a `//!` line |
-| Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 12 tests (`grep -c 'def test' scripts/release_test.py`) |
+| Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 17 tests (`grep -c 'def test' scripts/release_test.py`) |
 | Tag matches version | `python scripts/release.py validate-tag --tag "$RELEASE_TAG"` | None | Host tests and the packaging job, `v*` tags only | Fails the tag run |
 | Release staging | `python scripts/release.py stage …` | None | Embedded build & clippy | Refuses a modified tracked source tree, an existing output directory, an empty firmware file, or a commit that differs from `GITHUB_SHA` |
+| Release notes | `python scripts/release.py notes …` ([release notes](deployment.md#release-notes)) | None | Verify and attest release package, `v*` tags only | Fails the tag run on a checksum entry that does not match its file, build metadata without the release's identity, a template field it cannot fill, or a SoftDevice version that `maskfile.md` and `memory_sd.x` disagree on |
 
 ### How The Jobs Depend On Each Other
 
@@ -629,7 +630,8 @@ changelog for changed inputs and outputs; the 2026-10-10 updates kept every
 input and output this workflow uses (`name`, `path`, `if-no-files-found`, and
 the `artifact-id` output of upload-artifact; `persist-credentials` of
 checkout; `draft`, `prerelease`, `target_commitish`, `files`,
-`fail_on_unmatched_files`, and `generate_release_notes` of action-gh-release).
+`fail_on_unmatched_files`, and `generate_release_notes` of action-gh-release;
+`body_path` was added afterwards for the [release notes](deployment.md#release-notes)).
 
 ### Auditing
 

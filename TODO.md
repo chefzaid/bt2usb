@@ -35,11 +35,11 @@ probe, or USB host to close.
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 11 | 5 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 8 | 8 | 3 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 9 | 7 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **110** | **74** | **22** |
+| **Total** | **111** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1138,17 +1138,27 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
 - [ ] **P0** **Hosted provenance and release recovery acceptance.**
   *(hardware)* Push the first release tag (none exists yet), run the configured
   tag/attestation workflow, verify its downloaded artifacts against the approved
-  commit from a clean machine, and document storage migrations, rollback
-  constraints, and service flashing. Accept when provenance verification and
-  failed-update recovery have evidence; local helper tests and workflow lint do
-  not exercise GitHub signing or device recovery
+  commit from a clean machine, check that the draft's description is the filled
+  [release notes](docs/deployment.md#release-notes) followed by GitHub's change
+  list, and document storage migrations, rollback constraints, and service
+  flashing. Accept when provenance verification and failed-update recovery have
+  evidence; local helper tests and workflow lint do not exercise GitHub signing,
+  the release API, or device recovery
   ([deployment](docs/deployment.md#verify-before-flashing)).
-- [ ] **P0** **Release notes for deployment releases.** The release job uses
-  generated notes only. Add a release-notes template and fill it for each
-  deployment draft. Accept when a draft's notes list supported versions,
-  compatibility limits, migrations, rollback constraints, checksums, and the
-  exact SoftDevice prerequisite
-  ([release gates](docs/deployment.md#release-gates)).
+- [x] **P0** **Release notes for deployment releases.** Since 2026-10-10 each
+  draft's description starts from `.github/release-notes.md`, which
+  `release.py notes` fills in the `release-package` job from the verified
+  package and the tagged source: the exact SoftDevice prerequisite (S140
+  v7.3.0, its HEX, and the application origins, refused unless `maskfile.md`
+  installs the version `memory_sd.x` links against), compiled connection,
+  saved-device, and USB identity limits, the pairing storage pages and version,
+  rollback constraints, and `SHA256SUMS`. A `REVIEW:` line asks for supported
+  versions, tested hardware, the migration, and the oldest rollback target; the
+  `release` job uses the text as the draft body, and GitHub appends its change
+  list. Five new helper tests fill the real template and check its guide links;
+  the first hosted draft is part of "Hosted provenance and release recovery
+  acceptance" ([release notes](docs/deployment.md#release-notes);
+  `scripts/release.py`, `scripts/release_test.py`, `.github/workflows/ci.yml`).
 - [ ] **P0** **Security maintenance ownership.** Publish a private reporting
   contact, supported-version policy, triage ownership, and response/update
   expectations. Accept when dependency/advisory review, license inventory, and

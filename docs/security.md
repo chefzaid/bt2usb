@@ -552,7 +552,7 @@ Linux and Windows in CI. Malformed and hostile input is covered here:
 | Stored records | [framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs), [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | Truncated and zero-length records, count mismatch, future versions, invalid names and address types, bond flag/size mismatch, non-identity address types; malformed, future, and unreadable stores loading empty with saves refused; legacy count and length checks |
 | Deletion transactions | [management.rs](../src/ble/management.rs), [ui_logic.rs](../src/ui/ui_logic.rs) | Failed and cancelled persistence, stale quiescence tokens, default-Cancel confirmation, stale management replies |
 | Held-input release | [delivery.rs](../src/hid/delivery.rs), [coalesce.rs](../src/hid/coalesce.rs) | `queue_overflow_preserves_final_release`, `keyboard_latest_state_wins_but_release_survives` |
-| Release integrity | [release_test.py](../scripts/release_test.py) | Artifact tampering, lockfile change, metadata and build-policy mismatch (including a `debug` log level), bad checksum entries, dirty source |
+| Release integrity | [release_test.py](../scripts/release_test.py) | Artifact tampering, lockfile change, metadata and build-policy mismatch (including a `debug` log level), bad checksum entries, dirty source; release notes refused for a package whose checksums or metadata do not match, or a SoftDevice the linker script does not expect |
 
 Not covered by automated tests:
 

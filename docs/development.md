@@ -29,7 +29,7 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── ble/               scanning, connection workers, coordinator, GATT HID client
 │   ├── hid/               report types, descriptors, aggregation, delivery, wake
 │   ├── usb/               composite USB HID device
-│   ├── storage.rs, storage/  pairing store and its framing/codec
+│   ├── storage.rs, storage/  pairing store: flash shell, device list, codec, framing
 │   ├── ui/                display, buttons, UI state machine
 │   └── lib_tests.rs, lib_logic_tests.rs, hid_classify_tests.rs,
 │       hid_descriptor_tests.rs, hid_keyboard_report_tests.rs
@@ -40,7 +40,7 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 ├── vendor/nrf-softdevice/ pinned upstream crate with a small reviewed patch
 ├── .cargo/config.toml     probe-rs runner, ARM link flags, default DEFMT_LOG
 ├── .devcontainer/         VS Code devcontainer and its setup script
-├── .github/               CI workflow, Dependabot, issue templates
+├── .github/               CI workflow, Dependabot, issue and release notes templates
 ├── Cargo.toml, Cargo.lock features, binaries, profiles, locked dependency graph
 ├── rust-toolchain.toml    pinned compiler, components, and ARM target
 ├── memory_sd.x            linker memory map for SoftDevice builds
@@ -582,7 +582,7 @@ in a public issue. See the [security policy](../SECURITY.md).
 | `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
 | `memory_sd.x`, storage constants, or `build.rs` | `mask ci` (its Markdown check compares the documented memory map), `mask size` | Self-test flash stage and the `softdevice RAM` log |
 | `.github/workflows/ci.yml` | `actionlint` with `shellcheck` on `PATH` | A hosted run |
-| `scripts/release.py` | Release-helper tests, `mask lint-scripts` | The first hosted tag run ([deployment](deployment.md#validation-limits)) |
+| `scripts/release.py` or `.github/release-notes.md` | Release-helper tests, `mask lint-scripts` | The first hosted tag run ([deployment](deployment.md#validation-limits)) |
 | Another Python file, or `ruff.toml` | `mask lint-scripts`, and the file's tests (`mask docs-check` for the documentation checker) | |
 | `maskfile.md` or a `*.sh` script | `mask lint-scripts`, then run the changed recipe or script in Bash | |
 | Documentation only | `mask docs-check` | `mask rustdoc-check` when `///` or `//!` comments changed; figures the checker does not cover, such as counts and sizes, by hand |

@@ -506,10 +506,6 @@ Not covered by automated tests:
   `src/storage/codec.rs`, which the host crate does not compile
 - USB `set_report` validation and the `multi_conn.rs` security flow
   (encryption wait, `allow_pairing`, bond replacement)
-- the ten `#[test]` functions in `src/ble/scanner.rs`, which sit in an
-  `embedded`-only module that `src/lib.rs` does not include, so the host test
-  command never runs them (counted with `grep -c '#\[test\]'`; TODO:
-  [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality))
 - fuzzing, power-loss injection, and any on-air security test
 
 Hardware security acceptance (sniffed pairing, spoofed reconnect, forgotten

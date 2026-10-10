@@ -33,12 +33,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 6 | 6 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 1 | 3 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 5 | 11 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 6 | 10 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 7 | 9 | 3 |
 | [Developer Experience](#developer-experience) | 7 | 2 | 0 |
 | [Documentation](#documentation) | 6 | 1 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **71** | **87** | **22** |
+| **Total** | **72** | **86** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -682,6 +682,14 @@ Host tests, simulation, and code-health work. Context:
   the comment in `src/stack.rs` (embedded Clippy failed with "unsafe block
   missing a safety comment") and adding an `unsafe` block to `src/hid/wake.rs`
   (host Clippy failed on `forbid(unsafe_code)`).
+- [x] Run the scanner's advertisement tests on the host: of the ten
+  `#[test]` functions in `src/ble/scanner.rs`, which never compiled, the four
+  that covered new cases (a HID UUID among other UUIDs, an incomplete UUID
+  list, an empty advertisement, a shortened name alone) moved to
+  `src/ble/adv_parser.rs`, and the six that repeated `src/lib_logic_tests.rs`
+  were deleted. Every `#[test]` in `src/` and `tests/` now runs under
+  `cargo test --locked --lib --tests`
+  ([testing](docs/testing.md#tests-that-do-not-run)).
 - [ ] **P1** **Parser fuzzing and property tests.** Add bounded fuzz targets for
   HID descriptors, advertisements, report classification, and persistence
   framing. Accept when CI runs a seed corpus and scheduled fuzzing records no
@@ -692,13 +700,6 @@ Host tests, simulation, and code-health work. Context:
   device disappearance during discovery. Accept when deterministic test cases
   assert completion, retry policy, and UI state without relying only on reducer
   tests ([testing](docs/testing.md#known-verification-gaps)).
-- [ ] **P1** **Run the scanner's advertisement tests on the host.** The ten
-  `#[test]` functions in `src/ble/scanner.rs` never run: `src/lib.rs` does not
-  compile `scanner`, and the firmware target has no test harness. Move them
-  beside `ble::adv_parser`, which the host crate compiles, or delete the ones
-  that duplicate existing host tests. Accept when every `#[test]` function in
-  `src/` is compiled by `cargo test --locked --lib --tests`
-  ([testing](docs/testing.md#tests-that-do-not-run)).
 - [ ] **P1** **Host tests for the I/O shells.** The connection workers, GATT
   HID client, USB device, and display driver (`src/ble/multi_conn.rs`,
   `src/ble/hid_client.rs`, `src/usb/hid_device.rs`, `src/ui/display.rs`) have

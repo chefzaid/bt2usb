@@ -835,11 +835,10 @@ are open work.
   connection parameter policy, long-read assembly, management primitives,
   advertisement parser, storage framing and record validation, power policy,
   and UI logic.
-- The source contains 273 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`. Ten of them are in
-  [`ble/scanner.rs`](../src/ble/scanner.rs), an embedded-only module that host
-  runs do not compile; the other 260 unit tests and the 3 integration tests in
-  [`tests/integration.rs`](../tests/integration.rs) run with `mask test`.
+- The source contains 267 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 264 unit tests and the 3
+  integration tests in [`tests/integration.rs`](../tests/integration.rs), all
+  of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
   `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)).
 - The `bt2usb-sim` binary boots without the SoftDevice or USB on Renode's

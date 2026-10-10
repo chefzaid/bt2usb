@@ -88,6 +88,31 @@ mod tests {
     }
 
     #[test]
+    fn hid_uuid_is_found_among_other_uuids() {
+        // Complete 16-bit UUIDs: Battery (0x180F), HID (0x1812), GATT (0x1801).
+        let ad = [0x07, 0x03, 0x0F, 0x18, 0x12, 0x18, 0x01, 0x18];
+        assert!(contains_hid_service_uuid(&ad));
+    }
+
+    #[test]
+    fn hid_uuid_in_an_incomplete_list_counts() {
+        // AD type 0x02: Incomplete List of 16-bit Service UUIDs.
+        assert!(contains_hid_service_uuid(&[0x03, 0x02, 0x12, 0x18]));
+    }
+
+    #[test]
+    fn empty_advertisement_has_no_hid_uuid_or_name() {
+        assert!(!contains_hid_service_uuid(&[]));
+        assert_eq!(extract_device_name(&[]).as_str(), "Unknown");
+    }
+
+    #[test]
+    fn shortened_name_is_used_when_no_complete_name_is_present() {
+        let ad = [0x05, 0x08, b'B', b'T', b' ', b'K'];
+        assert_eq!(extract_device_name(&ad).as_str(), "BT K");
+    }
+
+    #[test]
     fn missing_empty_or_invalid_utf8_name_does_not_replace_known_name() {
         assert!(advertised_name(&[2, 0x01, 6]).is_none());
         assert!(advertised_name(&[1, 0x09]).is_none());

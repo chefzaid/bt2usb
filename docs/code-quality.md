@@ -381,8 +381,7 @@ the files. Renode runs, the self-test, and hardware sessions produce no
 coverage data.
 
 A coverage figure is therefore a figure for the pure logic, not for the
-firmware. The ten tests in `scanner.rs` are never compiled
-([testing](testing.md#tests-that-do-not-run)), so they add nothing to it.
+firmware.
 
 ### Reporting Coverage
 
@@ -597,7 +596,6 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | --- | --- |
 | CI measures no coverage, no threshold or baseline exists, and firmware rustdoc is not built with warnings denied | [Coverage and firmware documentation in CI](../TODO.md#verification-and-code-quality) (P1) |
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
-| The ten `scanner.rs` tests never compile | [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality) (P1) |
 | The connection workers, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |

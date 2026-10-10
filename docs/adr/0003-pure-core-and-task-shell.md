@@ -140,17 +140,16 @@ Negative:
   that loads the legacy format, merges records for the same identity, evicts the
   oldest peer, and sets the writable flag.
 - Coverage percentages describe only the host library, not the firmware.
-- The ten tests in `src/ble/scanner.rs` are never compiled, because that module
-  depends on the SoftDevice and is not part of the host library.
+- A test placed in a firmware-only module, such as `src/ble/scanner.rs`, is
+  never compiled, because that module depends on the SoftDevice and is not part
+  of the host library; tests belong beside the pure module they exercise. Ten
+  such tests sat in `scanner.rs` until 2026-10-10.
 - The pattern costs some indirection: generic types, small traits, `#[path]`
   includes, and a `dead_code` allowance in the simulation binary.
 
 Follow-up obligations:
 
 - Put new behavior in a core module with tests first, then wire it into a task.
-- "Run the scanner's advertisement tests on the host" in
-  [TODO.md](../../TODO.md): move or delete the ten uncompiled tests so every
-  `#[test]` in `src/` runs under `cargo test --locked --lib --tests`.
 - "Host tests for the I/O shells" in [TODO.md](../../TODO.md): move the
   remaining decisions in the shells into hardware-free modules, or test the
   shells against fakes. The `DeviceStore` load, merge, and eviction rules have
@@ -188,10 +187,12 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 273 test attributes. Ten of them are in `src/ble/scanner.rs`, which
-  the host library does not compile; the other 263 match the 260 unit and 3
-  integration tests that passed in the
-  [2026-10-09 validation record](../testing.md#validation-record--2026-10-09).
+  finds 267 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 264 unit and 3 integration tests, which
+  passed on 2026-10-10 (the
+  [2026-10-09 validation record](../testing.md#validation-record--2026-10-09)
+  ran 260 unit tests, before four advertisement tests moved out of the
+  firmware-only `scanner.rs`).
   The CI host-test jobs on Linux and Windows passed on GitHub-hosted runners
   in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
   (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The

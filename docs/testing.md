@@ -136,14 +136,15 @@ no coverage percentage.
 ## Test Map
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
-2026-10-09, in the commit that adds the shared reconnect scan, the host-LED
-forwarding, the bounded connection parameters, and the reserved keyboard byte
-handling. The tree holds 273 `#[test]` functions: 260 in files compiled into
-the host library, 3 in `tests/integration.rs`, and 10 in `src/ble/scanner.rs`,
-which never run (see [Tests That Do Not Run](#tests-that-do-not-run)). The
-260 + 3 split matches the
-[2026-10-09 validation record](#validation-record--2026-10-09). There are no
-`#[ignore]` or `#[should_panic]` tests.
+2026-10-10, in the commit that moves the scanner's advertisement tests to
+`ble/adv_parser.rs`. The tree holds 267 `#[test]` functions: 264 in files
+compiled into the host library and 3 in `tests/integration.rs`, and every one
+of them runs under `cargo test --locked --lib --tests` (see
+[Tests That Do Not Run](#tests-that-do-not-run)). The
+[2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
+tests, before four advertisement tests moved into the host library; the 264
+passed with `cargo test` on 2026-10-10. There are no `#[ignore]` or
+`#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
 
@@ -166,7 +167,7 @@ which never run (see [Tests That Do Not Run](#tests-that-do-not-run)). The
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
 | [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 26 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved, reconnection, and disconnect during retry. `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. |
-| [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 3 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one; a missing, empty, or invalid name does not replace a known one. |
+| [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 7 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
 | [ble/management.rs](../src/ble/management.rs) | 5 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | 23 | The shared background-reconnect table ([ADR 0015](adr/0015-shared-reconnect-scan.md)): a sighting goes to the slot that owns the device, unregistered devices and slots are ignored, a sighting is used once, replaced by a newer one, fresh at 2 s and discarded after, and dropped with its slot or when the slot changes target; re-registering the same target keeps the outage start, a different one restarts the fast window; the duty cycle is fast while any target is inside its window; after a failed attempt the other slot's scans ignore that device while its own still see it, the holdoff ends on time, survives re-registration, is extended by a new failure, ends for a new target, drops the pending sighting, and ignores unregistered slots; the lower slot wins a tie; out-of-range slots and a clock going backwards are harmless. |
@@ -199,17 +200,20 @@ protect.
 
 ### Tests That Do Not Run
 
-[scanner.rs](../src/ble/scanner.rs) contains a `#[cfg(test)]` module with 10
-tests of HID UUID detection and name extraction. The file is declared only in
-the firmware's [ble/mod.rs](../src/ble/mod.rs), behind the `embedded` feature;
-[lib.rs](../src/lib.rs) does not include it, and the firmware binaries cannot be
-built for the host test harness, so these tests are never compiled or run.
-Similar advertisement cases (HID UUID detection, malformed lengths, name
-extraction and truncation) do run through `lib_logic_tests.rs` and
-`ble/adv_parser.rs`, but not case for case. Move or delete them rather than
-counting them as coverage;
-[Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality)
-tracks this.
+None. Every `#[test]` in `src/` and `tests/` is compiled by
+`cargo test --locked --lib --tests`.
+
+Until 2026-10-10, [scanner.rs](../src/ble/scanner.rs) held a `#[cfg(test)]`
+module with 10 tests of HID UUID detection and name extraction that never ran:
+the file is declared only in the firmware's [ble/mod.rs](../src/ble/mod.rs),
+behind the `embedded` feature, [lib.rs](../src/lib.rs) does not include it, and
+the firmware binaries cannot be built for the host test harness. Four of them
+covered cases no host test did (a HID UUID among other UUIDs, an incomplete
+UUID list, an empty advertisement, and a shortened name on its own) and now
+live in [ble/adv_parser.rs](../src/ble/adv_parser.rs); the other six repeated
+tests in `lib_logic_tests.rs` and were deleted. A test placed in a module that
+only the firmware compiles will never run; put it beside the pure module it
+exercises.
 
 ### Modules Without Host Tests
 
@@ -592,9 +596,6 @@ Specific to the current workflow and test tree:
   firmware build.
 - `cargo audit` runs without a deny option, so unmaintained-crate warnings do
   not fail the job; see the [validation record](#validation-record--2026-09-28).
-- The ten `scanner.rs` tests are never compiled, so they are not in the 260
-  host unit tests ([details](#tests-that-do-not-run)); tracked as
-  [Run the scanner's advertisement tests on the host](../TODO.md#verification-and-code-quality).
 - Connection workers, the GATT HID client, the storage shell and codec, the USB
   device, and the display driver have no host tests
   ([details](#modules-without-host-tests)).
@@ -750,9 +751,9 @@ and scripts changed only in comments that name renamed documents, so the
 counts above described the tree until then; the checks were not re-run locally
 for those changes. The fixes added tests, which the
 [2026-10-09 record](#validation-record--2026-10-09) and the
-[Test Map](#test-map) count. The 219 unit tests do not include the ten `scanner.rs` tests, which
-are never compiled ([Tests That Do Not Run](#tests-that-do-not-run)). The
-hosted run on `2479c79` failed at the earlier actionlint installation step,
+[Test Map](#test-map) count. The 219 unit tests did not include the ten
+`scanner.rs` tests, which were never compiled
+([Tests That Do Not Run](#tests-that-do-not-run)). The hosted run on `2479c79` failed at the earlier actionlint installation step,
 which `8a04b25` replaced. Hosted runs later passed all five check jobs on
 `8a04b25` (run 36441995385, 2026-09-28) and on later commits; see
 [Hosted CI Runs](#hosted-ci-runs). The tag-only packaging and release jobs

@@ -15,40 +15,44 @@ three P0 items in [TODO.md](../../TODO.md#ble-central-and-pairing) replace
 it. In the 2026-10-10 tree (items in the vendored `gap.rs` are named by
 match arm or function):
 
-- **Parameters.** `Bonder` ([bonder.rs](../../src/ble/bonder.rs), lines
-  85–92) returns `IoCapabilities::None` and `can_bond = true` and overrides
-  neither `request_mitm_protection` nor `security_params`. The vendored
-  `security_params` (`vendor/nrf-softdevice/src/ble/security.rs`, lines
-  124–140) starts from `default_security_params` in `gap.rs`: key size 7 to
-  16, no I/O capability, MITM clear, LESC never set. Every pairing is LE
-  legacy Just Works.
+- **Parameters.** `Bonder` ([bonder.rs](../../src/ble/bonder.rs),
+  `io_capabilities` and `can_bond`) returns `IoCapabilities::None` and
+  `can_bond = true` and overrides neither `request_mitm_protection` nor
+  `security_params`. The vendored `security_params`
+  (the `SecurityHandler` default in
+  `vendor/nrf-softdevice/src/ble/security.rs`) starts from
+  `default_security_params` in `gap.rs`: key size 7 to 16, no I/O
+  capability, MITM clear, LESC never set. Every pairing is LE legacy Just
+  Works.
 - **Who starts security.** `connect_and_run_secure`
-  ([slot_worker.rs](../../src/ble/slot_worker.rs), lines 247–264) calls
-  `encrypt()` and, on `PeerKeysNotFound`, `request_pairing()` only when
-  `allow_pairing` (`!silent`, line 128) is set, that is for
-  `SlotCommand::Connect`. `wait_for_secure_link` (lines 185–198) polls 25
-  times at 200 ms for `JustWorks`, `Mitm`, or `LescMitm`; the vendored
-  `SecurityMode::try_from_raw` (`types.rs`, lines 105–117) calls every Level 2
+  ([slot_worker.rs](../../src/ble/slot_worker.rs), its `prepare` future)
+  calls `encrypt()` and, on `PeerKeysNotFound`, `request_pairing()` only when
+  `allow_pairing` (`!silent` in `connection_slot_task`) is set, that is for
+  `SlotCommand::Connect`. `wait_for_secure_link` polls 25 times at 200 ms
+  for `JustWorks`, `Mitm`, or `LescMitm`; the vendored
+  `SecurityMode::try_from_raw` (`types.rs`) calls every Level 2
   link, legacy or LESC, `JustWorks`; the `CONN_SEC_UPDATE` arm only traces
   the key size.
 - **Security Request.** The `SEC_REQUEST` arm calls `encrypt()`, or
   `request_pairing()` when no keys are found, whatever the slot allows. It
-  can beat the slot's own call, which waits for the MTU exchange (lines
-  235–245): the S140 header text in the `nrf-softdevice-s140` 0.1.2 bindings
-  gives `NRF_ERROR_BUSY` from `sd_ble_gap_encrypt` for a procedure in
-  progress, and `NRF_ERROR_INVALID_STATE` from `sd_ble_gap_authenticate`
-  while an encryption is queued; the slot fails on any error (lines
-  252–259). This race is derived, not observed.
+  can beat the slot's own call, which waits for the MTU exchange (the
+  `central::connect_with_security` call in `connect_and_run_secure`): the S140 header text in the
+  `nrf-softdevice-s140` 0.1.2 bindings gives `NRF_ERROR_BUSY` from
+  `sd_ble_gap_encrypt` for a procedure in progress, and
+  `NRF_ERROR_INVALID_STATE` from `sd_ble_gap_authenticate` while an
+  encryption is queued; the slot fails on any error (the `PeerKeysNotFound`
+  and `Err(_)` arms in `prepare`). This race is derived, not observed.
 - **Bonds.** The `AUTH_STATUS` arm calls `on_bonded` for any successful
-  bonded pairing on any link. `on_bonded` (`bonder.rs`, lines 94–124)
-  replaces a bond whose identity address equals the new one or whose IRK
-  resolves the connection address, else appends and evicts the oldest at
+  bonded pairing on any link. `on_bonded` (`bonder.rs`) replaces a bond
+  whose identity address equals the new one or whose IRK resolves the
+  connection address, else appends and evicts the oldest at
   `MAX_PAIRED_DEVICES` (4). The stored flags byte
-  ([codec.rs](../../src/storage/codec.rs), lines 54 and 79), which the
-  [data model](../data-model.md#bond) says the application does not
-  interpret, is the SoftDevice's `ble_gap_enc_info_t` bitfield: `lesc` bit 0,
-  `auth` bit 1, `ltk_len` bits 2 to 7. Every bond so far has `lesc = 0` and
-  `auth = 0`, and recording a bond's assurance needs no format change.
+  ([codec.rs](../../src/storage/codec.rs), `encode_bond` and `decode_bond`),
+  which the [data model](../data-model.md#bond) says the application does
+  not interpret, is the SoftDevice's `ble_gap_enc_info_t` bitfield: `lesc`
+  bit 0, `auth` bit 1, `ltk_len` bits 2 to 7. Every bond so far has
+  `lesc = 0` and `auth = 0`, and recording a bond's assurance needs no
+  format change.
 - **Binding gaps for LE Secure Connections.** S140 leaves the P-256
   Diffie-Hellman step to the application (`BLE_GAP_EVT_LESC_DHKEY_REQUEST`,
   answered by `sd_ble_gap_lesc_dhkey_reply`); `gap.rs` lists it as unhandled
@@ -61,10 +65,11 @@ match arm or function):
 - **No numeric comparison.** The `PASSKEY_DISPLAY` arm calls
   `display_passkey` without the connection and debug-asserts
   `match_request == 0`, so the handler cannot tell a comparison from a
-  passkey to show. `PasskeyReply` (`replies.rs`, lines 15–21 and 40–52)
+  passkey to show. `PasskeyReply` (its `Drop` and `finalize` in `replies.rs`)
   replies `BLE_GAP_AUTH_KEY_TYPE_PASSKEY` with NULL when dropped, which the
   header defines as confirming a numeric comparison. `display_passkey` and
-  `enter_passkey` panic unless implemented (`security.rs`, lines 53–62).
+  `enter_passkey` panic unless implemented (their `SecurityHandler` defaults
+  in `security.rs`).
 - **No P-256 code.** `Cargo.lock` has none; `embassy-nrf` 0.7.0 lists the
   `CRYPTOCELL` interrupt but has no CryptoCell driver. The RNG belongs to the
   SoftDevice; the vendored `random_bytes` wraps

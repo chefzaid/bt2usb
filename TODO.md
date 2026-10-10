@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 32 | 0 | 0 |
+| [FIXME](#fixme) | 33 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **118** | **72** | **21** |
+| **Total** | **119** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -344,7 +344,21 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   Renode scripts and models LF but not `renode/oled-font-6x10.txt`, so the
   Windows checkout converted the table to CRLF and the byte-for-byte
   comparison failed. Fixed: `.gitattributes` keeps `renode/*.txt` LF, and the
-  test compares the table with CRLF read as LF (`tests/oled_font.rs`).
+  test compares the table with CRLF read as LF (`tests/oled_font.rs`). Push
+  run 38085612272 (`ed63657`) passed every job.
+- [x] **P3** **Line-number citations into bt2usb's own sources drifted.**
+  The proposed ADRs 0017 to 0022 cited lines of `src/` files, `Cargo.toml`,
+  `Cargo.lock`, `memory_sd.x`, and the vendored `nrf-softdevice` by number,
+  and the commits since they were written moved that code: for example ADR
+  0020 placed the UI loop at `main.rs` lines 244 to 376 and ADR 0019 placed
+  the load in `ble_task` at `multi_conn.rs` lines 76 to 79. Found while
+  renaming the display task in ADR 0020. ADR 0003 also still counted 283 test
+  attributes. Fixed: the six ADRs cite bt2usb's own code and the vendored
+  crate by item name (`execute_action`, `manage_devices`, `Flash::erase`, and
+  so on), and keep line numbers only for dependency sources that `Cargo.lock`
+  pins.
+  ADR 0003 counts 359 test attributes and lists the modules and test files
+  added since (`messages.rs`, `controller.rs`, `layout.rs`, and their tests).
 
 ## Needs Your Input
 

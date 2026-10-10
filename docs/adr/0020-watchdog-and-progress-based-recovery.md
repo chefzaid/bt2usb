@@ -7,12 +7,12 @@
 
 Nothing restarts the bridge today. No file under `src/` uses the nRF52840
 watchdog timer (WDT) or reads the reset reason. All binaries link `panic-probe`
-([main.rs](../../src/main.rs) line 55), which in 1.0.0 masks interrupts, prints
-over RTT and executes `udf`; with no `#[exception]` handler that ends in
-`cortex-m-rt` 0.7.7's default `HardFault_`, a `loop {}`. A panic, a SoftDevice
-assertion or a task that never finishes stops the unit until it is unplugged
-([not yet handled](../architecture.md#not-yet-handled)), and since hosts keep a
-silent device's last report, a held key repeats on the PC
+(`use panic_probe as _` in [main.rs](../../src/main.rs)), which in 1.0.0 masks
+interrupts, prints over RTT and executes `udf`; with no `#[exception]` handler
+that ends in `cortex-m-rt` 0.7.7's default `HardFault_`, a `loop {}`. A panic,
+a SoftDevice assertion or a task that never finishes stops the unit until it is
+unplugged ([not yet handled](../architecture.md#not-yet-handled)), and since
+hosts keep a silent device's last report, a held key repeats on the PC
 ([operations](../operations.md#firmware-panics-or-stops-responding)), in
 firmware setup or on whichever computer the KVM has selected.
 
@@ -23,30 +23,31 @@ deadline and are bounded only by the SoftDevice, the Core or the hardware:
 
 | Task | Waits without bound for | Waits with no application deadline |
 | --- | --- | --- |
-| `main` UI loop ([main.rs](../../src/main.rs) lines 244 to 376) | Nothing: its `select4` includes the 1 s housekeeping `Ticker` (line 241) that runs `PowerManager::tick` | None |
-| `ble_task` ([multi_conn.rs](../../src/ble/multi_conn.rs)) | A command or slot event (lines 120 to 121) | Store writes (line 335), Forget and Factory reset (lines 293 to 297) after a quiescence barrier that waits for the workers (lines 270 to 289) |
-| `ble_slot_task`, running `connection_slot_task` ([slot_worker.rs](../../src/ble/slot_worker.rs)) | A command (line 60); notifications while the link lives (line 298) | `connect_with_security`, raced against neither commands nor a timer (lines 237 to 245); `close_connection`, which polls every 10 ms with no deadline (lines 178 to 183) |
-| `usb_device_task`, running `run_usb_device` ([hid_device.rs](../../src/usb/hid_device.rs) lines 371 to 385) | Bus events and resume | `remote_wakeup` (line 377), which waits for USBWUALLOWED, RESUME or USBRESET (`embassy-nrf` `src/usb/mod.rs` lines 361 to 394) |
-| `hid_writer_task` (lines 389 to 427) | Reports and host polling | None: each endpoint write has a 100 ms deadline and at most 1 s backoff ([delivery.rs](../../src/hid/delivery.rs) lines 147 to 184) |
-| `ui::display::task` ([display.rs](../../src/ui/display.rs)) | Frames | DMA on an electrically stuck bus, forever (`wait_stopped` and `finish_or_stop`, lines 147 to 173; [ADR 0009](0009-isolated-display-task.md)) |
+| `main` UI loop ([main.rs](../../src/main.rs), the `loop` at the end of `main`) | Nothing: its `select4` includes the 1 s housekeeping `Ticker` (`housekeeping`) that runs `PowerManager::tick` | None |
+| `ble_task` ([multi_conn.rs](../../src/ble/multi_conn.rs)) | A command or slot event (the `select` in its `loop`) | Store writes (`save_to_flash` in `execute_action`), Forget and Factory reset (`store.forget` and `store.factory_reset` in `manage_devices`) after a quiescence barrier that waits for the workers (its `Quiescence` loop) |
+| `ble_slot_task`, running `connection_slot_task` ([slot_worker.rs](../../src/ble/slot_worker.rs)) | A command (the idle `cmd_rx.receive()`); notifications while the link lives (`run_notification_loop`) | `connect_with_security`, raced against neither commands nor a timer (in `connect_and_run_secure`); `close_connection`, which polls every 10 ms with no deadline |
+| `usb_device_task`, running `run_usb_device` ([hid_device.rs](../../src/usb/hid_device.rs)) | Bus events and resume | `remote_wakeup`, which waits for USBWUALLOWED, RESUME or USBRESET (`embassy-nrf` `src/usb/mod.rs` lines 361 to 394) |
+| `hid_writer_task` ([hid_device.rs](../../src/usb/hid_device.rs), with `dispatch_reports`) | Reports and host polling | None: each endpoint write has a 100 ms deadline and at most 1 s backoff (`run_endpoint` in [delivery.rs](../../src/hid/delivery.rs)) |
+| `ui::display::task` ([display.rs](../../src/ui/display.rs)) | Frames | DMA on an electrically stuck bus, forever (`wait_stopped` and `finish_or_stop`; [ADR 0009](0009-isolated-display-task.md)) |
 | `softdevice_task`, three button tasks | SoftDevice events; GPIO edges | None. The `Bonder` callbacks ([bonder.rs](../../src/ble/bonder.rs)) run synchronously inside `softdevice_task`, as the boot-protocol and LED handlers ([host_requests.rs](../../src/usb/host_requests.rs)) do inside `usb_device_task`, so a hang there stalls the executor |
 
 Scans end under `with_timeout` after 6 s or 10 s
-([scanner.rs](../../src/ble/scanner.rs) lines 159 to 165, 238 to 239); the UI
+([scanner.rs](../../src/ble/scanner.rs) `find_saved_peer` and `scan`); the UI
 abandons a management reply after 30 s with **No reply**, restarting nothing.
 The other waits cannot simply get a timeout. The vendored flash driver arms a
 `DropBomb` around `sd_flash_write` and `sd_flash_page_erase` while it awaits the
-SoC event (`vendor/nrf-softdevice/src/flash.rs` lines 135 to 138, 157 to 162),
+SoC event (`Flash::write` and `Flash::erase` in
+`vendor/nrf-softdevice/src/flash.rs`),
 so dropping the future panics. `connect_with_security` returns after the 6 s
 whitelist scan and the MTU exchange, which ends on a response, a disconnect or
-the GATT client timeout (`vendor/nrf-softdevice/src/ble/central.rs` lines 122
-to 126); an ATT transaction times out after 30 s (Core Specification Vol 3,
+the GATT client timeout (the `att_mtu_exchange` call in `connect_inner`,
+`vendor/nrf-softdevice/src/ble/central.rs`); an ATT transaction times out after 30 s (Core Specification Vol 3,
 Part F, section 3.3.3; general knowledge). `close_connection` ends with the
 disconnect event, and termination completes on acknowledgement or when the
 supervision timer expires (Vol 6, Part B, section 5.1.6; general knowledge), at
 most 4 s here ([ADR 0016](0016-bounded-peer-connection-parameters.md)). The
 secure wait has an application bound of 25 polls 200 ms apart
-(`wait_for_secure_link`, `slot_worker.rs` lines 185 to 198); discovery, Report
+(`wait_for_secure_link` in `slot_worker.rs`); discovery, Report
 Map reads and LED writes are paced by the peer, bounded only per ATT step.
 
 Platform facts:
@@ -71,7 +72,7 @@ Platform facts:
   after writing UICR ([security](../security.md#physical-access-and-debug-port))
   and probe-rs resets the same way (general knowledge), so SREQ is common.
 - **SoftDevice.** The WDT interrupt is not in the vendored `RESERVED_IRQS`
-  (`critical_section_impl.rs` lines 8 to 16); to our knowledge the S140
+  (`critical_section_impl.rs`); to our knowledge the S140
   Specification neither blocks nor restricts the WDT. Radio events preempt at
   priority 0 and a page erase halts the CPU for at most about 85 ms (NVMC
   electrical specification; general knowledge), far below seconds.
@@ -111,7 +112,7 @@ while a stuck I2C bus survives it and is not needed to type, so ADR 0009
 already rejected that trade; a host that stops polling or a suspended bus is
 not a fault. A slow peer must never reset the bridge: a peer-paced phase that
 needs a bound gets an application deadline that fails the link, raced like the
-command at `slot_worker.rs` line 270.
+command against `prepare` in `connect_and_run_secure` (`slot_worker.rs`).
 
 **Feeding rule.** `watchdog_task` in a new `src/watchdog.rs`, spawned first,
 snapshots the six slots every `WDT_SUPERVISOR_PERIOD_MS` (1,000 ms) and calls

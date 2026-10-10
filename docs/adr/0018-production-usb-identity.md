@@ -16,14 +16,16 @@ change, recognizes it as the keyboard it already knows.
 **What the bridge sends today** (tree at `287fb96`):
 
 - `USB_VID` `0x1209`, `USB_PID` `0x0001`, manufacturer `bt2usb`, and product
-  `BT-to-USB HID Bridge` ([config.rs](../../src/config.rs) lines 102 to 109).
+  `BT-to-USB HID Bridge` (`USB_MANUFACTURER` and `USB_PRODUCT`; all four are
+  constants in [config.rs](../../src/config.rs)).
   pid.codes titles PIDs `0x0001` to `0x0010` "pid.codes Test PID", and its page
   for `0x0001` says it "MUST NOT be used on any device that will be
   redistributed, sold, or manufactured" (checked 2026-10-10).
 - `init` in [hid_device.rs](../../src/usb/hid_device.rs) calls
-  `Config::new(USB_VID, USB_PID)` at line 272 and builds the serial at lines
-  275 to 288: `FICR.DEVICEID[1]` then `DEVICEID[0]`, each `{:08X}`, 16
-  uppercase hex characters in the `USB_SERIAL` static (line 68). The nRF52840
+  `Config::new(USB_VID, USB_PID)` and builds the serial in a
+  `USB_SERIAL.init_with` closure, and sets the result as `serial_number`:
+  `FICR.DEVICEID[1]` then `DEVICEID[0]`, each `{:08X}`, 16 uppercase hex
+  characters in the `USB_SERIAL` static. The nRF52840
   Product Specification's FICR chapter calls these words (`0x10000060`,
   `0x10000064`) a "64 bit unique device identifier"; factory-programmed and
   read-only, they survive reflashing, full erase, and port changes. Nothing
@@ -38,10 +40,11 @@ change, recognizes it as the keyboard it already knows.
   `bmAttributes` `0xA0` and `bMaxPower` 50 (2 mA units). The crate's encoders
   (`src/descriptor.rs`) are `pub(crate)`, and an upgrade that changed a
   default would change what hosts see.
-- Interfaces 0 and 1 are the boot keyboard and mouse (lines 325 and 337), and
+- Interfaces 0 and 1 are the boot keyboard and mouse
+  (`HidSubclass::Boot` in `init`'s `kb_config` and `mouse_config`), and
   `BootRequestHandler` in [host_requests.rs](../../src/usb/host_requests.rs)
   answers `SET_PROTOCOL` for firmware setup screens (HID 1.11, 4.2 and 7.2.6).
-  The self-test reuses `init` ([selftest.rs](../../src/selftest.rs) line 133).
+  The self-test's `main` reuses `init` ([selftest.rs](../../src/selftest.rs)).
 - A string over 62 UTF-16 code units does not fit the 128-byte `USB_CTRL_BUF`
   and trips an `embassy-usb` assertion at enumeration. No Microsoft OS
   descriptor is offered: no handler overrides `get_string`, so a request for

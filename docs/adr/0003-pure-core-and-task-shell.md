@@ -56,9 +56,10 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
+| [messages.rs](../../src/ble/messages.rs) | The commands and events between the UI and the BLE side, and the per-request management IDs they carry | The channels in [main.rs](../../src/main.rs) and `ble_task` in `multi_conn.rs` |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
 | [devices.rs](../../src/storage/devices.rs), [codec.rs](../../src/storage/codec.rs), [framing.rs](../../src/storage/framing.rs), [record.rs](../../src/storage/record.rs) | The paired-device list (fail-closed load, legacy format, identity merge, eviction, Forget and reset candidates), the record codec, and frame and record validation, on SoftDevice-free types; IRK resolution is passed in as a function | `DeviceStore` in `storage.rs`, which converts SoftDevice types and does the flash I/O |
-| [ui_logic.rs](../../src/ui/ui_logic.rs), [input_logic.rs](../../src/ui/input_logic.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions, management request IDs, list windowing, display retry policy | UI loop in [main.rs](../../src/main.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
+| [ui_logic.rs](../../src/ui/ui_logic.rs), [controller.rs](../../src/ui/controller.rs), [input_logic.rs](../../src/ui/input_logic.rs), [layout.rs](../../src/ui/layout.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions; the UI loop's decisions (the command each button sends, management request tracking and its deadline); list windowing; each screen's text and where it sits; display retry policy | UI loop in [main.rs](../../src/main.rs) and [sim.rs](../../src/sim.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
 
 Rules for the core:
@@ -167,20 +168,29 @@ Follow-up obligations:
 - [lib.rs](../../src/lib.rs) is `#![cfg_attr(not(test), no_std)]`. It exports
   `hid` verbatim, includes `ble/adv_parser.rs`, `ble/conn_params.rs`,
   `ble/coordinator.rs`, `ble/reconnect.rs`, `ble/long_read.rs`,
-  `ble/management.rs`,
-  `power_logic.rs`, and the three `ui` logic files through `#[path]`, and
+  `ble/management.rs`, `ble/messages.rs`, `power_logic.rs`, and the five pure
+  `ui` files (`controller.rs`, `display_logic.rs`, `input_logic.rs`,
+  `layout.rs`, `ui_logic.rs`) through `#[path]`, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
   under `#[cfg(test)]`, in an inline `storage` module.
 - The self-test includes `ble/adv_parser.rs` through `#[path]`, and the
-  simulation compiles `ble::coordinator` and `ui::ui_logic` for the ARM target.
+  simulation compiles the same pure modules and the four `storage` files for
+  the ARM target and runs the coordinator, management, the device store,
+  `ui::controller`, and `ui::layout` there
+  ([ADR 0014](0014-renode-gpio-models.md),
+  [ADR 0024](0024-renode-oled-models.md)).
 - Test files: `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
   `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
   `src/hid_classify_tests.rs`, `src/ble/coordinator_tests.rs`,
-  `src/ui/ui_logic_tests.rs`, `src/hid/delivery_tests.rs` (the production
+  `src/ble/reconnect_tests.rs`, `src/storage/devices_tests.rs`,
+  `src/storage/devices_format_tests.rs`, `src/ui/ui_logic_tests.rs`,
+  `src/ui/controller_tests.rs`, `src/ui/layout_tests.rs`,
+  `src/hid/delivery_tests.rs` (the production
   worker against fake endpoints, for example
   `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
-  in-module tests such as those in `aggregate.rs` and `management.rs`, and
-  [tests/integration.rs](../../tests/integration.rs).
+  in-module tests such as those in `aggregate.rs` and `management.rs`,
+  [tests/integration.rs](../../tests/integration.rs), and
+  [tests/oled_font.rs](../../tests/oled_font.rs).
 - CI runs `cargo test --locked --lib --tests`, `cargo clippy --locked --lib
   --tests -- -D warnings`, and `cargo doc --locked --no-deps --lib` with
   warnings denied on `ubuntu-24.04` and `windows-2025`
@@ -191,12 +201,15 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 283 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 280 unit and 3 integration tests, which
-  passed on 2026-10-10 (the
-  [2026-10-09 validation record](../testing.md#validation-record--2026-10-09)
-  ran 260 unit tests, before four advertisement tests moved out of the
-  firmware-only `scanner.rs` and sixteen UI and keyboard-report tests were added).
+  finds 359 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 353 unit tests, 3 integration tests,
+  and 3 glyph-table tests, which passed on 2026-10-10 (the
+  [2026-10-10 OLED record](../testing.md#validation-record--2026-10-10-oled-in-renode);
+  the [test map](../testing.md#test-map) lists what was added since the
+  [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
+  which ran 260 unit tests). Since 2026-10-10 the pure core also includes
+  `ui::controller` and `ui::layout`, which took the UI loop's decisions and
+  each screen's text out of the untested shells.
   The CI host-test jobs on Linux and Windows passed on GitHub-hosted runners
   in push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721
   (`7fc99d6`, 2026-10-09) and scheduled run 37338711407 (2026-10-05). The
@@ -218,3 +231,4 @@ Follow-up obligations:
 - [ADR 0005: Two slots and independent endpoints](0005-two-slots-and-independent-endpoints.md)
 - [ADR 0009: Isolated display task](0009-isolated-display-task.md)
 - [ADR 0014: Renode GPIO models](0014-renode-gpio-models.md)
+- [ADR 0024: Renode OLED models](0024-renode-oled-models.md)

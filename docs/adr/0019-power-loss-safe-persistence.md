@@ -16,28 +16,33 @@ switched off with the monitor panel, a KVM that drops VBUS when it switches
 works in BIOS setup only if its bond survives every cut; lost bonds force
 re-pairing, and a rollback can restore a peer the user forgot.
 
-**The store today** (paths in `src/`, lines in the 2026-10-10 working tree)
+**The store today** (paths in `src/`, as of 2026-10-10)
 is ADR 0006's single item: key `0x01` (`KEY_PAIRED_DEVICES` in `storage.rs`), at most 512
-bytes (`storage/devices.rs` lines 16 to 19), `NoCache`, in pages 240 to 243
-(`config.rs` lines 153 to 168; `memory_sd.x` line 43), holding the W1 frame
-`B2 01 count records` (`storage/framing.rs` lines 19 to 20) without a checksum
-of its own. The host-tested `DeviceList` decides: load fails closed
-(`devices.rs` lines 196 to 203, 337 to 387, legacy parser included), and a
-reset of an unreadable store asks for an erase (lines 259 to 266). The
+bytes (`MAX_RECORD_SIZE` and its compile-time assertion in
+`storage/devices.rs`), `NoCache`, in pages 240 to 243
+(`STORAGE_FLASH_PAGE_START` to `STORAGE_FLASH_END` in `config.rs`; the
+`ASSERT` on the `FLASH` end in `memory_sd.x`), holding the W1 frame
+`B2 01 count records` (`MAGIC` and `VERSION` in `storage/framing.rs`) without
+a checksum of its own. The host-tested `DeviceList` decides: load fails closed
+(`load`, `decode`, and `decode_versioned` in `devices.rs`, legacy parser
+`decode_legacy` included), and a reset of an unreadable store asks for an
+erase (`erase_first` in `DeviceList::reset`). The
 `storage.rs` shell does the I/O: a save rewrites the frame, three attempts
 20 ms apart (`save_to_flash`), from a word-aligned 512-byte `FlashBuffer`
 (a plain `[u8; 512]` until this review; see below); the reset erases the four
 pages, then writes (`factory_reset`). `ble_task` is
-the only writer (`ble/multi_conn.rs` lines 76 to 79 load, 292 to 297 Forget
-and reset, 330 to 339 enrollment); the self-test image also writes and
+the only writer (`ble/multi_conn.rs`: load at the start of `ble_task`, Forget
+and reset in `manage_devices`, enrollment in the `Action::PersistDevice` arm
+of `execute_action`); the self-test image also writes and
 removes key `0xFE` (`SELFTEST_KEY` and `check_flash` in `selftest.rs`).
 
 **The flash path.** `vendor/nrf-softdevice/src/flash.rs` issues
-`sd_flash_write` (lines 119 to 147) or one `sd_flash_page_erase` per page
-(lines 149 to 180), awaits the SoftDevice event (`events.rs` lines 38 to 39),
-refuses an unaligned source buffer (line 127), implements `MultiwriteNorFlash`
-(line 189), and panics if the future is dropped (`DropBomb`, lines 135 and
-157). The pinned bindings say exactly one event follows, an error event means
+`sd_flash_write` (`Flash::write`) or one `sd_flash_page_erase` per page
+(`Flash::erase`), awaits the SoftDevice event (the flash arms of
+`on_soc_evt` in `events.rs`), refuses an unaligned source buffer
+(`FlashError::BufferMisaligned` in `write`), implements `MultiwriteNorFlash`,
+and panics if the future is dropped (the `DropBomb` in `write` and
+`erase`). The pinned bindings say exactly one event follows, an error event means
 "the command could not be started", and all interrupts are blocked during the
 NVMC operation. `embedded-storage-async` 0.4.2 states that a cut erase leaves
 the page undefined and a cut write leaves the written words undefined and the
@@ -48,8 +53,9 @@ around radio activity, hence failures while links are busy, and the nRF52840
 Product Specification (NVMC) allows two writes per word between erases, about
 41 µs per word, about 85 ms per page erase, and 10,000 erase cycles.
 
-**What `sequential-storage` 7.2.0 guarantees** (`Cargo.toml` line 95 asks for
-`"7"`; `Cargo.lock` line 1173 pins 7.2.0). Its README calls it "Power-fail
+**What `sequential-storage` 7.2.0 guarantees** (the `sequential-storage` entry
+in `Cargo.toml` asks for `"7"`; its `Cargo.lock` entry pins 7.2.0). Its README
+calls it "Power-fail
 safe" ("the system is always fine or fully recoverable") with automatic repair,
 and warns that a cancelled operation "might or might not have fully happened".
 An item is a data CRC-32, a length, and a length CRC-16, written header first
@@ -196,7 +202,8 @@ under the [ADR trigger](../architecture.md#adr-process), adopted only if its
 changelog states disk compatibility with the pinned one and the cross-version
 golden-image tests pass both ways. No version that changes the layout reads
 the old pages in place (question 3); a staged migration to spare pages
-(`memory_sd.x` line 21 leaves `0xF4000` to `0x100000` unused) needs its own
+(`memory_sd.x` leaves `0xF4000` to `0x100000` unused, as the comment on its
+`FLASH` region says) needs its own
 ADR. Moving to 8.0.2 brings the 8.0.1 fix that recovery through
 `remove_all_items` relies on (`NoCache` becomes `Cache::new_uncached()`);
 8.0.2 (2026-10-01) leaves 8.0.1's map code unchanged and is what Dependabot's
@@ -236,7 +243,7 @@ never cancels a storage future.
   every commit walks the region and rewrites headers, and it relies on the
   interruption behavior 8.0.1 had to fix.
 - **Power-fail warning or hold-up energy.** `sd_power_pof_enable` or
-  `PowerUsbRemoved` (`main.rs` lines 101 to 115) could stop new operations
+  `PowerUsbRemoved` (`softdevice_task` in `main.rs`) could stop new operations
   from starting but cannot finish one in progress; a capacitor that covers a
   page erase changes every board. Worth adding only if the bench shows margin.
 - **In-place migration of a changed container layout.** Between the erase and

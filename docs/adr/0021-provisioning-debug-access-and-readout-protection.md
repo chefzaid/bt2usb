@@ -16,9 +16,9 @@ The release gate "key deletion and physical-access policy"
 ([deployment](../deployment.md#release-gates)) waits on this decision. Facts
 are from the tree at `eeae4b8`.
 
-**Debug access today.** The bridge ([main.rs](../../src/main.rs) lines 181 to
-184) and the self-test ([selftest.rs](../../src/selftest.rs) lines 115 to 118)
-pass `embassy_nrf::config::Config::default()` to `embassy_nrf::init` before
+**Debug access today.** The bridge (`main` in [main.rs](../../src/main.rs))
+and the self-test (`main` in [selftest.rs](../../src/selftest.rs)) pass
+`embassy_nrf::config::Config::default()` to `embassy_nrf::init` before
 `Softdevice::enable`; no Nordic MDK `SystemInit` runs, so `init` alone touches
 access port protection (APPROTECT). In the pinned `embassy-nrf` 0.7.0
 (`src/lib.rs`), the default `Debug::Allowed` (line 581) reads the build-code
@@ -63,14 +63,14 @@ trace", section "Access port protection", online edition read 2026-10-10):
 **Keys at rest.** A bond record holds EDIV, Rand, LTK, key flags, IRK, and
 identity address in plain form ([codec.rs](../../src/storage/codec.rs)) in the
 frame under key `0x01` (`KEY_PAIRED_DEVICES` in [storage.rs](../../src/storage.rs)), pages 240
-to 243; RAM copies in `Bonder` ([bonder.rs](../../src/ble/bonder.rs) line 39)
+to 243; RAM copies in `Bonder`'s `peers` ([bonder.rs](../../src/ble/bonder.rs))
 and `DEVICE_STORE` in `storage.rs` are not zeroized. Each save appends a
 frame (`store_item` in `save_to_flash`): `forget` one without the record,
 `factory_reset` an empty one. The host-tested `DeviceList::reset`
-([devices.rs](../../src/storage/devices.rs) lines 257 to 266) asks for the
+([devices.rs](../../src/storage/devices.rs)) asks for the
 pages to be erased first (`erase_first` in `factory_reset`) only when the store
 is unreadable; `manage_devices` then clears the bonder
-([multi_conn.rs](../../src/ble/multi_conn.rs) lines 292 to 303).
+(`bonder().clear()` in [multi_conn.rs](../../src/ble/multi_conn.rs)).
 `sequential-storage` 7.2.0 only "logically" overwrites on `store_item`
 (`map.rs` lines 368 to 372), `remove_item` only zeroes an item's CRC
 (`erase_data`, `item.rs` lines 197 to 207), and its README (lines 136 to 139)
@@ -173,7 +173,7 @@ erase for a readable one. After the commit and `bonder().clear()`,
 `DeviceStore::scrub` calls the crate's `remove_all_items`, which zeroes every
 item's CRC, oldest page first and newest copy last (`remove_item_inner`,
 `map.rs` lines 578 to 655; the vendored `Flash` is `MultiwriteNorFlash`,
-`vendor/nrf-softdevice/src/flash.rs` line 189), then erases the four pages
+`vendor/nrf-softdevice/src/flash.rs`), then erases the four pages
 with the region erase recovery already uses (one `sd_flash_page_erase` per
 page, ascending, line 158). Invalidating first makes a cut safe: a cut erase
 leaves the page undefined (`embedded-storage-async`, as

@@ -17,30 +17,31 @@ layout must be translated on the bridge. The 2026-10-10 tree handles only fixed
 byte layouts:
 
 - **The Report Map is parsed for routing only.** `HidDescriptor` in
-  [report_protocol.rs](../../src/hid/report_protocol.rs) (lines 146–161) keeps
-  three booleans and one report ID per kind; `note_input` (358–368) keeps the
-  first ID seen, and `report_kind_for_id` (185–202) refuses an ID carrying two
-  kinds. `parse` (207–356) bounds collection and Push/Pop stacks at 16
-  (220–221), skips long items with checked arithmetic, rejects Report ID 0 and
-  Delimiter (313–318, 338), and never multiplies Report Size by Report Count
-  (217–218), so it computes no bit offsets.
+  [report_protocol.rs](../../src/hid/report_protocol.rs) keeps three booleans
+  and one report ID per kind; `note_input` keeps the first ID seen, and
+  `report_kind_for_id` refuses an ID carrying two kinds. `parse` bounds
+  collection and Push/Pop stacks at 16 (`collections`, `global_stack`), skips
+  long items with checked arithmetic, rejects Report ID 0 and Delimiter (the
+  Report ID arm's `value == 0` and the `2 if tag == 0x0A` arm), and never
+  multiplies Report Size by Report Count (its comment says "do not multiply
+  untrusted Report Size/Count values"), so it computes no bit offsets.
 - **Payloads are decoded by length.** `parse_by_kind` in
-  [hid/mod.rs](../../src/hid/mod.rs) (150–169) accepts an 8-byte keyboard report
-  (`KeyboardReport::from_identified_bytes`, keyboard.rs 58–67: bytes 0 and 2–7
+  [hid/mod.rs](../../src/hid/mod.rs) accepts an 8-byte keyboard report
+  (`KeyboardReport::from_identified_bytes` in keyboard.rs: bytes 0 and 2–7
   copied, OEM byte 1 zeroed), a 3- to 5-byte mouse report read as buttons and
-  signed 8-bit X, Y, wheel, and pan (`MouseReport::from_ble_bytes`, mouse.rs
-  54–65), and a 2-byte consumer usage up to `MAX_CONSUMER_USAGE` (consumer.rs
-  15, 108–117). Without a map, `infer_from_length` (191–210) routes by length;
-  an unnumbered map with several kinds routes by length among its kinds
-  (`classify_notification_with_hint`, 79–116).
+  signed 8-bit X, Y, wheel, and pan (`MouseReport::from_ble_bytes` in
+  mouse.rs), and a 2-byte consumer usage up to `MAX_CONSUMER_USAGE`
+  (`ConsumerReport::from_ble_bytes` in consumer.rs). Without a map,
+  `infer_from_length` routes by length; an unnumbered map with several kinds
+  routes by length among its kinds (`classify_notification_with_hint`).
 - **What that drops or misreads.** An NKRO bitmap report, usually longer than
   8 bytes, is dropped; a keyboard that sends only those connects but types
   nothing, silently
   ([operations](../operations.md#connect-fails-with-an-hid-error)). A hybrid
   keyboard's second keyboard report ID is not even subscribed:
   `report_kind_for_id` knows only the first, so `subscribe_all` skips it with
-  `Skipping unknown or ambiguous HID report reference` (hid_client.rs
-  227–230). Eight buttons, 12-bit X and Y, and an 8-bit wheel fill exactly five
+  `Skipping unknown or ambiguous HID report reference` (hid_client.rs).
+  Eight buttons, 12-bit X and Y, and an 8-bit wheel fill exactly five
   bytes, a layout many BLE mice use (general knowledge, no fixture yet), so
   `from_ble_bytes` accepts it and reads X, Y, and wheel from the wrong bits. An
   8-byte keyboard report with seven key bytes loses the key in byte 1. A report
@@ -48,30 +49,33 @@ byte layouts:
   kinds, are never decoded as declared.
 - **Notification context.** `on_hvx` in
   [hid_client.rs](../../src/ble/hid_client.rs) rejects payloads over
-  `MAX_REPORT_LEN` (32 bytes, line 52). [sd_setup.rs](../../src/sd_setup.rs)
-  sets `att_mtu: 64` (line 29), and a notification carries at most ATT_MTU − 3
-  octets (Bluetooth Core, Vol 3, Part F, 3.4.7.1): 61 bytes, or 20 with a peer
-  that keeps the 23-byte default. Classification runs in the
-  `gatt_client::run` callback (hid_client.rs 385–391), which the vendored
-  crate's `on_evt` invokes through the HVX portal inside `softdevice_task`
-  (`vendor/nrf-softdevice/src/ble/gatt_client.rs` lines 573 and 669), so it
-  must not await. The parsed descriptor lives in the `connect_and_run_secure`
-  future ([slot_worker.rs](../../src/ble/slot_worker.rs) 265–297), inside
-  `ble_slot_task`, which embassy-executor 0.10 keeps in a static pool of
-  `MAX_CONNECTIONS` (2) tasks (main.rs 131); there is no heap
+  `MAX_REPORT_LEN` (32 bytes). [sd_setup.rs](../../src/sd_setup.rs) sets
+  `att_mtu: 64` in `softdevice_config`, and a notification carries at most
+  ATT_MTU − 3 octets (Bluetooth Core, Vol 3, Part F, 3.4.7.1): 61 bytes, or 20
+  with a peer that keeps the 23-byte default. Classification runs in the
+  `gatt_client::run` callback (`run_notification_loop` in hid_client.rs),
+  which the vendored crate's `on_evt` invokes through the HVX portal inside
+  `softdevice_task` (`on_evt` and `run` in
+  `vendor/nrf-softdevice/src/ble/gatt_client.rs`), so it must not await. The parsed descriptor lives in the
+  `connect_and_run_secure` future (its `descriptor` binding in
+  [slot_worker.rs](../../src/ble/slot_worker.rs)), inside `ble_slot_task`,
+  which embassy-executor 0.10 keeps in a static pool of `MAX_CONNECTIONS` (2)
+  tasks (`pool_size = MAX_CONNECTIONS` in main.rs); there is no heap
   ([ADR 0010](0010-static-memory-layout.md)). Report Maps are at most 512
   bytes (`MAX_ATTRIBUTE_LEN` in `src/ble/long_read.rs`; Core, Vol 3, Part F,
   3.2.9).
 - **Fixed USB side and downstream rules.** USB reports are the 8-byte boot
   keyboard, a 5-byte mouse with signed 8-bit axes, and one consumer usage up to
   `0x0FFF`, on 8-byte endpoints with the boot subclass for keyboard and mouse
-  ([hid_device.rs](../../src/usb/hid_device.rs) 314–350); the boot mouse is
-  three bytes (`serialize_boot`, mouse.rs 83–91). The aggregator unions every
-  source's six keys and sends `ErrorRollOver` when the union exceeds six or a
-  source reports codes 1–3
-  ([aggregate.rs](../../src/hid/aggregate.rs) 101–132); mouse motion merges
-  with 8-bit saturation (mouse.rs 100–108); each endpoint FIFO holds 16 reports
-  and is cleared when full (delivery.rs 22, 54).
+  (the three `HidConfig` values in `init` in
+  [hid_device.rs](../../src/usb/hid_device.rs)); the boot mouse is three bytes
+  (`serialize_boot` in mouse.rs). The aggregator unions every source's six keys
+  and sends `ErrorRollOver` when the union exceeds six or a source reports
+  codes 1–3 (`InputAggregator::keyboard` in
+  [aggregate.rs](../../src/hid/aggregate.rs)); mouse motion merges with 8-bit
+  saturation (`MouseReport::merged_with` in mouse.rs); each endpoint FIFO holds
+  16 reports and is cleared when full (`ENDPOINT_QUEUE_CAPACITY` and
+  `EndpointDelivery::publish` in delivery.rs).
 
 The specifications fix the rest (HID 1.11 section numbers from general
 knowledge, not rechecked): fields are packed from the least significant bit,
@@ -171,7 +175,7 @@ uses extraction. With a map, length never selects a decoder.
 | Level | Example | Result | Log |
 | --- | --- | --- | --- |
 | Map | Truncated item, unbalanced collection, nesting over 16, Report ID 0, an input item before the first Report ID of a map that uses IDs | Connection fails with `ReportMapInvalid` (`Unsupported HID map`), as today | As today |
-| Map | No input report feeds any kind | Same tag; the slot worker reports it and stops retrying, as for every failure but a background reconnect's `ConnectFailed` (slot_worker.rs 154–160) | `HID map has no translatable report` |
+| Map | No input report feeds any kind | Same tag; the slot worker reports it and stops retrying, as for every failure but a background reconnect's `ConnectFailed` (the `SlotOutcome::Failed` arms of `connection_slot_task` in slot_worker.rs) | `HID map has no translatable report` |
 | Report | Over 61 bytes, table full, a field over 32 bits or spanning more than four bytes, Delimiter in its items (today Delimiter fails the whole map) | Not subscribed; other reports work | `HID report {} not translated: {}` |
 | Kind | Absolute X or Y, two X fields, unsigned relative axis, array over 16 elements | Kind dropped from that report; other kinds translate | Same line |
 | Element | Key above `0xFF`, consumer above `0x0FFF`, button 6, out-of-range array value | Ignored, as released | None |

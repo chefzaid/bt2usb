@@ -57,7 +57,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
-| [framing.rs](../../src/storage/framing.rs), [record.rs](../../src/storage/record.rs) | Store frame and record validation | `DeviceStore` in `storage.rs` |
+| [devices.rs](../../src/storage/devices.rs), [codec.rs](../../src/storage/codec.rs), [framing.rs](../../src/storage/framing.rs), [record.rs](../../src/storage/record.rs) | The paired-device list (fail-closed load, legacy format, identity merge, eviction, Forget and reset candidates), the record codec, and frame and record validation, on SoftDevice-free types; IRK resolution is passed in as a function | `DeviceStore` in `storage.rs`, which converts SoftDevice types and does the flash I/O |
 | [ui_logic.rs](../../src/ui/ui_logic.rs), [input_logic.rs](../../src/ui/input_logic.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions, management request IDs, list windowing, display retry policy | UI loop in [main.rs](../../src/main.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
 
@@ -137,9 +137,10 @@ Negative:
 - The shells are not host-tested. That includes `multi_conn.rs`,
   `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`,
   `usb/hid_device.rs`, `usb/host_requests.rs`, `ui/display.rs`, `power.rs`,
-  `storage/codec.rs`, and the `DeviceStore` logic in `storage.rs` that loads
-  the legacy format, merges records for the same identity, evicts the oldest
-  peer, and sets the writable flag.
+  and the `storage.rs` shell (flash I/O, write retries, and the conversion to
+  SoftDevice types). Since 2026-10-10 the store's load, merge, and eviction
+  rules and its codec are in the host-tested `storage/devices.rs` and
+  `storage/codec.rs`.
 - Coverage percentages describe only the host library, not the firmware.
 - A test placed in a firmware-only module, such as `src/ble/scanner.rs`, is
   never compiled, because that module depends on the SoftDevice and is not part
@@ -153,9 +154,9 @@ Follow-up obligations:
 - Put new behavior in a core module with tests first, then wire it into a task.
 - "Host tests for the I/O shells" in [TODO.md](../../TODO.md): move the
   remaining decisions in the shells into hardware-free modules, or test the
-  shells against fakes. The `DeviceStore` load, merge, and eviction rules have
-  their own item,
-  ["Host tests for the device store"](../../TODO.md#verification-and-code-quality).
+  shells against fakes. The device store's rules moved out under
+  ["Host tests for the device store"](../../TODO.md#verification-and-code-quality),
+  done on 2026-10-10.
 - "Async task fault tests" in [TODO.md](../../TODO.md) covers the shell-level
   behavior (cancellation, full channels, contention) that reducer tests cannot.
 - Passing host tests never closes a hardware gate; that needs the later layers
@@ -168,8 +169,8 @@ Follow-up obligations:
   `ble/coordinator.rs`, `ble/reconnect.rs`, `ble/long_read.rs`,
   `ble/management.rs`,
   `power_logic.rs`, and the three `ui` logic files through `#[path]`, and
-  includes `storage/framing.rs` and `storage/record.rs` only under
-  `#[cfg(test)]`.
+  includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
+  under `#[cfg(test)]`, in an inline `storage` module.
 - The self-test includes `ble/adv_parser.rs` through `#[path]`, and the
   simulation compiles `ble::coordinator` and `ui::ui_logic` for the ARM target.
 - Test files: `src/lib_tests.rs`, `src/lib_logic_tests.rs`,

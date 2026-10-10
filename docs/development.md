@@ -786,18 +786,22 @@ Files:
   `VERSION` (`0x01`), the frame writer and reader.
 - [storage/record.rs](../src/storage/record.rs): `ADDRESS_RECORD_SIZE` (7),
   `BOND_RECORD_SIZE` (50), and record validation.
-- [storage/codec.rs](../src/storage/codec.rs): address and bond byte codec
-  over SoftDevice types.
-- [storage.rs](../src/storage.rs): load and save rules, the legacy format,
-  `KEY_PAIRED_DEVICES`, `MAX_RECORD_SIZE` (512) and its compile-time
-  assertion, and the three-attempt write retry.
+- [storage/codec.rs](../src/storage/codec.rs): device, address, and bond
+  record codec, and `MAX_DEVICE_RECORD`.
+- [storage/devices.rs](../src/storage/devices.rs): load and save rules, the
+  legacy format, merge and eviction, `MAX_RECORD_SIZE` (512) and its
+  compile-time assertion; host tests in `devices_format_tests.rs` (codec and
+  load) and `devices_tests.rs` (merge, eviction, Forget, and reset).
+- [storage.rs](../src/storage.rs): `KEY_PAIRED_DEVICES`, the flash I/O with
+  its three-attempt write retry, and the conversion to and from SoftDevice
+  address and key types.
 - [config.rs](../src/config.rs) and [memory_sd.x](../memory_sd.x) when the
   capacity or the reserved pages change; the self-test flash stage uses the
   same constants.
 
-Only `framing.rs` and `record.rs` are compiled into the host library, and
-only for tests (`#[cfg(test)]` in `lib.rs`); `storage.rs` and `codec.rs` are
-not. Put new parsing and validation in the
+`codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` are compiled into the
+host library, only for tests (`#[cfg(test)]` in `lib.rs`); the `storage.rs`
+shell is not. Put new parsing and validation in the
 pure files so the host tests reach it, and add fixtures for the new version,
 every supported older version, and malformed and truncated input. Docs: the
 [pairing store](data-model.md#pairing-store) and

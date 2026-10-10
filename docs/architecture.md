@@ -85,9 +85,10 @@ reducer, and BLE coordinator reducers with custom Renode GPIO models
 | [hid/host_leds.rs](../src/hid/host_leds.rs) | Pure core | Host LED forwarding: the current state when a link starts, then each change |
 | [usb/hid_device.rs](../src/usb/hid_device.rs) | Board shell | Composite device, VBUS, suspend, report writing |
 | [usb/host_requests.rs](../src/usb/host_requests.rs) | Board shell | Host control requests: boot/report protocol and the keyboard LED output report |
-| [storage.rs](../src/storage.rs) | Board shell | Paired-device persistence with versioned framing and bond codec |
+| [storage.rs](../src/storage.rs) | Board shell | Flash load and save with write retries, conversion to and from SoftDevice address and key types, storage log lines |
+| [storage/devices.rs](../src/storage/devices.rs) | Pure core | Paired-device list: fail-closed load, legacy format, identity merge, eviction, forget, factory reset |
 | [storage/framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs) | Pure core | Versioned frame and record validation |
-| [storage/codec.rs](../src/storage/codec.rs) | Board shell | Address and bond byte codec over SoftDevice types |
+| [storage/codec.rs](../src/storage/codec.rs) | Pure core | Device, address, and bond record codec |
 | [ui/ui_logic.rs](../src/ui/ui_logic.rs) | Pure core | Screens, button reducer, view model, management request IDs |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | Pure core | Device-list window and scan spinner |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | Pure core | OLED retry backoff policy |
@@ -103,17 +104,19 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{framing, record}` | Host crate and each firmware binary that declares them | Host tests |
-| Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, `storage` and `storage::codec`, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
+| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management}`, `power_logic`, `ui::{ui_logic, input_logic, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests |
+| Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
 `lib.rs` mounts the shared files with `#[path]` attributes and re-exports them
 through `pub mod ble`, `pub mod ui`, and `pub mod power_logic` facades, so a
 path such as `crate::ble::coordinator` resolves the same way in the library and
-the firmware. `hid` is exported whole. `storage::framing` and `storage::record`
-are compiled into the library only under `cfg(test)`; `storage::codec` is not,
-because it converts SoftDevice address and key types.
+the firmware. `hid` is exported whole. `storage::{codec, devices, framing,
+record}` are compiled into the library only under `cfg(test)`, inside an inline
+`storage` module so that they reach each other through `super::` in both
+builds; the `storage` shell is not, because it converts SoftDevice address and
+key types and does the flash I/O.
 
 ```mermaid
 flowchart TD
@@ -128,7 +131,7 @@ flowchart TD
         BND["ble::bonder"]
         HC["ble::hid_client"]
         SC["ble::scanner"]
-        ST["storage and storage::codec"]
+        ST["storage shell"]
         USB["usb::hid_device and host_requests"]
         PWR["power"]
         DSP["ui::display"]
@@ -140,7 +143,7 @@ flowchart TD
         HID["hid modules"]
         UIL["ui::ui_logic, input_logic, display_logic"]
         PL["power_logic"]
-        SF["storage::framing and record"]
+        SF["storage::devices, codec, framing, record"]
     end
     MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & UIL & HID
     SELF --> USB & DSP & SDS & BC & HID

@@ -170,8 +170,9 @@ Negative:
 - Logical deletion is not physical key erasure; `sequential-storage` appends,
   so older records can remain in flash until garbage collection.
 - A full store evicts the oldest peer with only a log line.
-- Load, legacy parsing, merging, and eviction in `DeviceStore` are not
-  host-tested.
+- The flash I/O, write retries, and SoftDevice type conversion in the
+  `storage.rs` shell are not host-tested; the load, legacy parsing, merge, and
+  eviction rules are, since 2026-10-10.
 - Power loss during a write or a recovery erase has not been tested.
 
 Follow-up obligations, tracked in [TODO.md](../../TODO.md):
@@ -188,22 +189,22 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   pairing that was not saved, with useful actions.
 - "Provisioning and physical key protection": readout protection and key
   lifetime for the keys this store holds.
-- ["Host tests for the device store"](../../TODO.md#verification-and-code-quality):
-  bring the `DeviceStore` load, legacy parsing, merge, and eviction rules
-  under host tests.
+- ["Host tests for the device store"](../../TODO.md#verification-and-code-quality)
+  (done 2026-10-10): the load, legacy parsing, merge, and eviction rules
+  moved into the host-tested `storage/devices.rs`.
 
 ## Implementation
 
 | Concern | Where |
 | --- | --- |
 | Page reservation | `STORAGE_FLASH_PAGE_START = 240`, `STORAGE_FLASH_PAGE_COUNT = 4`, and the derived `STORAGE_FLASH_START`/`STORAGE_FLASH_END` in [config.rs](../../src/config.rs); `FLASH : ORIGIN = 0x00027000, LENGTH = 804K` and the assertion that it ends at `STORAGE_FLASH_START` in [memory_sd.x](../../memory_sd.x) |
-| Container and limits | `KEY_PAIRED_DEVICES`, `MAX_RECORD_SIZE`, and the compile-time size assertion in [storage.rs](../../src/storage.rs) |
+| Container and limits | `KEY_PAIRED_DEVICES` in [storage.rs](../../src/storage.rs); `MAX_RECORD_SIZE` and the compile-time size assertion in [devices.rs](../../src/storage/devices.rs) |
 | Frame | `MAGIC`, `VERSION`, `has_magic`, `is_versioned`, `is_complete`, `Writer::push` (rolls back a record that does not fit), and `records` in [framing.rs](../../src/storage/framing.rs) |
 | Record validation | `ADDRESS_RECORD_SIZE = 7`, `BOND_RECORD_SIZE = 50`, `base`, and `bond` in [record.rs](../../src/storage/record.rs) |
-| Byte codec | Address-type and bond encoding in [codec.rs](../../src/storage/codec.rs) |
-| Load, save, merge | `DeviceStore::load_from_flash`, `save_to_flash`, `add`, `deserialize_all`, and the `writable` and `dirty` flags in `storage.rs` |
+| Byte codec | Device, address-type, and bond encoding in [codec.rs](../../src/storage/codec.rs) |
+| Load, save, merge | `DeviceList::load`, `load_empty`, `load_unreadable`, `pending_item`, `add`, and the `writable` and `dirty` flags in [devices.rs](../../src/storage/devices.rs); `DeviceStore::load_from_flash`, `save_to_flash`, and `add` in `storage.rs` do the flash I/O and logging |
 | Enrollment | `Bonder::on_bonded` in [bonder.rs](../../src/ble/bonder.rs) stores the keys in RAM during pairing; `execute_action` for `Action::PersistDevice` in [multi_conn.rs](../../src/ble/multi_conn.rs) calls `store.add`, then `save_to_flash`, and sends `BleErrorTag::StorageFailed` if the save fails |
-| Forget and reset | `DeviceStore::forget` and `factory_reset` (which erases `STORAGE_START..STORAGE_END` only when the store is not writable) in `storage.rs` |
+| Forget and reset | `DeviceList::without` and `reset` (whose `erase_first` is set only when the store is not writable) in `devices.rs`; `DeviceStore::forget` and `factory_reset` in `storage.rs` erase `STORAGE_FLASH_START..STORAGE_FLASH_END` when told to and persist through `commit` |
 | Commit and quiescence | `commit` and `Quiescence` in [management.rs](../../src/ble/management.rs); `manage_devices` in `multi_conn.rs` sends `SlotCommand::Quiesce(token)`, waits for `SlotEvent::Quiesced`, and calls `Bonder::forget` or `clear` only after the store write succeeds |
 | Boot | `ble_task` loads the store, loads bonds into the bonder, and sends `BleEvent::Error(BleErrorTag::StorageFailed)` when the store is not writable |
 | Self-test | `check_flash` in [selftest.rs](../../src/selftest.rs) only reads key `0x01`, and writes, reads back, and removes a separate scratch key |
@@ -227,11 +228,15 @@ The log lines that mark each path are `Loaded {} devices from flash`,
   `reconnect_events_are_suppressed_until_matching_cancellation_ack` in
   `management.rs`. They passed on GitHub-hosted runners in push runs
   36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09)
-  and scheduled run 37338711407 (2026-10-05). `DeviceStore` itself, the
-  enrollment save, and the bonder depend on SoftDevice types and are not in
-  the host library ([ADR 0003](0003-pure-core-and-task-shell.md)), so no
-  automated test covers load, legacy parsing, merging, eviction, or the
-  enrollment window.
+  and scheduled run 37338711407 (2026-10-05). Since 2026-10-10 the 27 tests
+  in `storage/devices_tests.rs` and `devices_format_tests.rs` also cover loading valid, legacy, malformed,
+  and unreadable stores (each invalid one refusing saves until reset),
+  identity merge, bond replacement, eviction, Forget and reset candidates
+  published only after a successful save, and the record codec. The
+  `storage.rs` shell, the enrollment save, and the bonder depend on SoftDevice
+  types and are not in the host library
+  ([ADR 0003](0003-pure-core-and-task-shell.md)), so no automated test covers
+  the flash I/O, the type conversion, or the enrollment window.
 - **Hardware-verified:** not yet. The repository holds no board record of the
   self-test flash stage, persistence across a reboot, Forget, Factory reset,
   or a failed write.

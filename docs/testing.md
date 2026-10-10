@@ -112,7 +112,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/framing.rs` and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`, `src/storage/codec.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -146,17 +146,17 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were taken with `grep -c '#\[test\]' <file>` on each file on
-2026-10-10, in the commit that keeps the strongest devices in a crowded scan
-list. The tree holds 300 `#[test]` functions: 297 in files compiled into the
-host library and 3 in
+2026-10-10, in the commit that moved the paired-device store into
+host-compiled modules. The tree holds 327 `#[test]` functions: 324 in files
+compiled into the host library and 3 in
 `tests/integration.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
 tests, before four advertisement tests moved into the host library and
 fourteen UI tests (the management deadline, the saved-device list, scans, and
-`UiState` link updates), four keyboard-report tests, one connection-parameter test, eight reconnect wake and identity tests, and six crowded-scan tests were added; the 297 passed
-with `cargo test` on 2026-10-10. There are no `#[ignore]` or
+`UiState` link updates), four keyboard-report tests, one connection-parameter test, eight reconnect wake and identity tests, six crowded-scan tests, and 27
+device-store tests were added; the 324 passed with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -194,6 +194,8 @@ with `cargo test` on 2026-10-10. There are no `#[ignore]` or
 | --- | --- | --- |
 | [storage/framing.rs](../src/storage/framing.rs) | 8 | Versioned blob framing: empty and multi-record round trips in order, non-versioned data yields no records, the writer truncates cleanly when full, the reader stops on truncated or zero-length records, a complete frame needs the exact record count and length, and future or truncated versioned headers are never read as legacy data. |
 | [storage/record.rs](../src/storage/record.rs) | 3 | Record metadata validation: name encoding, capacity, and base length; agreement between the bond flag and the record size; UTF-8 name lengths counted in bytes. |
+| [storage/devices_format_tests.rs](../src/storage/devices_format_tests.rs) | 15 | The flash format of the device list in `devices.rs` and `codec.rs`. Codec: device records with and without a bond round trip and need their whole buffer, every address kind round trips and kind 5 is rejected, bond fields sit at their offsets, a bond identity must be public or random static, names truncate at a character boundary. Load: a full store of four bonded devices with 32-byte names round trips through the flash item; an empty area is writable; a legacy store loads without bonds and is rewritten versioned on the next change, and a bad legacy count or length is refused; empty, truncated, future-version, over-capacity, and malformed items, like an unreadable area, leave the store empty and refusing saves until a factory reset, which erases first only for an unreadable store; a save reports an item that does not fit its buffer; loading merges records of one bonded peer. |
+| [storage/devices_tests.rs](../src/storage/devices_tests.rs) | 12 | The device list in `devices.rs`. Merge: a bonded device is stored under its identity address; RSSI alone is not saved but a name change is; new keys replace the bond of the same identity; a device without keys never clears a bond; keys merge with an entry under the identity or a private address. Capacity and removal: a fifth device evicts the oldest; lookup follows the stored address or a resolvable private address with `IdentityKey::is_match` rules, and address equality ignores the resolved flag; Forget builds a candidate and leaves the list unchanged; bonds list oldest first and devices newest first; Forget and reset publish only after the save succeeds (through `management::commit`). Both files resolve private addresses with a fake in place of the SoftDevice's AES block. |
 
 The [data model](data-model.md#pairing-store) describes the layout these tests
 protect.
@@ -235,7 +237,7 @@ exercises.
 | Module | What checks it today |
 | --- | --- |
 | `ble/multi_conn.rs`, `ble/slot_worker.rs`, `ble/bonder.rs`, `ble/hid_client.rs`, `ble/scanner.rs` | Embedded build and Clippy; pure decisions they call are host-tested; hardware acceptance. The self-test scan stage checks the radio with its own scan loop and `ble/adv_parser.rs`; it does not run these modules |
-| `storage.rs`, `storage/codec.rs` | Embedded build and Clippy; framing and record validation are host-tested; the self-test flash stage exercises the same region and `sequential-storage` map, not this code; hardware acceptance |
+| `storage.rs` | Embedded build and Clippy; the decisions it calls (the device list, codec, framing, and record validation) are host-tested, but its conversions to and from SoftDevice types, IRK resolution through the SoftDevice, and flash writes with retries are not; the self-test flash stage exercises the same region and `sequential-storage` map, not this code; hardware acceptance |
 | `usb/hid_device.rs`, `usb/host_requests.rs` | Embedded build and Clippy; delivery, aggregation, wake policy, and host LED decoding and forwarding are host-tested; self-test USB stages; hardware acceptance |
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
 | `ui/display.rs` | Embedded build and Clippy; recovery policy is host-tested; self-test OLED stages |
@@ -641,13 +643,11 @@ Specific to the current workflow and test tree:
   released dependency lets the graph drop them; any other warning fails the
   job ([auditing](code-quality.md#auditing)).
 - Connection workers, the security handler, the GATT HID client, the storage
-  shell and codec, the USB device, and the display driver have no host tests
-  ([details](#modules-without-host-tests)).
-- `DeviceStore` in `storage.rs` and the address and bond-record encoding in
-  `storage/codec.rs` have no host tests, so the legacy-format parser, the
-  identity merge in `DeviceStore::add`, and bond-record round trips are checked
-  only by the embedded build and on hardware; tracked as
-  [Host tests for the device store](../TODO.md#verification-and-code-quality).
+  shell, the USB device, and the display driver have no host tests
+  ([details](#modules-without-host-tests)). For storage that leaves the
+  conversion between SoftDevice and stored types, IRK resolution through the
+  SoftDevice, and the flash retries, which only the embedded build and
+  hardware check.
 - The packaging and draft-release jobs run only on `v*` tag pushes. No `v*` tag
   exists, so they have never run; the check jobs have passed on hosted
   runners ([Hosted CI Runs](#hosted-ci-runs)).

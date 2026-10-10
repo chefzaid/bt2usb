@@ -8,17 +8,23 @@
 //!   - The whole store is one `sequential-storage` map item under
 //!     `KEY_PAIRED_DEVICES`, rewritten in full on each save.
 //!   - That item is a versioned frame (see `framing`) holding one
-//!     length-prefixed record per paired device: a serialized `PairedDevice`
-//!     with optional `BondInfo`.
+//!     length-prefixed record per paired device (see `codec`): address, RSSI,
+//!     name, and an optional bond.
 //!   - `sequential-storage` manages the flash pages (wear levelling and GC).
+//!
+//! What to store, merge, evict, or refuse is decided by the host-tested
+//! `devices` module on SoftDevice-free types; this shell converts addresses
+//! and keys to and from them, does the flash I/O, and logs the outcome.
 
 mod codec;
+mod devices;
 mod framing;
 mod record;
 
-use codec::{
-    deserialize_address, deserialize_bond, serialize_address, serialize_bond, ADDRESS_RECORD_SIZE,
-    BOND_RECORD_SIZE,
+pub use devices::StoreError;
+use devices::{
+    truncated_name, AddOutcome, AddressKind, DeviceList, PeerAddress, StoredBond, StoredDevice,
+    MAX_RECORD_SIZE,
 };
 
 use crate::config::{MAX_PAIRED_DEVICES, STORAGE_FLASH_END, STORAGE_FLASH_START};
@@ -27,24 +33,16 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::mutex::Mutex;
 use embassy_time::{Duration, Timer};
 use heapless::Vec;
-use nrf_softdevice::ble::{Address, EncryptionInfo, IdentityKey, MasterId};
+use nrf_softdevice::ble::{Address, AddressType, EncryptionInfo, IdentityKey, MasterId};
+use nrf_softdevice::raw;
 use sequential_storage::cache::NoCache;
 
 /// Key for the paired devices list in the map storage.
 const KEY_PAIRED_DEVICES: u8 = 0x01;
 
-// Versioned multi-record framing (magic/version/length prefixes) lives in
-// `framing`; per-record wire sizes (ADDRESS_RECORD_SIZE, BOND_RECORD_SIZE) in `codec`.
-
 /// Retry budget for a flash write that races BLE radio timeslots.
 const FLASH_WRITE_ATTEMPTS: u8 = 3;
 const FLASH_RETRY_BACKOFF_MS: u64 = 20;
-
-/// Maximum serialized size for paired device records.
-/// 4 devices × (address/name metadata + BLE bond keys) plus versioning overhead.
-const MAX_RECORD_SIZE: usize = 512;
-const _: () =
-    assert!(3 + MAX_PAIRED_DEVICES * (1 + 9 + 32 + 1 + BOND_RECORD_SIZE) <= MAX_RECORD_SIZE);
 
 /// BLE bonding keys stored alongside the paired-device record.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,118 +69,111 @@ pub struct PairedDevice {
 impl PairedDevice {
     /// Create a new paired device record.
     pub fn new(address: Address, name: &str, rssi: i8) -> Self {
-        let mut n: heapless::String<32> = heapless::String::new();
-        // Truncate name to fit heapless::String<32> capacity.
-        for c in name.chars() {
-            if n.push(c).is_err() {
-                break;
-            }
-        }
         Self {
             address,
-            name: n,
+            name: truncated_name(name),
             last_rssi: rssi,
             bond: None,
         }
     }
 
-    fn serialize_base(&self, buf: &mut [u8]) -> usize {
-        let name_bytes = self.name.as_bytes();
-
-        // Format: [7 addr+type][1 rssi][1 name_len][name_bytes...]
-        let total = ADDRESS_RECORD_SIZE + 1 + 1 + name_bytes.len();
-        if buf.len() < total {
-            return 0;
-        }
-
-        serialize_address(self.address, &mut buf[..ADDRESS_RECORD_SIZE]);
-        buf[7] = self.last_rssi as u8;
-        buf[8] = name_bytes.len() as u8;
-        buf[9..9 + name_bytes.len()].copy_from_slice(name_bytes);
-        total
-    }
-
-    /// Serialize to bytes for flash storage.
-    fn serialize(&self, buf: &mut [u8]) -> usize {
-        let base_len = self.serialize_base(buf);
-        if base_len == 0 || buf.len() < base_len + 1 {
-            return 0;
-        }
-
-        match self.bond {
-            Some(bond) => {
-                if buf.len() < base_len + 1 + BOND_RECORD_SIZE {
-                    return 0;
-                }
-                buf[base_len] = 1;
-                serialize_bond(
-                    &bond,
-                    &mut buf[base_len + 1..base_len + 1 + BOND_RECORD_SIZE],
-                );
-                base_len + 1 + BOND_RECORD_SIZE
-            }
-            None => {
-                buf[base_len] = 0;
-                base_len + 1
-            }
+    fn to_stored(&self) -> StoredDevice {
+        StoredDevice {
+            address: to_peer(self.address),
+            name: self.name.clone(),
+            last_rssi: self.last_rssi,
+            bond: self.bond.as_ref().map(to_stored_bond),
         }
     }
 
-    fn deserialize_base(data: &[u8]) -> Option<(Self, usize)> {
-        let (text, end) = record::base(data)?;
-        let address = deserialize_address(&data[..ADDRESS_RECORD_SIZE])?;
-        let rssi = data[7] as i8;
-        let mut name: heapless::String<32> = heapless::String::new();
-        name.push_str(text).ok()?;
-
-        Some((
-            Self {
-                address,
-                name,
-                last_rssi: rssi,
-                bond: None,
-            },
-            end,
-        ))
-    }
-
-    /// Deserialize a versioned record from bytes.
-    fn deserialize(data: &[u8]) -> Option<Self> {
-        let (mut device, offset) = Self::deserialize_base(data)?;
-        if let Some(bytes) = record::bond(data, offset)? {
-            device.bond = Some(deserialize_bond(bytes)?);
+    fn from_stored(device: &StoredDevice) -> Self {
+        Self {
+            address: to_address(device.address),
+            name: device.name.clone(),
+            last_rssi: device.last_rssi,
+            bond: device.bond.as_ref().map(to_bond_info),
         }
-        Some(device)
     }
 }
 
-/// In-memory cache of paired devices, synced with flash.
+fn to_peer(address: Address) -> PeerAddress {
+    let kind = match address.address_type() {
+        AddressType::Public => AddressKind::Public,
+        AddressType::RandomStatic => AddressKind::RandomStatic,
+        AddressType::RandomPrivateResolvable => AddressKind::RandomPrivateResolvable,
+        AddressType::RandomPrivateNonResolvable => AddressKind::RandomPrivateNonResolvable,
+        AddressType::Anonymous => AddressKind::Anonymous,
+    };
+    PeerAddress {
+        kind,
+        bytes: address.bytes(),
+        resolved: address.is_resolved_peer_id(),
+    }
+}
+
+fn to_address(address: PeerAddress) -> Address {
+    let address_type = match address.kind {
+        AddressKind::Public => AddressType::Public,
+        AddressKind::RandomStatic => AddressType::RandomStatic,
+        AddressKind::RandomPrivateResolvable => AddressType::RandomPrivateResolvable,
+        AddressKind::RandomPrivateNonResolvable => AddressType::RandomPrivateNonResolvable,
+        AddressKind::Anonymous => AddressType::Anonymous,
+    };
+    let mut converted = Address::new(address_type, address.bytes);
+    converted.flags |= u8::from(address.resolved);
+    converted
+}
+
+fn to_stored_bond(bond: &BondInfo) -> StoredBond {
+    StoredBond {
+        ediv: bond.master_id.ediv,
+        rand: bond.master_id.rand,
+        ltk: bond.key.ltk,
+        flags: bond.key.flags,
+        irk: bond.peer_id.as_raw().id_info.irk,
+        identity: to_peer(bond.peer_id.addr),
+    }
+}
+
+fn to_bond_info(bond: &StoredBond) -> BondInfo {
+    BondInfo {
+        master_id: MasterId {
+            ediv: bond.ediv,
+            rand: bond.rand,
+        },
+        key: EncryptionInfo {
+            ltk: bond.ltk,
+            flags: bond.flags,
+        },
+        peer_id: IdentityKey::from_raw(raw::ble_gap_id_key_t {
+            id_info: raw::ble_gap_irk_t { irk: bond.irk },
+            id_addr_info: *to_address(bond.identity).as_raw(),
+        }),
+    }
+}
+
+/// Resolve a private address with a peer's IRK through the SoftDevice's AES
+/// block, as `IdentityKey::is_match` does.
+fn resolve(irk: &[u8; 16], address: &[u8; 6]) -> bool {
+    let key = IdentityKey::from_raw(raw::ble_gap_id_key_t {
+        id_info: raw::ble_gap_irk_t { irk: *irk },
+        id_addr_info: *Address::new(AddressType::Public, [0; 6]).as_raw(),
+    });
+    key.is_match(Address::new(AddressType::RandomPrivateResolvable, *address))
+}
+
+/// In-memory cache of paired devices, synced with flash. The decisions live
+/// in the host-tested [`DeviceList`]; this shell does the flash I/O and logs.
 #[derive(Clone)]
 pub struct DeviceStore {
-    /// Cached list of paired devices.
-    devices: Vec<PairedDevice, MAX_PAIRED_DEVICES>,
-    /// Dirty flag - true if cache differs from flash.
-    dirty: bool,
-    /// Preserve unreadable or unsupported data until an explicit recovery flow
-    /// exists, rather than silently overwriting bonds after a failed load.
-    writable: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StoreError {
-    Unreadable,
-    Serialization,
-    Flash,
-    NotFound,
+    list: DeviceList,
 }
 
 impl DeviceStore {
     /// Create an empty store.
     pub const fn new() -> Self {
         Self {
-            devices: Vec::new(),
-            dirty: false,
-            writable: true,
+            list: DeviceList::new(),
         }
     }
 
@@ -202,26 +193,21 @@ impl DeviceStore {
 
         match map.fetch_item::<&[u8]>(&mut buf, &KEY_PAIRED_DEVICES).await {
             Ok(Some(data)) => {
-                self.devices.clear();
-                self.writable = self.deserialize_all(data);
-                if self.writable {
-                    info!("Loaded {} devices from flash", self.devices.len());
+                if self.list.load(data, &resolve) {
+                    info!("Loaded {} devices from flash", self.list.len());
                 } else {
                     error!("Invalid or unsupported device store; writes disabled");
                 }
             }
             Ok(None) => {
                 info!("No paired devices in flash");
-                self.devices.clear();
-                self.writable = true;
+                self.list.load_empty();
             }
             Err(e) => {
                 error!("Flash read error: {:?}", defmt::Debug2Format(&e));
-                self.devices.clear();
-                self.writable = false;
+                self.list.load_unreadable();
             }
         }
-        self.dirty = false;
     }
 
     /// Persist all paired devices to flash.
@@ -229,21 +215,23 @@ impl DeviceStore {
         &mut self,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) -> Result<(), StoreError> {
-        if !self.dirty {
-            debug!("DeviceStore: no changes to save");
-            return Ok(());
-        }
-        if !self.writable {
-            error!("Device store is unreadable; refusing to overwrite stored bonds");
-            return Err(StoreError::Unreadable);
-        }
-
         let mut buf = [0u8; MAX_RECORD_SIZE];
         let mut data_buf = [0u8; MAX_RECORD_SIZE];
 
-        let Some(len) = self.serialize_all(&mut data_buf) else {
-            error!("Device store exceeds serialization capacity; save aborted");
-            return Err(StoreError::Serialization);
+        let len = match self.list.pending_item(&mut data_buf) {
+            Ok(Some(len)) => len,
+            Ok(None) => {
+                debug!("DeviceStore: no changes to save");
+                return Ok(());
+            }
+            Err(StoreError::Unreadable) => {
+                error!("Device store is unreadable; refusing to overwrite stored bonds");
+                return Err(StoreError::Unreadable);
+            }
+            Err(e) => {
+                error!("Device store exceeds serialization capacity; save aborted");
+                return Err(e);
+            }
         };
         let item: &[u8] = &data_buf[..len];
 
@@ -260,8 +248,8 @@ impl DeviceStore {
                 .await
             {
                 Ok(_) => {
-                    info!("Saved {} devices to flash", self.devices.len());
-                    self.dirty = false;
+                    info!("Saved {} devices to flash", self.list.len());
+                    self.list.mark_saved();
                     return Ok(());
                 }
                 Err(e) => {
@@ -281,17 +269,15 @@ impl DeviceStore {
         Err(StoreError::Flash)
     }
 
-    pub fn find(&self, address: Address) -> Option<&PairedDevice> {
-        self.devices.iter().find(|device| {
-            device.address == address
-                || device
-                    .bond
-                    .is_some_and(|bond| bond.peer_id.is_match(address))
-        })
+    /// The device stored at `address`, or whose bond resolves it.
+    pub fn find(&self, address: Address) -> Option<PairedDevice> {
+        self.list
+            .find(to_peer(address), &resolve)
+            .map(PairedDevice::from_stored)
     }
 
     pub fn is_writable(&self) -> bool {
-        self.writable
+        self.list.is_writable()
     }
 
     /// Transactionally remove a stable identity. Failed flash writes leave the
@@ -301,17 +287,9 @@ impl DeviceStore {
         address: Address,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) -> Result<(), StoreError> {
-        if !self.writable {
-            return Err(StoreError::Unreadable);
-        }
-        let index = self
-            .devices
-            .iter()
-            .position(|device| device.address == address)
-            .ok_or(StoreError::NotFound)?;
-        let mut candidate = self.clone();
-        candidate.devices.remove(index);
-        candidate.dirty = true;
+        let candidate = Self {
+            list: self.list.without(to_peer(address))?,
+        };
         crate::ble::management::commit(self, candidate, async |next| {
             next.save_to_flash(flash).await
         })
@@ -324,11 +302,12 @@ impl DeviceStore {
         &mut self,
         flash: &mut impl embedded_storage_async::nor_flash::NorFlash,
     ) -> Result<(), StoreError> {
-        let recover = !self.writable;
-        let mut candidate = Self::new();
-        candidate.dirty = true;
+        let reset = self.list.reset();
+        let candidate = Self {
+            list: reset.candidate,
+        };
         crate::ble::management::commit(self, candidate, async |next| {
-            if recover {
+            if reset.erase_first {
                 flash
                     .erase(STORAGE_FLASH_START, STORAGE_FLASH_END)
                     .await
@@ -339,147 +318,30 @@ impl DeviceStore {
         .await
     }
 
-    /// Serialize all devices to a byte buffer using the versioned framing.
-    fn serialize_all(&self, buf: &mut [u8]) -> Option<usize> {
-        let mut writer = framing::Writer::new(buf)?;
-        for device in &self.devices {
-            if !writer.push(|slot| device.serialize(slot)) {
-                return None;
-            }
-        }
-        Some(writer.finish())
-    }
-
-    /// Deserialize all devices from a byte buffer.
-    fn deserialize_all(&mut self, data: &[u8]) -> bool {
-        if data.is_empty() {
-            return false;
-        }
-
-        let valid = if framing::has_magic(data) {
-            framing::is_complete(data) && self.deserialize_versioned(data)
-        } else {
-            self.deserialize_legacy(data)
-        };
-        if !valid {
-            self.devices.clear();
-        }
-        valid
-    }
-
-    fn deserialize_versioned(&mut self, data: &[u8]) -> bool {
-        if data[2] as usize > MAX_PAIRED_DEVICES {
-            return false;
-        }
-        for record in framing::records(data) {
-            let Some(device) = PairedDevice::deserialize(record) else {
-                return false;
-            };
-            // Older firmware could store multiple RPAs for the same bonded
-            // peer. Normalize and merge them while loading, otherwise both
-            // connection slots would attempt to reconnect the same device.
-            self.add(device);
-        }
-        true
-    }
-
-    fn deserialize_legacy(&mut self, data: &[u8]) -> bool {
-        let count = data[0] as usize;
-        if count > MAX_PAIRED_DEVICES {
-            return false;
-        }
-        let mut offset = 1;
-
-        for _ in 0..count {
-            if offset >= data.len() {
-                return false;
-            }
-
-            // Read name length to determine record size.
-            if offset + 9 > data.len() {
-                return false;
-            }
-            let name_len = data[offset + 8] as usize;
-            let record_len = 9 + name_len;
-
-            if offset + record_len > data.len() {
-                return false;
-            }
-
-            let Some((device, _)) =
-                PairedDevice::deserialize_base(&data[offset..offset + record_len])
-            else {
-                return false;
-            };
-            self.add(device);
-
-            offset += record_len;
-        }
-        offset == data.len()
-    }
-
     /// Add a newly paired device.
-    pub fn add(&mut self, mut device: PairedDevice) {
-        // Persist a stable identity address when keys are available. Saving the
-        // currently advertised RPA would create a new entry on every rotation
-        // and eventually evict the other paired peripherals.
-        if let Some(bond) = device.bond {
-            device.address = bond.peer_id.addr;
-        }
-        // If already stored (same address), update the record. Only persist
-        // (mark dirty) when something we care about for reconnect actually
-        // changed — RSSI churns on every reconnect and is just a UI hint, so
-        // updating it alone must not cause a flash write (avoidable wear).
-        if let Some(existing) = self.devices.iter_mut().find(|d| {
-            d.address == device.address
-                || d.bond.is_some_and(|b| b.peer_id.is_match(device.address))
-                || device.bond.is_some_and(|b| b.peer_id.is_match(d.address))
-        }) {
-            let address_changed = existing.address != device.address;
-            let name_changed = existing.name != device.name;
-            let bond_changed = device.bond.is_some() && existing.bond != device.bond;
-
-            existing.last_rssi = device.last_rssi;
-            existing.address = device.address;
-            if name_changed {
-                existing.name = device.name.clone();
+    pub fn add(&mut self, device: PairedDevice) {
+        match self.list.add(device.to_stored(), &resolve) {
+            AddOutcome::Unchanged => {}
+            AddOutcome::Updated => info!("Updated existing paired device"),
+            AddOutcome::Added => {
+                info!("Added paired device - now storing {}", self.list.len());
             }
-            if bond_changed {
-                existing.bond = device.bond;
+            AddOutcome::AddedAfterEviction => {
+                warn!("Paired device store full - evicting oldest entry");
+                info!("Added paired device - now storing {}", self.list.len());
             }
-            if address_changed || name_changed || bond_changed {
-                self.dirty = true;
-                info!("Updated existing paired device");
-            }
-            return;
         }
-
-        // If at capacity, evict the oldest entry.
-        if self.devices.is_full() {
-            warn!("Paired device store full - evicting oldest entry");
-            self.devices.remove(0);
-        }
-
-        let _ = self.devices.push(device);
-        self.dirty = true;
-        info!("Added paired device - now storing {}", self.devices.len());
     }
 
     /// Iterate paired devices most-recently-added first, for auto-reconnect of
     /// multiple links (e.g. keyboard + mouse) on boot.
-    pub fn iter_recent(&self) -> impl Iterator<Item = &PairedDevice> {
-        self.devices.iter().rev()
+    pub fn iter_recent(&self) -> impl Iterator<Item = PairedDevice> + '_ {
+        self.list.iter_recent().map(PairedDevice::from_stored)
     }
 
     /// Return all stored BLE bonds.
     pub fn bonds(&self) -> Vec<BondInfo, MAX_PAIRED_DEVICES> {
-        let mut bonds = Vec::new();
-        for device in &self.devices {
-            if let Some(bond) = device.bond {
-                let _ = bonds.push(bond);
-            }
-        }
-        bonds
+        self.list.bonds().map(|bond| to_bond_info(&bond)).collect()
     }
 }
 

@@ -7,11 +7,11 @@
 //!
 //! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
 //! reconnect, long_read, management}`, `ui::{ui_logic, input_logic, display_logic}` and
-//! `power_logic`, plus `storage::{framing, record}` under `cfg(test)` only, and
+//! `power_logic`, plus `storage::{codec, devices, framing, record}` under `cfg(test)` only, and
 //! `config`, whose capacities the pure modules size their buffers from.
 //! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, bonder,
 //! hid_client, scanner}`,
-//! `storage` and `storage::codec`, `usb`, `power`, `sd_setup`, `stack`,
+//! the `storage` shell, `usb`, `power`, `sd_setup`, `stack`,
 //! `ui::{display, buttons}`) are *not* included here.
 
 #![cfg_attr(not(test), no_std)]
@@ -43,15 +43,18 @@ mod ble_long_read_impl;
 #[path = "ble/management.rs"]
 mod ble_management_impl;
 
-// Pure flash-record framing (host-tested independently of the embedded
-// `storage` shell, which is SoftDevice-coupled and not compiled here).
+// The pure parts of the paired-device store: the device list, its record
+// codec, and the flash-item framing (host-tested independently of the embedded
+// `storage` shell, which is SoftDevice-coupled and not compiled here). Inside
+// this inline module the files resolve to `src/storage/`, and they reach each
+// other through `super::`, as they do under the firmware's `storage` module.
 #[cfg(test)]
-#[path = "storage/framing.rs"]
-mod storage_framing_impl;
-
-#[cfg(test)]
-#[path = "storage/record.rs"]
-mod storage_record_impl;
+mod storage {
+    pub mod codec;
+    pub mod devices;
+    pub mod framing;
+    pub mod record;
+}
 
 #[path = "power_logic.rs"]
 mod power_logic_impl;

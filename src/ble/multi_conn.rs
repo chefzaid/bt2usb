@@ -102,7 +102,7 @@ pub async fn ble_task(
             .take(MAX_CONNECTIONS)
             .map(|paired| DiscoveredDevice {
                 address: paired.address,
-                name: paired.name.clone(),
+                name: paired.name,
                 rssi: paired.last_rssi,
             })
             .collect()
@@ -223,7 +223,7 @@ async fn publish_paired_devices(
             .iter_recent()
             .map(|paired| DiscoveredDevice {
                 address: paired.address,
-                name: paired.name.clone(),
+                name: paired.name,
                 rssi: paired.last_rssi,
             })
             .collect()
@@ -245,7 +245,7 @@ async fn manage_devices(
 ) -> Result<(), BleErrorTag> {
     let paired = if let Some(identity) = address {
         let store = DEVICE_STORE.lock().await;
-        let Some(paired) = store.find(identity).cloned() else {
+        let Some(paired) = store.find(identity) else {
             return Err(BleErrorTag::ManagementFailed);
         };
         Some(paired)

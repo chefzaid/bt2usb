@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 25 | 0 | 0 |
+| [FIXME](#fixme) | 26 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 10 | 6 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 11 | 5 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 8 | 8 | 3 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **108** | **75** | **22** |
+| **Total** | **110** | **74** | **22** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -281,6 +281,14 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   audited. Found while reviewing the vendored logs below; fixed in the same
   change, which rewrote both passages from the
   [dependency log review](docs/security.md#dependency-logs).
+- [x] **P3** **Boot logged a line per stored device that the docs omitted.**
+  `DeviceStore::load_from_flash` rebuilt the list through the runtime `add`, so
+  every boot printed `Added paired device - now storing N` for each stored
+  record (or `Updated existing paired device` when two merged) before
+  `Loaded N devices from flash`, while the
+  [boot sequence](docs/operations.md#boot-sequence) lists only that summary line. Found while
+  moving the store into host code; fixed by the move: the pure loader merges
+  without logging, and only runtime adds log.
 
 ## Needs Your Input
 
@@ -649,10 +657,10 @@ Context: [data model](docs/data-model.md#pairing-store),
   documented safe reset path, without accepting corrupted bond material or
   silently replacing it ([data model](docs/data-model.md#write-rules)).
 - [ ] **P1** **Versioned storage migration.** Document each wire version and
-  supported upgrade/downgrade paths. The legacy parser and the identity merge in
-  `DeviceStore` live in `src/storage.rs`, which the host crate does not compile,
-  so they have no host tests today (see "Host tests for the device store" under
-  [Verification And Code Quality](#verification-and-code-quality)). Accept
+  supported upgrade/downgrade paths. The legacy parser and the identity merge
+  moved into the host-tested `src/storage/devices.rs` on 2026-10-10, whose tests
+  already refuse future versions and cover a valid legacy conversion and
+  malformed items; capacity changes and a written migration policy remain. Accept
   when fixture tests reject unknown versions and cover valid legacy
   conversion, malformed data, and capacity changes
   ([data model](docs/data-model.md#schema-change-rules)).
@@ -999,21 +1007,26 @@ Host tests, simulation, and code-health work. Context:
   (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/bonder.rs`,
   `src/ble/hid_client.rs`, `src/usb/hid_device.rs`, `src/usb/host_requests.rs`,
   `src/ui/display.rs`) have no host tests; only the pure modules they call do.
-  The storage shell is the next item. Move remaining decisions into
+  The storage shell (`src/storage.rs`) is down to flash I/O and SoftDevice type
+  conversion since the device-store move. Move remaining decisions into
   hardware-free modules or test the shells against fakes. Accept when each
   has host tests for its error paths, or the testing guide records why it
   cannot ([testing](docs/testing.md#modules-without-host-tests)).
-- [ ] **P1** **Host tests for the device store.** `DeviceStore` in
-  `src/storage.rs` loads, merges by identity address, evicts the oldest record
-  when full, forgets, and factory-resets the pairing store, and it holds the
-  legacy-format parser (`deserialize_legacy`); the byte codec is in
-  `src/storage/codec.rs`. The host crate compiles only `storage/framing.rs`
-  and `storage/record.rs`, so none of this has a host test. Move the in-memory
-  logic and the codec into host-compiled modules, or test them against a fake
-  flash. Accept when host tests cover load of valid, legacy, malformed, and
-  unreadable stores, identity merge and bond replacement, eviction at
-  `MAX_PAIRED_DEVICES`, forget, factory reset, and a codec round trip
-  ([testing](docs/testing.md#modules-without-host-tests)).
+- [x] **P1** **Host tests for the device store.** The in-memory store moved
+  out of the `src/storage.rs` shell on 2026-10-10 into host-compiled modules
+  under ADR 0003: `src/storage/devices.rs` (`DeviceList`: fail-closed load,
+  the legacy parser, identity merge and bond replacement, eviction at
+  `MAX_PAIRED_DEVICES`, and the Forget and factory-reset candidates) and a pure
+  `src/storage/codec.rs`. Address resolution with an IRK stays in the shell and
+  reaches the list as a `resolve` function, so tests pass a fake. 27 host tests
+  in `src/storage/devices_tests.rs` and `src/storage/devices_format_tests.rs`
+  cover load of valid, legacy, malformed, and unreadable stores, merge, bond
+  replacement, eviction, lookup, Forget and reset published through
+  `management::commit` only after a successful save, and codec round trips.
+  The shell keeps flash I/O, the write retry, SoftDevice type conversion, and
+  the log lines; host line coverage rose to 97.90%
+  ([testing](docs/testing.md#pairing-storage); [data model](docs/data-model.md#pairing-store);
+  `src/storage.rs`, `src/lib.rs`).
 - [ ] **P1** **Broaden the Renode scenarios.** The Robot test runs one scripted
   scenario; it does not exercise the OLED task or the saved-device management
   screens. It also does not exercise link loss: step 2 of the scenario logs
@@ -1069,7 +1082,8 @@ Host tests, simulation, and code-health work. Context:
 - [x] **P2** **Keep source files within a size limit.** Every Rust file under
   `src/`, `tests/`, and `build.rs`, and every Python file under `scripts/`, is
   at most 500 lines since the 2026-10-10
-  split (largest: `src/storage.rs` 488, `src/hid_descriptor_tests.rs` 486), and
+  split (largest after the device-store move: `src/hid_descriptor_tests.rs`
+  486, `src/ble/coordinator_tests.rs` 465), and
   the host-tests job fails on any file over the limit
   ([code quality](docs/code-quality.md#file-length); `src/ble/bonder.rs`,
   `src/ble/slot_worker.rs`, `src/usb/host_requests.rs`,
@@ -1162,7 +1176,7 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   audit reported `bare-metal 0.2.5` (`RUSTSEC-2026-0110`) and
   `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained; both are still
   in `Cargo.lock`. Trace their dependency chains, track the upstream migration,
-  and adopt maintained replacements through dependency upgrades; CI runs
+  and adopt maintained replacements through dependency upgrades; CI ran
   `cargo audit` without a deny option until 2026-10-10, so these warnings did
   not fail the job. Accept when the lockfile no longer selects these affected versions,
   the audit is clean without advisory suppression, the CI audit fails on
@@ -1691,7 +1705,7 @@ The checklist, adapted to this firmware:
 | Static analysis | `cargo fmt`, and host, firmware, and simulation Clippy with `-D warnings`, rustdoc with warnings denied |
 | Security | Every peer-, host-, or flash-controlled value bounded and validated; no key material or keystrokes logged; no unreviewed dependency |
 | Robustness | No lost wakeups, unbounded waits, or panics reachable from outside input; bounded work in callbacks |
-| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 97.5% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
+| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 97.9% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
 | Documentation | The owning guide, ADRs, and this plan match the code; dependencies pinned and current |
 
 ## Updating This Checklist

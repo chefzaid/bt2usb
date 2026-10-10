@@ -155,12 +155,16 @@ arbitrary line: tests go to a sibling `*_tests.rs` file included with
 `reconnect_tests.rs`, and `coordinator_tests.rs` are), and a shell module
 splits by task or handler (as `multi_conn.rs` gave up `slot_worker.rs` and
 `bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10).
+The device-store tests split the same way when the store moved into host
+code: `devices_tests.rs` holds the list rules and `devices_format_tests.rs`,
+a child module of it that shares its helpers, the codec and load tests.
 A Python helper splits the same way: on 2026-10-10 the documentation checker
 (775 lines once formatted) became a thin `scripts/check_docs.py` driver and one
 module per check in `scripts/docs_checks/`. Markdown guides, `maskfile.md`, the
-shell scripts, and the vendored crate are not checked. On 2026-10-10 the
-largest Rust files were `storage.rs` (488 lines) and `hid_descriptor_tests.rs`
-(486), and the largest Python file was `scripts/check_docs_test.py` (436).
+shell scripts, and the vendored crate are not checked. On 2026-10-10, after
+the device-store move cut `storage.rs` from 488 lines to 350, the largest Rust
+files were `hid_descriptor_tests.rs` (486) and `coordinator_tests.rs` (465),
+and the largest Python file was `scripts/check_docs_test.py` (436).
 
 ### Clippy
 
@@ -446,7 +450,7 @@ file's `#[cfg(test)] mod`:
 | `.expect("two u32 hex words fit in 16 characters")` | 1 in `usb/hid_device.rs` | Formatting two `{:08X}` words always yields 16 characters |
 | `unreachable!()` after `join4` | 1 in `usb/hid_device.rs` | The four joined futures never complete |
 | `unreachable!()` for `SlotEvent::Quiesced` | 1 in `ble/multi_conn.rs` | The loop handles `Quiesced` and continues before this match |
-| `const _: () = assert!(…)` on the pairing record size | 1 in `storage.rs` | Compile time only: the build fails if four records with bonds exceed `MAX_RECORD_SIZE` |
+| `const _: () = assert!(…)` on the pairing record size | 1 in `storage/devices.rs` | Compile time only: the build fails if four records with bonds exceed `MAX_RECORD_SIZE` |
 
 That table covers the panic macros only. Slice indexing, `RefCell` borrows,
 and `StaticCell` initialization can also panic; Clippy's `indexing_slicing`,
@@ -496,23 +500,23 @@ Coverage measures only the code that host tests compile:
   parser, connection-parameter bounds, coordinator, reconnect table,
   long-read assembler, and management logic, `src/power_logic.rs`, and the UI display, input, and state-machine
   logic
-- `src/storage/framing.rs` and `src/storage/record.rs`, which `lib.rs`
-  includes only under `cfg(test)`
+- `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
+  `lib.rs` includes only under `cfg(test)`
 - the inline `#[cfg(test)] mod tests` blocks inside those files, which count
   toward the file they sit in
 
 The test code in separate files is compiled with instrumentation but left out
 of the llvm-cov report: `tests/integration.rs`, the `src/*_tests.rs` files
 that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
-`reconnect_tests.rs`, `delivery_tests.rs`, and `ui_logic_tests.rs`. On
-2026-10-10, cargo-llvm-cov 0.9.1's summary listed 22 files, all of them
-source modules; passing
+`reconnect_tests.rs`, `delivery_tests.rs`, `ui_logic_tests.rs`,
+`devices_tests.rs`, and `devices_format_tests.rs`. On 2026-10-10, after the device-store move,
+cargo-llvm-cov 0.9.1's summary listed 24 files, all of them source modules; passing
 `--ignore-filename-regex '(_tests\.rs$|tests/)'` gave the same total, so no
 test file reaches the figure.
 
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
-workers, security handler, GATT HID client, scanner, storage shell and codec,
+workers, security handler, GATT HID client, scanner, storage shell,
 USB device, display driver, buttons, power shell, stack monitor, SoftDevice setup, and the
 three entry points. `config.rs` is compiled into the host library but holds
 only constants, so it adds no lines to the report. The
@@ -688,7 +692,7 @@ These limits fail the build when they are exceeded:
 | Application RAM | `RAM : ORIGIN = 0x20006000, LENGTH = 232K`, after the SoftDevice's 24 KiB | Linker: static data that does not fit fails the link |
 | RAM placement | `ASSERT(__sdata == ORIGIN(RAM) && _stack_start == ORIGIN(RAM) + LENGTH(RAM), …)` | Linker assert in [memory_sd.x](../memory_sd.x) |
 | Pairing boundary | `ASSERT(ORIGIN(FLASH) + LENGTH(FLASH) == __bt2usb_storage_start, …)` and `ASSERT(__bt2usb_storage_end <= 0x00100000, …)`, with the symbols written by [build.rs](../build.rs) from `STORAGE_FLASH_START`/`END` in [config.rs](../src/config.rs) | Linker assert in [memory_sd.x](../memory_sd.x): changing the page constants or the `FLASH` length alone fails the link |
-| Pairing record | `3 + MAX_PAIRED_DEVICES * (1 + 9 + 32 + 1 + BOND_RECORD_SIZE) <= MAX_RECORD_SIZE`, that is 375 ≤ 512 bytes | `const` assert in [storage.rs](../src/storage.rs) |
+| Pairing record | `3 + MAX_PAIRED_DEVICES * (1 + MAX_DEVICE_RECORD) <= MAX_RECORD_SIZE` with `MAX_DEVICE_RECORD` = 92, that is 375 ≤ 512 bytes | `const` assert in [storage/devices.rs](../src/storage/devices.rs) |
 
 The simulation build uses [memory_sim.x](../memory_sim.x), which gives the
 whole 1024 KiB of flash and 256 KiB of RAM to the application and has no
@@ -792,7 +796,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | Gap | Where it is tracked |
 | --- | --- |
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
-| The connection workers, security handler, GATT HID client, storage shell and codec, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1); the storage shell also under [Host tests for the device store](../TODO.md#verification-and-code-quality) (P1) |
+| The connection workers, security handler, GATT HID client, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
 | Panic-prone indexing and borrows are not inventoried by any lint | [Inventory panic sites in firmware paths](../TODO.md#verification-and-code-quality) (P2) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |

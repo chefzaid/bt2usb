@@ -333,7 +333,7 @@ These hardware-relevant values live next to the code that uses them:
 | --- | --- | --- |
 | Idle timeout (`IDLE_TIMEOUT_SECS`) | 60 s | [power.rs](../src/power.rs) |
 | Flash write attempts and retry pause | 3, 20 ms apart | [storage.rs](../src/storage.rs) |
-| Pairing item size limit (`MAX_RECORD_SIZE`) | 512 bytes | [storage.rs](../src/storage.rs) |
+| Pairing item size limit (`MAX_RECORD_SIZE`) | 512 bytes | [storage/devices.rs](../src/storage/devices.rs) |
 | USB endpoint write deadline and retry backoff | 100 ms; 20 ms doubling to 1000 ms | [hid/delivery.rs](../src/hid/delivery.rs) |
 | Endpoint queue (`ENDPOINT_QUEUE_CAPACITY`) | 16 reports per endpoint | [hid/delivery.rs](../src/hid/delivery.rs) |
 | OLED address in the self-test (`OLED_ADDR`) | `0x3C` | [selftest.rs](../src/selftest.rs) |

@@ -66,8 +66,9 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | --- | --- | --- | --- |
 | Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 8 host tests | None recorded |
 | Record prefix and bond-flag validation | [storage/record.rs](../src/storage/record.rs) | 3 host tests | None recorded |
-| Address and bond byte codec | [storage/codec.rs](../src/storage/codec.rs) | Firmware build and Clippy only; no tests | None recorded |
-| Load, save, legacy parse, merge, eviction | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
+| Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
+| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 12 merge, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
+| Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Persist-then-publish commit and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 5 host tests | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
 | USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs), [usb/host_requests.rs](../src/usb/host_requests.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
@@ -87,7 +88,7 @@ pairing region with a scratch key, not this record format.
 | Flash pages | 240–243 (`0x000F0000–0x000F4000`), 4 KiB each | `STORAGE_FLASH_PAGE_START` / `COUNT`, `FLASH_PAGE_SIZE`, and the derived `STORAGE_FLASH_START` / `END` in [config.rs](../src/config.rs); `memory_sd.x` fails the link unless `FLASH` ends at `STORAGE_FLASH_START` |
 | Container | One `sequential-storage` map item, key `0x01`, no cache (`NoCache`) | `KEY_PAIRED_DEVICES` in [storage.rs](../src/storage.rs) |
 | Flash access | SoftDevice flash API (`nrf_softdevice::Flash`), so writes wait for radio-idle time | [ble/multi_conn.rs](../src/ble/multi_conn.rs) |
-| Maximum item size | 512 bytes, checked at compile time against four bonded records with 32-byte names | `MAX_RECORD_SIZE` |
+| Maximum item size | 512 bytes, checked at compile time against four bonded records with 32-byte names | `MAX_RECORD_SIZE` in [storage/devices.rs](../src/storage/devices.rs) |
 | Capacity | 4 peers; 2 can be connected at once | `MAX_PAIRED_DEVICES`, `BLE_MAX_CONNECTIONS` in [config.rs](../src/config.rs) |
 | Other keys | `0xFE` is written, read back and removed by the self-test image only | `SELFTEST_KEY` in [selftest.rs](../src/selftest.rs) |
 
@@ -127,7 +128,8 @@ Owned by [storage.rs](../src/storage.rs) and validated by
 | 10 + n | 50 | Bond | Present only when the flag is 1; the record length must match exactly |
 
 A bonded record is stored under the peer's identity address from the bond, not
-the advertising address seen at connection time (`DeviceStore::add`). This
+the advertising address seen at connection time (`DeviceList::add` in
+[storage/devices.rs](../src/storage/devices.rs)). This
 keeps a peer that rotates its resolvable private address from creating a new
 record on every rotation.
 
@@ -195,18 +197,20 @@ host test.
 
 ### Capacity And Compile-Time Checks
 
-[storage.rs](../src/storage.rs) contains:
+[storage/devices.rs](../src/storage/devices.rs) contains the assertion below,
+and [storage/codec.rs](../src/storage/codec.rs) defines the largest record as
+`MAX_DEVICE_RECORD = ADDRESS_RECORD_SIZE + 2 + 32 + 1 + BOND_RECORD_SIZE`:
 
 ```rust
-const _: () =
-    assert!(3 + MAX_PAIRED_DEVICES * (1 + 9 + 32 + 1 + BOND_RECORD_SIZE) <= MAX_RECORD_SIZE);
+const _: () = assert!(3 + MAX_PAIRED_DEVICES * (1 + codec::MAX_DEVICE_RECORD) <= MAX_RECORD_SIZE);
 ```
 
 | Term | Bytes | Meaning |
 | --- | --- | --- |
 | `3` | 3 | Magic, version, count |
 | `1` | 1 | Per-record length prefix |
-| `9` | 9 | Address (7), RSSI (1), name length (1) |
+| `ADDRESS_RECORD_SIZE` | 7 | Address and type (part of `MAX_DEVICE_RECORD`) |
+| `2` | 2 | RSSI and name length |
 | `32` | 32 | Longest name |
 | `1` | 1 | Bond flag |
 | `BOND_RECORD_SIZE` | 50 | Bond |
@@ -716,9 +720,10 @@ policy is in [hardware](hardware.md#power).
   version must fail closed, not overwrite it.
 - Keep `MAX_RECORD_SIZE`, `MAX_PAIRED_DEVICES`, and the flash reservation
   consistent; the compile-time assertion guards the first two.
-- Move record parsing that needs coverage into a host-compiled module, as
-  `framing.rs` and `record.rs` already are; `storage.rs` and `codec.rs` are not
-  compiled by the host tests.
+- Keep record parsing and store decisions in the host-compiled modules
+  (`codec.rs`, `devices.rs`, `framing.rs`, `record.rs`); only the `storage.rs`
+  shell, which does the flash I/O and converts SoftDevice types, is outside
+  the host tests.
 - A USB descriptor or report change updates the descriptor, the serializer,
   boot-protocol output, `hid_descriptor_tests.rs`, and this guide together, and
   needs enumeration evidence on each supported host.

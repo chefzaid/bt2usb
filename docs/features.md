@@ -720,12 +720,16 @@ keeps application code out of those pages
   list use the most recently added first; a fifth device evicts the oldest
   ([data model](data-model.md#in-memory-cache)).
 
-Host tests cover the framing and record validation
-([`storage/framing.rs`](../src/storage/framing.rs),
-[`storage/record.rs`](../src/storage/record.rs)) and the commit primitive. The
-flash-backed store itself, including merging and eviction, depends on
-SoftDevice types and has no host test. Power-loss safety, migration rules, and
-physical key protection are open work.
+Host tests cover the store's decisions and encoding: loading valid, legacy,
+malformed, and unreadable stores, identity merge, bond replacement, eviction,
+Forget, Factory reset, and the record codec
+([`storage/devices.rs`](../src/storage/devices.rs),
+[`storage/codec.rs`](../src/storage/codec.rs)), the framing and record
+validation ([`storage/framing.rs`](../src/storage/framing.rs),
+[`storage/record.rs`](../src/storage/record.rs)), and the commit primitive.
+The flash I/O and the conversion to SoftDevice types in
+[`storage.rs`](../src/storage.rs) have no host test. Power-loss safety,
+migration rules, and physical key protection are open work.
 
 ## Saved-Device Management
 
@@ -860,10 +864,11 @@ are open work.
   host library [`lib.rs`](../src/lib.rs): HID types and policies (including
   host-LED forwarding), the BLE coordinator, the shared reconnect table, the
   connection parameter policy, long-read assembly, management primitives,
-  advertisement parser, storage framing and record validation, power policy,
+  advertisement parser, the paired-device store and its record codec, framing,
+  and validation, power policy,
   and UI logic.
-- The source contains 300 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 297 unit tests and the 3
+- The source contains 327 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 324 unit tests and the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), all
   of which run with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or

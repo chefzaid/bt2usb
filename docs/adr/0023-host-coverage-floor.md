@@ -142,7 +142,7 @@ Negative:
   the same change.
 - A single total can hide one module losing coverage while others gain.
 - The figure still says nothing about the connection workers, security
-  handler, GATT HID client, storage shell and codec, USB device, or display
+  handler, GATT HID client, storage shell, USB device, or display
   driver; those stay tracked as gaps in
   [testing](../testing.md#known-verification-gaps).
 

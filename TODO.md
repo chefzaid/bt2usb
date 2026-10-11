@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 41 | 2 | 0 |
+| [FIXME](#fixme) | 42 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **128** | **73** | **21** |
+| **Total** | **129** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -542,17 +542,24 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   full store (`src/storage/devices_tests.rs`;
   [data model](docs/data-model.md#write-rules)). `Bonder` and
   `execute_action` are checked by the embedded builds and Clippy.
-- [ ] **P2** **A slot keeps retrying a device it cannot secure.** When the
-  link of a device for which `Bonder` holds no keys ends (a refused pairing,
+- [x] **P2** **A slot kept retrying a device it could not secure.** When the
+  link of a device for which `Bonder` held no keys ended (a refused pairing,
   or a device whose keys a newer pairing evicted from the four in memory),
-  the slot worker reports `LinkLost` and retries it in the background.
-  Background reconnects never pair, so every attempt fails, and the slot
-  stays reserved until the user disconnects: with two slots, one such device
-  halves what the bridge can connect. Close by releasing the slot instead of
-  retrying when no bond matches the device. This is the part of the open P1
-  "Visible storage/security errors" that the bridge can decide alone, since
-  it knows it holds no keys; that item still covers a peer that lost its
-  keys and a legacy record without a bond.
+  the slot worker reported `LinkLost` and retried it in the background.
+  Background reconnects never pair, so every attempt failed, and the slot
+  stayed reserved until the user disconnected: with two slots, one such
+  device halved what the bridge could connect. Found while fixing "A refused
+  pairing still stored the device". Fixed: on link loss
+  `connection_slot_task` asks `Bonder::bond_for_address` for the device's
+  keys and, without them, sends `SlotEvent::Disconnected`, which frees the
+  slot, and logs `slot {} link lost; no keys to reconnect`, instead of
+  retrying (`src/ble/slot_worker.rs`;
+  [architecture](docs/architecture.md#background-reconnect)). This is the
+  part of the open P1 "Visible storage/security errors" that the bridge can
+  decide alone, since it knows it holds no keys; that item still covers a
+  peer that lost its keys and a legacy record without a bond. The slot
+  worker is checked by the embedded builds and Clippy; the coordinator's
+  handling of `Disconnected` is host-tested.
 - [ ] **P2** **Selecting a device whose slot is retrying leaves the UI on
   Connecting.** `plan_connect` returns no action when the selected address
   is reserved by a slot that is not connected, expecting that attempt to

@@ -614,7 +614,7 @@ Connection worker to coordinator, defined in
 | --- | --- | --- | --- |
 | `Connected` | `slot`, `device` | Link encrypted, HID discovered and subscribed | Mark slot connected, persist the device and its bond, emit `Connected` |
 | `Disconnected` | `slot` | The slot is free | Clear slot, emit link status |
-| `LinkLost` | `slot`, `device` | An established link dropped; the worker is retrying | Keep the slot reserved, emit link status |
+| `LinkLost` | `slot`, `device` | An established link to a device `Bonder` holds keys for dropped; the worker is retrying. Without keys the worker sends `Disconnected` instead | Keep the slot reserved, emit link status |
 | `Error` | `slot`, `tag` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed` | Clear slot, emit `Error(tag)` and link status |
 | `Quiesced` | `slot`, `token` | Reply to `Quiesce` | Counted only by the management barrier |
 

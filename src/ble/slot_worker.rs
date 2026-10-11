@@ -135,6 +135,13 @@ pub async fn connection_slot_task(
         )
         .await
         {
+            // Without keys for the device (its pairing was refused, or a newer
+            // pairing evicted them), a background reconnect, which never
+            // pairs, could never secure the link: free the slot instead.
+            SlotOutcome::Closed if bonder().bond_for_address(device.address).is_none() => {
+                info!("slot {} link lost; no keys to reconnect", slot);
+                slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+            }
             SlotOutcome::Closed => {
                 // The peer dropped a working link: keep the slot for it and
                 // reconnect as soon as it advertises again.

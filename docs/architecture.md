@@ -461,8 +461,8 @@ worker waiting to retry drops its target. Stored records and bonds are kept.
 
 A slot reconnects silently, without pairing, in three cases: `ble_task` sends
 it `Reconnect` at power-up; an established link closes (`"slot {} link lost;
-reconnecting"`), including one that the user connected; or a silent attempt
-fails with `ConnectFailed`.
+reconnecting"`), including one that the user connected, unless `Bonder` holds
+no keys for the device; or a silent attempt fails with `ConnectFailed`.
 
 ```mermaid
 flowchart TD
@@ -479,8 +479,9 @@ flowchart TD
     C -->|Secured and HID ready| L[Drop target, Connected event, notification loop]
     C -->|ConnectFailed: hide device from other slot's scans 6.5 s| T
     C -->|HID or Report Map error| E[Drop target, error event, slot released, retries stop]
-    L -->|Peer closes link| D[HidEvent Disconnected, then LinkLost]
-    D --> T
+    L -->|Peer closes link| D[HidEvent Disconnected]
+    D -->|Bonder holds keys: LinkLost| T
+    D -->|No keys: Disconnected| F[Slot released, retries stop]
 ```
 
 - Each silent attempt registers the slot's target in `RECONNECTS`, the
@@ -555,6 +556,12 @@ flowchart TD
   aggregator releases that source's held input, then `SlotEvent::LinkLost`.
   `on_slot_link_lost` keeps the slot reserved in the connecting state, so a new
   connect request cannot take it, and the UI shows only links that are up.
+  When `Bonder::bond_for_address` finds no keys for the device (its pairing
+  was refused, or a newer pairing evicted them from the four held in RAM),
+  the worker sends `SlotEvent::Disconnected` instead and logs
+  `"slot {} link lost; no keys to reconnect"`: a silent attempt never pairs,
+  so it could never secure the link, and would hold the slot until the user
+  disconnected.
 - A background reconnect that reaches Connected moves the UI from Home or
   Connecting to Connected. A scan the user started keeps its picker on screen;
   an error or notice also stays until acknowledged.

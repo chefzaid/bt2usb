@@ -273,8 +273,12 @@ When an established link drops, for example because the peripheral went to
 sleep, anything that link was holding down on the PC is released at once, the
 slot stays reserved for the same device, and it reconnects silently once the
 device advertises again. The screen shows only the links that are actually up.
-The log shows `slot N link lost; reconnecting`, with the slot number. A link
-that drops without a disconnect is detected by the supervision timeout, which
+The log shows `slot N link lost; reconnecting`, with the slot number. A
+device the bridge holds no keys for, such as one that showed
+`Pairing not saved`, could reconnect only by pairing, which a background
+reconnect never does, so its slot is freed instead and the log shows
+`slot N link lost; no keys to reconnect`; select the device from a scan to
+pair it again. A link that drops without a disconnect is detected by the supervision timeout, which
 is never longer than 4 seconds, whatever the peripheral asks for
 ([Connection And Security](#connection-and-security)).
 

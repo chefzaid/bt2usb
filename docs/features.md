@@ -187,9 +187,9 @@ pending stays on screen when the request times out.
    Connected and input reaches the PC.
 4. To add a second device, press SELECT on Connected, then choose the other
    device. Both links stay up and the screen shows `2 devices`.
-5. The device is saved when its link comes up. It reconnects automatically
-   after a restart and after it sleeps, unless the bridge showed
-   `Pairing not saved` for it ([notices and errors](#notices-and-errors)).
+5. The device is saved when its link comes up, unless the bridge shows
+   `Pairing not saved` ([notices and errors](#notices-and-errors)). A saved
+   device reconnects automatically after a restart and after it sleeps.
 
 Some details matter in daily use:
 
@@ -338,7 +338,7 @@ otherwise Home. SELECT on an error starts a new scan instead.
 | `HID map too large` | The device is not supported |
 | `Unsupported HID map` | The device's report layout is not supported |
 | `Storage failed` | See [Pairing Storage](#pairing-storage); Factory reset recovers an unreadable store |
-| `Pairing not saved` | The device named an identity the bridge cannot store, so its new keys were not saved. It works until it disconnects but does not reconnect by itself; to use it again, select it from a scan, which pairs it again. If the message repeats, record the log and report the device |
+| `Pairing not saved` | The device named an identity the bridge cannot store, or none while using a private address, so this pairing was not saved: the device is not added to the saved-device list and its new keys are dropped (a record from an earlier pairing of the same device stays). It works until it disconnects but does not reconnect by itself; to use it again, select it from a scan, which pairs it again. If the message repeats, record the log and report the device |
 | `Action failed; retry` | Reopen saved devices; the device was already removed |
 | `Busy; try again` | Wait a moment and retry |
 | `Device changed; retry` | Reopen saved devices |
@@ -884,8 +884,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 359 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 353 unit tests, the 3
+- The source contains 372 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 366 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), and
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   all of which run with `mask test`.

@@ -324,16 +324,25 @@ async fn execute_action(
         Action::ConnectSlot { slot, device } => {
             send_slot_cmd(slot, SlotCommand::Connect(device), slot_txs).await;
         }
+        // `Bonder::on_bonded` refused the pairing's bond and logged why. The
+        // device is not stored either: without keys it would sit at the
+        // private address it connected from, and each pairing after that
+        // address rotates would add a record, evicting a bonded peer once the
+        // store is full.
+        Action::PersistDevice(device) if bonder().take_refused(device.address) => {
+            event_tx
+                .send(BleEvent::Error(BleErrorTag::BondRefused))
+                .await;
+        }
         Action::PersistDevice(device) => {
             let mut store = DEVICE_STORE.lock().await;
             let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
             let bond = bonder().bond_for_address(device.address);
             paired.bond = bond;
             if store.add(paired).is_err() {
-                // Drop exactly the refused keys from the security handler too,
-                // so it holds what flash will hold after a reboot: once this
-                // link ends, background reconnects fail (they never pair) until
-                // the user connects the device from a scan.
+                // The store refuses what `Bonder` should already have
+                // refused; drop exactly those keys so RAM holds what flash
+                // will.
                 if let Some(bond) = bond {
                     bonder().forget_bond(&bond);
                 }

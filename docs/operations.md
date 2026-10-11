@@ -337,7 +337,8 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `Added paired device - now storing {}` | New peer cached | A save follows |
 | info | `Updated existing paired device` | Address, name, or keys changed | A save follows |
 | warn | `Paired device store full - evicting oldest entry` | A fifth peer replaced the oldest-added one | Expected at capacity (4) |
-| warn | `Bond refused: identity address is not public or random static; stored without keys` | The peer named a private, anonymous, or reserved identity address during pairing; its new keys were not stored and were dropped from the security handler, and the OLED shows `Pairing not saved` | Record the peripheral and report it. Once the link ends, background reconnects fail with `slot {} failed to secure BLE link`; select the device from a scan to pair it again |
+| warn | `Bond refused: identity address is not public or random static` | The peer named a private, anonymous, or reserved identity address during pairing, or distributed no identity key while connecting from a private address (the vendored crate then uses that address as the identity); the security handler kept no keys, nothing is stored for the device, and the OLED shows `Pairing not saved` | Record the peripheral and report it. Once the link ends, background reconnects cannot bring it back, because they never pair; select the device from a scan to pair it again |
+| warn | `Device store refused a bond whose identity is not public or random static` | Should be impossible: the security handler refuses such a bond first. The store refused the device and its keys were dropped from the security handler | Report as a defect with the preceding log |
 | error | `Paired device address has a reserved type; not stored` | Should be impossible: the SoftDevice gives every link a defined address type | Report as a defect |
 | info | `Saved {} devices to flash` | The store was written | None |
 | warn | `Flash write busy (attempt {}), retrying` | A write attempt failed; retried after 20 ms | [Flash incident](#flash-writes-report-busy-or-fail) |
@@ -369,7 +370,7 @@ message:
 | `No HID service`, `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `HID map read failed`, `HID map too large`, `Unsupported HID map` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `Storage failed` | [Storage](#storage-unreadable-and-writes-disabled) and [flash](#flash-writes-report-busy-or-fail) incidents |
-| `Pairing not saved` | Record the peripheral and the `Bond refused` log line and report it; the device keeps working until it disconnects and then does not reconnect by itself; select it from a scan to pair it again |
+| `Pairing not saved` | Record the peripheral and the `Bond refused` log line and report it; the device is not saved, keeps working until it disconnects, and then does not reconnect by itself; select it from a scan to pair it again |
 | `Action failed; retry` | Reopen the saved-device list and retry |
 | `Busy; try again` | Wait a few seconds and retry |
 | `Device changed; retry` | Reopen the saved-device list |

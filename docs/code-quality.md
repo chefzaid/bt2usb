@@ -628,9 +628,11 @@ The remaining panic paths, and why each does not fire:
 `Address::address_type` unwraps the 7-bit address type, whose conversion
 accepts only the four defined types and 0x7F, so bt2usb never calls it on a
 type a peer chooses. During pairing the peer sends its own identity address,
-which `Bonder::on_bonded` keeps as sent; the storage shell decodes its raw type
-with `AddressKind::from_gap_type`, which returns `None` for a reserved type,
-and stores the device without the bond ([data model](data-model.md#write-rules)).
+which `Bonder::on_bonded` checks with `storage::is_identity_address`: it
+decodes the raw type with `AddressKind::from_gap_type`, which returns `None`
+for a reserved type, and a bond whose identity is not public or random static
+is refused and nothing is stored for the device
+([data model](data-model.md#write-rules)).
 `IdentityKey::is_match` and `Address`'s `defmt::Format` also call
 `address_type`, on an address whose type the SoftDevice set (see the table).
 

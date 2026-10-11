@@ -181,6 +181,9 @@ pub enum AddOutcome {
     Added,
     /// Appended after evicting the oldest-added device from a full list.
     AddedAfterEviction,
+    /// Not stored: its bond names an identity that is not a public or random
+    /// static address ([`AddressKind::is_identity`]).
+    BondRefused,
 }
 
 /// The candidate store a factory reset publishes once persisted, and whether
@@ -305,13 +308,19 @@ impl DeviceList {
 
     /// Store a paired device, merging it with the entry for the same peer.
     ///
-    /// A bond whose identity is not a public or random static address is left
-    /// out and the device stored without keys, like a peer that did not bond:
-    /// a reload refuses such a bond, and with it the whole store, so saving it
-    /// would lose every pairing on the next boot. The firmware's storage shell
-    /// refuses such a bond, and reports it, before it gets here.
+    /// A device whose bond names an identity that is not a public or random
+    /// static address is not stored at all. A reload refuses such a bond, and
+    /// with it the whole store, so saving it would lose every pairing on the
+    /// next boot; and the device without the bond would be stored at the
+    /// private address it connected from, so each pairing after the address
+    /// rotates would add a record and, in a full store, evict a bonded peer.
     pub fn add(&mut self, mut device: StoredDevice, resolve: &impl Resolve) -> AddOutcome {
-        device.bond = device.bond.filter(|bond| bond.identity.kind.is_identity());
+        if device
+            .bond
+            .is_some_and(|bond| !bond.identity.kind.is_identity())
+        {
+            return AddOutcome::BondRefused;
+        }
         // Keep the stable identity address when keys are available. Storing
         // the currently advertised private address would add a new entry on
         // every rotation and eventually evict the other paired peripherals.

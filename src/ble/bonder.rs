@@ -12,8 +12,8 @@ use core::cell::RefCell;
 
 use crate::ble::conn_params::{self, ConnParamLimits, ConnParams};
 use crate::config;
-use crate::config::MAX_PAIRED_DEVICES;
-use crate::storage::{irk_present, BondInfo};
+use crate::config::{BLE_MAX_CONNECTIONS, MAX_PAIRED_DEVICES};
+use crate::storage::{irk_present, is_identity_address, BondInfo};
 use defmt::{info, warn};
 use heapless::Vec;
 use nrf_softdevice::ble::security::{IoCapabilities, SecurityHandler};
@@ -47,12 +47,29 @@ pub(crate) fn key_matches(key: &IdentityKey, address: Address) -> bool {
 
 pub(crate) struct Bonder {
     peers: RefCell<Vec<BondInfo, MAX_PAIRED_DEVICES>>,
+    /// The addresses of links whose pairing named an identity the store
+    /// refuses, until [`Self::take_refused`] reports them.
+    refused: RefCell<Vec<Address, BLE_MAX_CONNECTIONS>>,
 }
 
 impl Bonder {
     fn new() -> Self {
         Self {
             peers: RefCell::new(Vec::new()),
+            refused: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// Whether the pairing on the link to `address` was refused, forgetting
+    /// the refusal.
+    pub(crate) fn take_refused(&self, address: Address) -> bool {
+        let mut refused = self.refused.borrow_mut();
+        match refused.iter().position(|link| *link == address) {
+            Some(index) => {
+                refused.remove(index);
+                true
+            }
+            None => false,
         }
     }
 
@@ -95,6 +112,7 @@ impl Bonder {
 
     pub(crate) fn clear(&self) {
         self.peers.borrow_mut().clear();
+        self.refused.borrow_mut().clear();
     }
 }
 
@@ -114,13 +132,30 @@ impl SecurityHandler for Bonder {
         key: EncryptionInfo,
         peer_id: IdentityKey,
     ) {
+        let link = conn.peer_address();
+        let mut refused = self.refused.borrow_mut();
+        refused.retain(|refused_link| *refused_link != link);
+        // The peer chose its identity address. The store refuses one that is
+        // not public or random static (a reload would refuse the whole store),
+        // so keep no such bond: it would only displace a valid one here.
+        // `execute_action` reports the refusal when the link is persisted.
+        if !is_identity_address(peer_id.addr) {
+            warn!("Bond refused: identity address is not public or random static");
+            if refused.is_full() {
+                refused.remove(0);
+            }
+            let _ = refused.push(link);
+            return;
+        }
+        drop(refused);
         let mut peers = self.peers.borrow_mut();
         // MasterId is not a peer identity (LE Secure Connections can use the
         // same all-zero EDIV/RAND for multiple peers). Re-pairing replaces only
         // this peer's keys and must not overwrite another keyboard's bond.
-        if let Some(existing) = peers.iter_mut().find(|p| {
-            p.peer_id.addr == peer_id.addr || key_matches(&p.peer_id, conn.peer_address())
-        }) {
+        if let Some(existing) = peers
+            .iter_mut()
+            .find(|p| p.peer_id.addr == peer_id.addr || key_matches(&p.peer_id, link))
+        {
             existing.master_id = master_id;
             existing.key = key;
             existing.peer_id = peer_id;

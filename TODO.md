@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 40 | 0 | 0 |
+| [FIXME](#fixme) | 41 | 2 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **127** | **71** | **21** |
+| **Total** | **128** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -398,17 +398,17 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   embedded builds and Clippy; the vendored code has no tests, and the
   hardware check is part of "Report Map interoperability and legacy policy".
 - [x] **P1** **A bond with a private or reserved identity address broke the
-  store.** `Bonder::on_bonded` keeps the identity address the peer sends
-  during pairing without checking its type; when the peer sends none, it
-  keeps the connection's address with an all-zero IRK
-  (`IdentityKey::from_addr`). `execute_action` stores the bond only when
-  `bond_for_address` matches it to the connection's address: a public or
-  static address must equal the identity, a non-resolvable one never matches,
-  and a resolvable one must be resolved by the bond's IRK. A private or
-  reserved identity therefore reached the store only from a peer that
-  connects from a resolvable private address and either distributes an IRK
-  that resolves it together with an identity type the SoftDevice passes
-  through (its documentation does not say whether it can), or distributes no
+  store.** `Bonder::on_bonded` kept the identity address the peer sent
+  during pairing without checking its type; when the peer sent none, it
+  kept the connection's address with an all-zero IRK
+  (`IdentityKey::from_addr`). `execute_action` stored the bond only when
+  `bond_for_address` matched it to the connection's address: a public or
+  static address had to equal the identity, a non-resolvable one never
+  matched, and a resolvable one had to be resolved by the bond's IRK. A
+  private or reserved identity therefore reached the store only from a peer
+  that connected from a resolvable private address and either distributed an IRK
+  that resolved it together with an identity type the SoftDevice passes
+  through (its documentation does not say whether it can), or distributed no
   identity and built its address from an all-zero IRK, which a crafted peer
   can do. `DeviceStore::add` then converted the identity with the vendored
   `Address::address_type`, which `unwrap!`s and panics for the reserved raw
@@ -416,19 +416,16 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the reload refuses any identity type above 1, so the next boot logged
   `Invalid or unsupported device store; writes disabled`, loaded no devices,
   and refused saves until a Factory reset: every pairing was lost. Found by
-  the panic inventory's reviewer. Fixed: `DeviceStore::add` decodes the raw
-  type with `AddressKind::from_gap_type`, which returns `None` for a reserved
-  one, and stores no bond whose identity is not public or random static
-  (`AddressKind::is_identity`, which `DeviceList::add` and the reload in
-  `codec::decode_bond` also apply). It keeps the device without keys and logs
-  `Bond refused: identity address is not public or random static; stored without keys`;
-  `execute_action` then drops exactly those keys from `Bonder`
-  (`forget_bond`), so RAM holds what flash will after a reboot, and the OLED
-  shows `Pairing not saved` (`BleErrorTag::BondRefused`); the device works
-  until it disconnects and is then paired again from a scan, since background
-  reconnects never pair. Host tests decode every
-  SoftDevice address type and save and reload a bond with each identity type
-  (`src/storage/devices_tests.rs`, `devices_format_tests.rs`;
+  the panic inventory's reviewer. Fixed: the raw type is decoded with
+  `AddressKind::from_gap_type`, which returns `None` for a reserved one, and
+  no bond whose identity is not public or random static
+  (`AddressKind::is_identity`) is kept. Since the follow-up FIXME "A refused
+  pairing still stored the device", `Bonder::on_bonded` refuses it when it is
+  made and nothing is stored for that pairing; `DeviceStore::add`,
+  `DeviceList::add`, and the reload in `codec::decode_bond` refuse it too, and
+  the OLED shows `Pairing not saved` (`BleErrorTag::BondRefused`). Host tests
+  decode every SoftDevice address type and save and reload a bond with each
+  identity type (`src/storage/devices_tests.rs`, `devices_format_tests.rs`;
   [data model](docs/data-model.md#write-rules),
   [ADR 0006](docs/adr/0006-fail-closed-pairing-store.md)). The shell and the
   `execute_action` path are checked by the embedded builds and Clippy; no peer
@@ -517,6 +514,55 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the resolver it is given, so the rule is tested where it lives, and the
   firmware passes it `key_matches`; that shell code is checked by the
   embedded builds and Clippy.
+- [x] **P2** **A refused pairing still stored the device.** After the bond
+  identity fix, `DeviceStore::add` refused the bond but stored the device
+  without keys, at the private address it connected from. A peer that names
+  a private identity pairs again after each address rotation, so every
+  pairing added a record; in a full store each one evicted the oldest bonded
+  peer, whose keys were then lost at the next boot, and the keyless records
+  took boot reconnect slots although only an address the peer had already
+  left matched them. A peer that sent no identity while connecting from a
+  non-resolvable private address was not refused at all:
+  `IdentityKey::is_match` never matches such an address, so
+  `bond_for_address` found no bond, the device was stored without keys, and
+  no error was shown. Found by the behavior review of the bond identity fix.
+  Fixed: `Bonder::on_bonded` checks the identity the peer sends
+  (`storage::is_identity_address`, which decodes the type without
+  `Address::address_type`), keeps no keys for one that is not public or
+  random static, logs `Bond refused: identity address is not public or random
+  static`, and records the link; `execute_action` then stores nothing for it
+  and shows `Pairing not saved` (`Bonder::take_refused`). As a second line of
+  defense `DeviceList::add` returns `AddOutcome::BondRefused` and stores
+  nothing for such a bond, and `DeviceStore::add` logs `Device store refused a
+  bond whose identity is not public or random static`; `execute_action` then
+  drops exactly those keys from `Bonder` (`forget_bond`). A bond already
+  stored for the same peer stays. Host tests show that a refused bond stores
+  nothing and leaves nothing to save, leaves the same peer's stored bond, and
+  that 256 refused pairings from rotating addresses leave every bond of a
+  full store (`src/storage/devices_tests.rs`;
+  [data model](docs/data-model.md#write-rules)). `Bonder` and
+  `execute_action` are checked by the embedded builds and Clippy.
+- [ ] **P2** **A slot keeps retrying a device it cannot secure.** When the
+  link of a device for which `Bonder` holds no keys ends (a refused pairing,
+  or a device whose keys a newer pairing evicted from the four in memory),
+  the slot worker reports `LinkLost` and retries it in the background.
+  Background reconnects never pair, so every attempt fails, and the slot
+  stays reserved until the user disconnects: with two slots, one such device
+  halves what the bridge can connect. Close by releasing the slot instead of
+  retrying when no bond matches the device. This is the part of the open P1
+  "Visible storage/security errors" that the bridge can decide alone, since
+  it knows it holds no keys; that item still covers a peer that lost its
+  keys and a legacy record without a bond.
+- [ ] **P2** **Selecting a device whose slot is retrying leaves the UI on
+  Connecting.** `plan_connect` returns no action when the selected address
+  is reserved by a slot that is not connected, expecting that attempt to
+  report. A background retry that cannot succeed, such as one for a peripheral
+  that lost its keys after pairing with another host, never reports, so
+  `Connecting...` stays on screen and the device cannot be paired again
+  without disconnecting everything first. Close by sending the selection to
+  that slot as an explicit connect, which may pair, with a coordinator host
+  test and a guard so the slot's `Disconnected` for the superseded retry does
+  not free the reservation.
 
 ## Needs Your Input
 

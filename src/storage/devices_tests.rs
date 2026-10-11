@@ -178,17 +178,20 @@ fn a_bond_is_stored_only_with_a_public_or_random_static_identity() {
         let mut paired = bonded(1, 0, "Keyboard");
         paired.bond.as_mut().unwrap().identity = address(kind, 1);
         let mut list = DeviceList::new();
+        list.mark_saved();
+        let mut buf = [0u8; MAX_RECORD_SIZE];
+        if !is_identity {
+            // Neither the keys nor the device: nothing for the next save.
+            assert_eq!(list.add(paired, &resolve), AddOutcome::BondRefused);
+            assert_eq!(list.len(), 0, "{kind:?}");
+            assert_eq!(list.pending_item(&mut buf), Ok(None));
+            continue;
+        }
         assert_eq!(list.add(paired, &resolve), AddOutcome::Added);
         let stored = list.iter_recent().next().unwrap().clone();
-        if is_identity {
-            assert_eq!(stored.address, address(kind, 1));
-            assert!(stored.bond.is_some());
-        } else {
-            // Kept without keys, at the address it connected from.
-            assert_eq!(stored.address, private_address(1, 0));
-            assert_eq!(stored.bond, None, "{kind:?}");
-        }
-        // Either way the next boot loads what the save wrote.
+        assert_eq!(stored.address, address(kind, 1));
+        assert!(stored.bond.is_some());
+        // The next boot loads what the save wrote.
         let mut reloaded = DeviceList::new();
         assert!(reloaded.load(&item(&list), &resolve), "{kind:?}");
         assert!(reloaded.is_writable());
@@ -200,12 +203,37 @@ fn a_bond_is_stored_only_with_a_public_or_random_static_identity() {
 fn a_refused_bond_leaves_the_stored_bond_of_the_same_peer() {
     let mut list = DeviceList::new();
     list.add(bonded(1, 0, "Keyboard"), &resolve);
+    list.mark_saved();
     let mut refused = bonded(1, 3, "Keyboard");
     refused.bond.as_mut().unwrap().identity = private_address(1, 3);
     refused.bond.as_mut().unwrap().ltk = [0x99; 16];
-    list.add(refused, &resolve);
-    assert_eq!(list.len(), 1);
+    assert_eq!(list.add(refused, &resolve), AddOutcome::BondRefused);
+    assert_eq!(addresses(&list), [identity(1)]);
     assert_eq!(list.bonds().next(), Some(bond(1, 0x77)));
+    let mut buf = [0u8; MAX_RECORD_SIZE];
+    assert_eq!(list.pending_item(&mut buf), Ok(None));
+}
+
+#[test]
+fn refused_pairings_from_rotating_addresses_never_evict_a_bonded_peer() {
+    let mut list = DeviceList::new();
+    for id in 0..MAX_PAIRED_DEVICES as u8 {
+        list.add(bonded(id, 0, "Keyboard"), &resolve);
+    }
+    let kept: std::vec::Vec<StoredBond> = list.bonds().collect();
+    list.mark_saved();
+    // A peer that names its private address as its identity pairs again
+    // after every rotation.
+    for rotation in 0..=u8::MAX {
+        let mut refused = device(private_address(0xEE, rotation), "Other");
+        let mut keys = bond(0xEE, 0x99);
+        keys.identity = private_address(0xEE, rotation);
+        refused.bond = Some(keys);
+        assert_eq!(list.add(refused, &resolve), AddOutcome::BondRefused);
+    }
+    assert_eq!(list.bonds().collect::<std::vec::Vec<_>>(), kept);
+    let mut buf = [0u8; MAX_RECORD_SIZE];
+    assert_eq!(list.pending_item(&mut buf), Ok(None));
 }
 
 #[test]

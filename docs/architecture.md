@@ -419,10 +419,10 @@ which can be too late for a firmware setup key.
     marks the slot connected and returns two actions in order: persist the
     device with its bond (`store.add`, then `save_to_flash`), then emit the
     connection summary. The UI shows Connected after the flash write finishes;
-    a failed write shows "Storage failed" while the link stays up. A bond whose
-    identity is not a public or random static address is not stored: the
-    device is saved without the new keys, `Bonder` drops them, and the UI
-    shows "Pairing not saved" ([write rules](data-model.md#write-rules)).
+    a failed write shows "Storage failed" while the link stays up. A pairing
+    whose identity is not a public or random static address is refused in
+    `Bonder::on_bonded`: no keys are kept, nothing is stored for the device,
+    and the UI shows "Pairing not saved" ([write rules](data-model.md#write-rules)).
 11. The worker enters the notification loop (`"HID notification loop started"`),
     described in [one input report](#one-input-report-from-ble-to-usb).
 

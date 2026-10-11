@@ -360,8 +360,8 @@ pull request #9 fails embedded Clippy today.
 - **Implemented:** nothing of this proposal. Today: the W1 frame under key
   `0x01`, fail-closed load, the legacy parser, three write attempts, and
   erase-then-write recovery, on `sequential-storage` 7.2.0 with `NoCache`.
-- **Software-verified:** nothing of this proposal. Today 8 framing, 3 record,
-  and 31 device-list host tests (`storage/devices_tests.rs` and
+- **Software-verified:** nothing of this proposal. Today 9 framing, 3 record,
+  and 32 device-list host tests (`storage/devices_tests.rs` and
   `devices_format_tests.rs`: valid, legacy,
   malformed, and unreadable loads, merge, identity types, eviction, Forget
   and reset candidates, codec) and the `commit` tests in `ble/management.rs`; nothing

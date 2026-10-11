@@ -204,12 +204,13 @@ Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
   paired device that claims an existing peer's identity address replaces that
   peer's bond in memory and, on its first successful connection, in flash.
 - A bond whose identity is not a public or random static address, the only
-  types the Core specification allows for an identity, is not stored:
-  `DeviceStore::add` keeps the device without keys, `execute_action` drops the
-  keys from `Bonder` and shows `Pairing not saved`, and the type is decoded
-  without the vendored `Address::address_type`, which panics on a reserved
-  one. Saving it would make the next boot refuse the whole store
-  ([data model](data-model.md#write-rules)).
+  types the Core specification allows for an identity, is not kept:
+  `on_bonded` keeps no keys for it, `execute_action` stores nothing for the
+  device and shows `Pairing not saved`, and the type is decoded without the
+  vendored `Address::address_type`, which panics on a reserved one. Saving
+  the bond would make the next boot refuse the whole store, and saving the
+  device without it would let a peer that rotates its address evict bonded
+  peers by pairing again ([data model](data-model.md#write-rules)).
 - `get_key` requires both the master ID and an identity match;
   `get_peripheral_key` matches identity only.
 - Every match of a bond against an address goes through `key_matches`, which

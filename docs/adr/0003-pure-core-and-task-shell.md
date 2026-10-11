@@ -193,8 +193,10 @@ Follow-up obligations:
   worker against fake endpoints, for example
   `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
   in-module tests such as those in `aggregate.rs` and `management.rs`,
-  [tests/integration.rs](../../tests/integration.rs), and
-  [tests/oled_font.rs](../../tests/oled_font.rs).
+  [tests/integration.rs](../../tests/integration.rs),
+  [tests/oled_font.rs](../../tests/oled_font.rs), and
+  [tests/vendor_portal.rs](../../tests/vendor_portal.rs), which compiles the
+  vendored crate's event portal on the host.
 - CI runs `cargo test --locked --lib --tests`, `cargo clippy --locked --lib
   --tests -- -D warnings`, and `cargo doc --locked --no-deps --lib` with
   warnings denied on `ubuntu-24.04` and `windows-2025`
@@ -205,10 +207,11 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 390 test attributes, all of them compiled by
+  finds 395 test attributes, all of them compiled by
   `cargo test --locked --lib --tests`: 384 unit tests, 3 integration tests,
-  and 3 glyph-table tests, which passed on 2026-10-11 (the
-  [bond eviction record](../testing.md#validation-record--2026-10-11-bonds-follow-the-saved-devices);
+  3 glyph-table tests, and 5 vendored-portal tests, which passed on
+  2026-10-11 (the
+  [portal record](../testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

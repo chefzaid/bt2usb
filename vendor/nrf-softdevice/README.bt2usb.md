@@ -10,7 +10,8 @@ changes are described at the end: a connection-parameter hook in
 that keeps peer addresses, passkeys, and notification bytes out of the logs by
 default, and fixes for panics a peer could reach in `src/ble/gap.rs` and
 `src/ble/connection.rs`. The connection-parameter hook and the panic fixes
-are marked `bt2usb patch:` in the source. The first GATT change adds
+are marked `bt2usb patch:` in the source, as is the event portal fix in
+`src/util/portal.rs` described last. The first GATT change adds
 `gatt_client::read_by_offset` and makes `read`
 delegate to it with offset zero. It exposes the SoftDevice's ATT Read Blob
 support through the existing response portal; the response handle and offset
@@ -123,6 +124,23 @@ arm and `can_bond` and `request_mitm_protection` in
 `save_sys_attrs` in `ConnectionState::on_disconnected` (feature
 `ble-gatt-server`).
 
+Event portal registrations (2026-10-11): `Portal::wait_once` and
+`wait_many` arm a drop guard that upstream let reset the portal to
+`State(None)` whenever the wait ended, completed or cancelled, without
+checking whose closure the portal held. A wait whose closure had already run
+and cleared the portal, such as a GATT wait that `on_disconnected` failed with
+`DISCONNECTED`, then erased any closure registered after it. When a peer
+drops a link and the SoftDevice gives the freed connection handle to another
+link in the same event drain, embassy-executor can poll the new link's task
+first: its MTU exchange registers on the handle's portal, and the old task's
+guard then erases it, so the new connect never sees its response, timeout, or
+disconnect and holds bt2usb's GAP procedure lock until reset. The guard now
+calls `Portal::clear_if_registered`, which resets the portal only while it
+holds the closure at the waiter's own address. Two live waiters never share
+an address, and a waiter's closure outlives its guard. bt2usb's
+`tests/vendor_portal.rs` compiles this file and `src/util/on_drop.rs` on the
+host and tests the guard; three of its five tests fail on the upstream code.
+
 Remove this patch only when the pinned upstream provides equivalent offset
 reads, timeout errors, bounded discovery, a way for the application to
 answer connection parameter requests, a way to keep peer addresses,
@@ -130,6 +148,7 @@ passkeys, and notification bytes out of debug and trace logs, no panic
 on an unexpected timeout source or a disconnect error, an ATT MTU that
 matches the one the SoftDevice uses, a connect that survives a refused
 MTU exchange, answers to a peer's Exchange MTU Request and system
-attribute access without the GATT server feature, and security handler
-calls made outside the connection state. Do not edit the Cargo checkout to deploy this change; the root Cargo
+attribute access without the GATT server feature, security handler
+calls made outside the connection state, and a portal whose ended wait
+clears only its own registration. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

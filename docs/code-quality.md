@@ -133,8 +133,11 @@ component).
 
 `cargo fmt` formats the bt2usb package only. `cargo fmt -v -- --check` lists
 its roots as `build.rs`, `src/lib.rs`, `src/main.rs`, `src/selftest.rs`,
-`src/sim.rs`, and `tests/integration.rs`; rustfmt follows each root's module
-tree, including the `#[path]` modules in `lib.rs`.
+`src/sim.rs`, `tests/integration.rs`, `tests/oled_font.rs`, and
+`tests/vendor_portal.rs`; rustfmt follows each root's module tree, including
+the `#[path]` modules in `lib.rs`. `tests/vendor_portal.rs` marks its two
+`#[path]` modules into `vendor/` with `#[rustfmt::skip]`, so rustfmt does not
+follow them.
 
 The vendored crate under `vendor/nrf-softdevice` is excluded. It is a path
 dependency, not a workspace member (`cargo metadata --no-deps` lists only
@@ -190,7 +193,7 @@ different code:
 
 | Configuration | Targets checked | Code only this configuration sees |
 | --- | --- | --- |
-| Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs` and `tests/oled_font.rs` | `#[cfg(test)]` modules and test files |
+| Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs`, `tests/oled_font.rs`, and `tests/vendor_portal.rs` | `#[cfg(test)]` modules and test files; the vendored portal source, which `tests/vendor_portal.rs` compiles with Clippy's groups and rustc's unused lints allowed on the two modules, since it keeps upstream's code |
 | Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, and GATT HID client modules |
 | Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs`, `src/sim_ble.rs`, and their UART output path |
 | Embedded with the opt-in (`--features embedded,log-sensitive-data`) | Library; `bt2usb`; `bt2usb-selftest` | No bt2usb code. It compiles the opt-in branches of three log lines in the vendored `nrf-softdevice` ([dependency logs](security.md#dependency-logs)); Clippy does not lint that crate, which is a path dependency rather than a workspace member |
@@ -414,7 +417,11 @@ patch changes most. One of the 162 is the patch's own
 like the crate's other event handlers. The patch's changes are recorded in the
 [vendor notes](../vendor/nrf-softdevice/README.bt2usb.md) and
 [ADR 0007](adr/0007-vendored-softdevice-patch.md). Review every change to the
-vendored sources with the same rules as application `unsafe`.
+vendored sources with the same rules as application `unsafe`. Since
+2026-10-11 `tests/vendor_portal.rs` also compiles `src/util/portal.rs`, with
+its `unsafe` closure transmute and calls, into a host test; the test file
+itself has no `unsafe`, and the module keeps upstream's blocks without
+`// SAFETY:` comments, under an `allow` for Clippy's restriction group.
 
 The crate keeps each connection's state in a static `UnsafeCell`, and
 `Connection::with_state` hands its closure a `&mut ConnectionState` with no
@@ -621,7 +628,7 @@ The remaining panic paths, and why each does not fire:
 | SoftDevice fault handler | `fault_handler`: an internal SoftDevice assertion, an application access to SoftDevice-protected memory or peripherals, an unknown fault | bt2usb touches TWIM0, USBD, GPIOTE, and RTC1 (the embassy-time driver) through embassy-nrf, plus GPIO and FICR, never POWER, CLOCK, or other SoftDevice-owned blocks directly, and runs the interrupts it uses at priority 2 |
 | Event fetch | `run_soc`, `run_ble`, `on_soc_evt` | With a valid buffer the SoftDevice returns only "no event", "BLE not enabled", or "data size", and the buffer covers the largest event. SoC event IDs come from the same S140 bindings |
 | Connection bookkeeping | Reference-count `checked_add` and `checked_sub`, `with_state_by_conn_handle`, `index_by_handle` (also behind the non-panicking `try_with_state_by_conn_handle`), `gatt_client::portal` and `hvx_portal` (which index by connection handle), `Connection::new`, `on_disconnected` | A link has a few `Connection` clones at most (the slot worker, the HID client, the LED forwarder) against a `u8` count. The SoftDevice sends one DISCONNECTED per handle and every other event for a handle after its CONNECTED, and the 20-entry state and portal tables cover the 2 links, whose handles S140 numbers from 0 |
-| Event portals | `Multiple tasks waiting on same portal`; each portal's `RefCell` and thread-mode mutex; `unreachable!()` in `wait_many` | `GAP_PROCEDURE` serializes scans and connects, the GATT procedures on one link run one after another, and notifications and the LED write wait on different portals. A slot worker drops its pending GATT waits before closing the link, so a dropped wait clears its portal while the handle is still this link's, never after the SoftDevice reuses it ([takeover](architecture.md#attempt-numbers-and-retry-takeover)). Every portal call runs in thread mode, and no waiter closure re-enters a portal |
+| Event portals | `Multiple tasks waiting on same portal`; each portal's `RefCell` and thread-mode mutex; `unreachable!()` in `wait_many` | `GAP_PROCEDURE` serializes scans and connects, the GATT procedures on one link run one after another, and notifications and the LED write wait on different portals. A wait that ends, completed or cancelled, clears its portal only while the portal still holds its own closure (a `bt2usb patch:`, `Portal::clear_if_registered`), so a wait that the peer's disconnect failed cannot erase one the other slot registered on the reused handle before the old task ran again; `tests/vendor_portal.rs` tests it on the host. A slot worker also drops its pending GATT waits before closing a link itself ([takeover](architecture.md#attempt-numbers-and-retry-takeover)). Every portal call runs in thread mode, and no waiter closure re-enters a portal |
 | Connect waiter | `unexpected event {}` in `central::connect_inner` | The connect portal receives only CONNECTED or the connect timeout |
 | Notification loop | `unwrap!(Connection::from_handle(..))` in `gatt_client::run` | The notification portal receives events only while the link has an index, DISCONNECTED clears it, and the loop returns on DISCONNECTED |
 | Security callbacks | The `SecurityHandler` defaults `display_passkey`, `enter_passkey`, and `recv_out_of_band`, and the passkey arm's `debug_assert_eq!` | `Bonder` declares no input, no output, and no out-of-band data, so pairing is Just Works and the SoftDevice never asks for a passkey or out-of-band data. `Bonder` implements `on_bonded` |
@@ -694,7 +701,9 @@ Coverage measures only the code that host tests compile:
   toward the file they sit in
 
 The test code in separate files is compiled with instrumentation but left out
-of the llvm-cov report: `tests/integration.rs`, the `src/*_tests.rs` files
+of the llvm-cov report: `tests/integration.rs`, `tests/oled_font.rs`,
+`tests/vendor_portal.rs` with the vendored portal source it compiles (the
+totals did not change when it was added on 2026-10-11), the `src/*_tests.rs` files
 that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
 `coordinator_attempt_tests.rs`, `scan_list_tests.rs`, `bond_table_tests.rs`,
 `reconnect_tests.rs`, `delivery_tests.rs`, `ui_logic_tests.rs`,

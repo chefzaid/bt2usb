@@ -665,12 +665,16 @@ numbers keep those late reports from undoing the newer decision.
 - To carry an attempt on through a takeover, the worker pins the security and
   discovery future, and then the notification loop, in a block that returns
   the result or the superseding command; the future is dropped when that
-  block ends, before the worker closes the link. A pending wait of the
-  vendored GATT client clears its per-handle portal when dropped
-  (`vendor/nrf-softdevice/src/util/portal.rs`), so dropping it after the
-  disconnect could erase a wait the other slot had registered on the reused
-  handle and leave that slot's connect waiting forever with the GAP procedure
-  lock held.
+  block ends, before the worker closes the link. The vendored GATT client
+  keeps one portal per connection handle
+  (`vendor/nrf-softdevice/src/util/portal.rs`), and a wait that outlived its
+  link could erase a wait the other slot had registered on the reused handle,
+  leaving that slot's connect waiting forever with the GAP procedure lock
+  held. Since 2026-10-11 a `bt2usb patch:` makes an ended wait clear the
+  portal only while it holds that wait's own closure, which also covers a
+  link the peer drops, where the failed wait's task runs again only after the
+  SoftDevice may have reused the handle; the drop order above stays as
+  defence in depth ([ADR 0007](adr/0007-vendored-softdevice-patch.md)).
 
 ### Peripheral Connection Parameter Requests
 

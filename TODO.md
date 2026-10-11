@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 47 | 0 | 0 |
+| [FIXME](#fixme) | 48 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **134** | **71** | **21** |
+| **Total** | **135** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -711,6 +711,31 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   `src/ble/coordinator_events.rs`, a child module of `coordinator.rs`, to
   keep it under 500 lines
   ([security](docs/security.md#pairing-and-authentication)).
+- [x] **P2** **A GATT wait that ends after a peer disconnect can clear the
+  next link's portal.** Found by the independent review of "A superseded
+  link's pending GATT wait could outlive it", which fixed only the links the
+  worker closes itself. The vendored portal's drop guard (`Portal::wait_once`
+  and `wait_many` in `vendor/nrf-softdevice/src/util/portal.rs`) ran whenever
+  a wait ended, completed or cancelled, and reset the portal without checking
+  whose closure it held. When the peer drops a link, `on_disconnected` fails
+  the link's pending GATT waits on its handle's portal, and the waiting task
+  runs again only at its next poll. If the SoftDevice gave the freed handle
+  to the other slot's link in the same event drain, and the executor polled
+  that slot first, its MTU exchange registered on the portal and the late
+  guard of the old wait (a discovery read, or an LED write that the
+  notification loop's select dropped) erased it: that slot's
+  `connect_with_security` never returned and held the GAP procedure lock
+  until the bridge was reset. Accept when an ended wait clears the portal only
+  while it holds that wait's own closure, whoever closed the link, and host
+  tests show it. Fixed: a `bt2usb patch:` makes the guard compare the stored
+  closure's address with its own (`Portal::clear_if_registered`), and
+  `tests/vendor_portal.rs` compiles the vendored portal on the host with five
+  tests, three of which fail on the unpatched source. The drop-before-close
+  order in `src/ble/slot_link.rs` stays as defence in depth. The same review
+  found the TODO wording on evicted keys and on which keys gate a retry, and
+  the coverage rows that gave the region figure as the line figure, all
+  corrected in "Keys held in RAM and saved records are evicted separately"
+  ([validation record](docs/testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)).
 
 ## Needs Your Input
 

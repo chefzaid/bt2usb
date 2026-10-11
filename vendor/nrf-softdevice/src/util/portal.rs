@@ -88,9 +88,8 @@ impl<T> Portal<T> {
 
         // If the future gets cancelled from the outside, this gets dropped,
         // and resets the state of the portal to None
-        let _bomb = OnDrop::new(|| {
-            self.state.lock(|state| *(state.borrow_mut()) = State(None));
-        });
+        let own = Self::closure_address(core::ptr::addr_of!(call_func));
+        let _bomb = OnDrop::new(move || self.clear_if_registered(own));
 
         self.set_function_pointer(&mut call_func);
 
@@ -144,15 +143,39 @@ impl<T> Portal<T> {
 
         // If the future gets cancelled from the outside, this gets dropped,
         // and resets the state of the portal to None
-        let _bomb = OnDrop::new(|| {
-            self.state.lock(|mut state| *(state.borrow_mut()) = State(None));
-        });
+        let own = Self::closure_address(core::ptr::addr_of!(call_func));
+        let _bomb = OnDrop::new(move || self.clear_if_registered(own));
 
         self.set_function_pointer(&mut call_func);
 
         signal.wait().await;
 
         unsafe { result.assume_init() }
+    }
+
+    /// bt2usb patch: the address of a waiter's closure, as the portal stores
+    /// it, so the waiter can tell whether the portal still holds its closure.
+    fn closure_address<C: ?Sized>(closure: *const C) -> usize {
+        closure.cast::<()>() as usize
+    }
+
+    /// bt2usb patch: reset the portal to `State(None)` only while it still
+    /// holds the closure at `own`. Upstream's drop guard cleared the portal
+    /// whenever a wait ended, completed or cancelled, without checking whose
+    /// closure it held. A wait whose closure had already run and cleared the
+    /// portal, such as a GATT wait failed by `DISCONNECTED`, then erased any
+    /// closure another task registered in between: after the SoftDevice gives
+    /// the freed connection handle to a new link, that is the new link's MTU
+    /// exchange or GATT wait, which then never sees its response, timeout or
+    /// disconnect. Two live waiters never share an address, and the closure
+    /// outlives the guard, so the address identifies this wait's registration.
+    fn clear_if_registered(&self, own: usize) {
+        self.state.lock(|state| {
+            let mut state = state.borrow_mut();
+            if state.0.is_some_and(|ptr| Self::closure_address(ptr.as_ptr()) == own) {
+                *state = State(None);
+            }
+        });
     }
 
     /// Utility function for setting the current waiting function pointer

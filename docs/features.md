@@ -923,11 +923,13 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 390 `#[test]` functions, counted with
+- The source contains 395 `#[test]` functions, counted with
   `grep -rh '#\[test\]' src tests | wc -l`: 384 unit tests, the 3
-  integration tests in [`tests/integration.rs`](../tests/integration.rs), and
+  integration tests in [`tests/integration.rs`](../tests/integration.rs),
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
-  all of which run with `mask test`.
+  and the 5 tests of the vendored SoftDevice crate's event portal in
+  [`tests/vendor_portal.rs`](../tests/vendor_portal.rs), all of which run
+  with `mask test`.
   Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
   `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)), and CI
   fails when host line coverage drops below 97%

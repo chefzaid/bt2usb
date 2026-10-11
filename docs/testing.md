@@ -92,7 +92,8 @@ the coverage percentage measures only the instrumented selection. Report the
 commit, toolchain, command, and excluded modules with coverage results. Avoid
 putting an undated coverage percentage or test count in the README.
 
-`--lib --tests` selects the library's unit tests and `tests/integration.rs`.
+`--lib --tests` selects the library's unit tests and the three files in
+`tests/`: `integration.rs`, `oled_font.rs`, and `vendor_portal.rs`.
 The three binaries are skipped because their `embedded` or `sim` feature is not
 enabled. Doctests are not selected; the library's fenced doc blocks are all
 `text` blocks, which rustdoc would not run anyway. Host tests build for the native
@@ -147,10 +148,11 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that keeps the bonder's keys in step with the saved
-devices. The tree holds 390 `#[test]` functions: 384 in
-files compiled into the host library, 3 in `tests/integration.rs`, and 3 in
-`tests/oled_font.rs`, and every one of them runs under
+2026-10-11, in the commit that makes the vendored event portal clear only its
+own wait. The tree holds 395 `#[test]` functions: 384 in
+files compiled into the host library, 3 in `tests/integration.rs`, 3 in
+`tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
+them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
 [2026-10-09 validation record](#validation-record--2026-10-09) ran 260 unit
@@ -230,6 +232,7 @@ protect.
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
 | [tests/integration.rs](../tests/integration.rs) | 3 | Keyboard (report ID 1), mouse (ID 2), and consumer (ID 3) notifications classified and serialized through the crate's public `bt2usb::hid` API, as an external crate sees it. |
+| [tests/vendor_portal.rs](../tests/vendor_portal.rs) | 5 | The vendored nrf-softdevice event portal, compiled from `vendor/nrf-softdevice/src/util/portal.rs` and `util/on_drop.rs` on a thread named `main` (the firmware's thread-mode mutex accepts no other on the host): a wait that a disconnect completed, or that is dropped afterwards, leaves a wait registered after it in place for both `wait_many` and `wait_once`, so the next link on a reused connection handle still gets its response; a cancelled wait clears its own registration; and a `wait_many` closure that skips an event stays registered. Three of the five fail on the unpatched upstream portal ([ADR 0007](adr/0007-vendored-softdevice-patch.md)). It uses `embassy-sync` 0.8, renamed `portal-embassy-sync`, and a std `critical-section` as dev-dependencies. |
 | [tests/oled_font.rs](../tests/oled_font.rs) | 3 | The glyph table the Renode panel model reads text with, [oled-font-6x10.txt](../renode/oled-font-6x10.txt), equals `FONT_6X10` as embedded-graphics draws it (rewrite it with `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font`); every printable ASCII glyph is distinct, so text reads back unambiguously; and the font's 6×10 cell, zero spacing, and baseline 7 are what `ui::layout` and the text reader assume, and `display.rs` draws in no other font. It uses `embedded-graphics` as a dev-dependency. |
 
 ### Tests That Do Not Run
@@ -890,6 +893,36 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Portal Clears Only Its Own Wait
+
+This record covers the commit that fixes what the independent review of
+"Drop a superseded link's GATT waits before closing it" upheld (FIXME "A GATT
+wait that ends after a peer disconnect can clear the next link's portal" in
+[TODO.md](../TODO.md#fixme)). A `bt2usb patch:` in the vendored
+`util/portal.rs` makes the drop guard of `Portal::wait_once` and `wait_many`
+clear the portal only while it still holds that wait's own closure, and the
+new `tests/vendor_portal.rs` compiles the vendored portal on the host. The
+review's other findings, two TODO sentences and the coverage rows that gave
+the region figure as the line figure, were corrected in the commit before
+this one. The checks ran locally on Linux in a container, on the working tree
+just before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 384 unit tests, 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Portal tests against the upstream portal | `tests/vendor_portal.rs` with `util/portal.rs` reset to the commit before | 3 of 5 failed, as expected: the three that register a wait after an earlier one ended; the cancellation and keep-waiting tests passed |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.79% of lines, 98.79% of regions, 99.06% of functions, unchanged: neither the test file nor the vendored portal it compiles is in the report |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed; `tests/vendor_portal.rs` is a new root, and its modules into `vendor/` are skipped |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 119,504 bytes (+188 since `b6fdc8f`), `.rodata` 11,660 (−16), `.data` 1,640, `.bss` 24,628 (+32: `ble_slot_task::POOL` grows from 5,728 to 5,760 bytes, measured with `llvm-nm -S`, because each pending wait's guard now keeps its closure's address), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 118,524 bytes |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 51 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record; the simulation does not compile the vendored crate |
+| Firmware portal behaviour | Review | Built and reviewed, not tested on the target: the host tests run the vendored source with embassy-sync's host thread-mode mutex, while the firmware runs it on the SoftDevice event path; the event order that triggered the hang (a peer's `DISCONNECTED` and the other slot's `CONNECTED` on the freed handle in one event drain) was read from the code, not reproduced |
+| Hosted CI | GitHub Actions | Push run 38107545021 (`b6fdc8f`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
 
 ## Validation Record — 2026-10-11, Bonds Follow The Saved Devices
 

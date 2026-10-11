@@ -7,7 +7,8 @@
   ([logging and privacy](../security.md#logging-and-privacy)), and on
   2026-10-10 by [ADR 0025](0025-panic-lints-and-inventory.md), which removes
   four panics a peer could reach in `events.rs`, `gap.rs`, and
-  `connection.rs`
+  `connection.rs`, and on 2026-10-11 by a fix to the event portal's drop
+  guard in `util/portal.rs`, the first patch with host tests
 - Date: 2026-09-28
 
 ## Context
@@ -97,6 +98,16 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
   connection (bt2usb's `Bonder` calls `Connection::peer_address`) never takes
   a second `&mut ConnectionState` while the first is live (`gap::on_evt`,
   `Connection::encrypt`, and `Connection::request_pairing`).
+- Since 2026-10-11, let a portal wait that ends, completed or cancelled,
+  clear the portal only while the portal still holds that wait's own closure
+  (`Portal::clear_if_registered` in `util/portal.rs`). Upstream's drop guard
+  reset the portal unconditionally, so a GATT wait that a peer's disconnect
+  had failed, and whose task ran again only after the SoftDevice gave the
+  freed connection handle to the other slot's link, erased that link's MTU
+  exchange; its connect then never returned and held the GAP procedure lock
+  until reset ([architecture](../architecture.md#attempt-numbers-and-retry-takeover)).
+  `tests/vendor_portal.rs` compiles the vendored portal source on the host
+  and tests the guard.
 - Assemble and bound long values in bt2usb, not in the vendored crate.
 - Since 2026-10-10, print a peer address, a displayed passkey, or notification
   bytes only with the vendored crate's `log-sensitive-data` feature, which
@@ -109,8 +120,9 @@ application that issued `sd_ble_gattc_read` itself would never see the reply.
 - Remove the patch only when the pinned upstream provides equivalent offset
   reads, timeout errors, bounded discovery, the panic fixes above, the
   negotiated ATT MTU, a connect that survives a refused MTU exchange,
-  answers to the GATT server events a central-only build still receives, and
-  security handler calls made outside the connection state.
+  answers to the GATT server events a central-only build still receives,
+  security handler calls made outside the connection state, and a portal
+  whose ended wait clears only its own registration.
   Never
   deploy a change by editing Cargo's git checkout.
 
@@ -165,8 +177,10 @@ Positive:
 
 Negative:
 
-- bt2usb carries a copy of an upstream crate. It keeps upstream formatting, is
-  outside `cargo fmt --package bt2usb`, and has no host tests.
+- bt2usb carries a copy of an upstream crate. It keeps upstream formatting and
+  is outside `cargo fmt --package bt2usb` (the portal test pulls its two
+  modules in under `#[rustfmt::skip]`). Only the event portal has host tests,
+  because it is the one module that builds without the SoftDevice.
 - The vendored crate depends on `heapless` 0.9 and `embassy-sync` 0.8, while
   bt2usb itself uses 0.8 and 0.7. `embassy-usb` pulls in the same newer
   versions, so `Cargo.lock` carries two versions of each either way; the patch
@@ -204,6 +218,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Sensitive log gate | `#[cfg(feature = "log-sensitive-data")]` pairs on the connect line in `vendor/nrf-softdevice/src/ble/central.rs`, the passkey-display line in `gap.rs`, and the notification line in `gatt_client.rs`; the root feature in [Cargo.toml](../../Cargo.toml); a Clippy run with the feature in the CI "Embedded build & clippy" job |
 | ATT MTU | `ATT_MTU = 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
 | Panic fixes ([ADR 0025](0025-panic-lints-and-inventory.md)) | `evt-max-size-256` in [Cargo.toml](../../Cargo.toml) and the event-size `const` assertion in [sd_setup.rs](../../src/sd_setup.rs); the timeout arm of `gap::on_evt`; `ConnectionState::disconnect_with_reason` and `Connection::drop` in `connection.rs`; the waiters in `discover_service`, `discover_characteristics`, `discover_descriptors`, and `att_mtu_exchange`. Each source change is marked `bt2usb patch:` |
+| Event portal guard (since 2026-10-11) | `Portal::closure_address` and `Portal::clear_if_registered`, called from the drop guards of `wait_once` and `wait_many`, in `vendor/nrf-softdevice/src/util/portal.rs`, marked `bt2usb patch:`; five host tests in [tests/vendor_portal.rs](../../tests/vendor_portal.rs), which compiles that file and `util/on_drop.rs` with `embassy-sync` 0.8 and a std `critical-section` as dev-dependencies |
 | Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
 
 ### Verification Status
@@ -215,8 +230,11 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   passed on GitHub-hosted runners in push runs 36441995385 (`8a04b25`,
   2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09) and scheduled run
   37338711407 (2026-10-05). The CI format check covers only the application
-  package, and no test exercises the patched functions; they were reviewed,
-  not tested. The log gate was checked on 2026-10-10 by listing the defmt
+  package. Until 2026-10-11 no test exercised a patched function; the
+  GATT client, GAP, and connection changes are still reviewed, not tested.
+  The event portal guard has five host tests in `tests/vendor_portal.rs`,
+  three of which fail on the unpatched source
+  ([validation record](../testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)). The log gate was checked on 2026-10-10 by listing the defmt
   format strings of `debug`, `trace`, and `info` builds with and without the
   feature ([logging and privacy](../security.md#logging-and-privacy)). The
   event-size check was tried against a 131-byte buffer, which fails the build,

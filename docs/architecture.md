@@ -66,8 +66,8 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [sd_setup.rs](../src/sd_setup.rs) | Board shell | Shared SoftDevice setup and USB power events |
 | [power.rs](../src/power.rs) | Board shell | Activity tracking and power state over `embassy-time` |
 | [power_logic.rs](../src/power_logic.rs) | Pure core | Pure power/display policy |
-| [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement, the MPU stack guard (programming and read-back), and the HardFault and MemManage handlers that report a stack overflow |
-| [stack_logic.rs](../src/stack_logic.rs) | Pure core | Where the stack guard goes (`StackGuard::place`) and the MPU register values for it ([ADR 0026](adr/0026-mpu-stack-guard.md)) |
+| [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement, the MPU stack guard (programming and read-back), and the HardFault and MemManage handlers that report a stack overflow and keep the report in `.uninit` RAM for the next boot |
+| [stack_logic.rs](../src/stack_logic.rs) | Pure core | Where the stack guard goes (`StackGuard::place`), the MPU register values for it, and the encoding of the overflow report kept across a reset (`OverflowRecord`) ([ADR 0026](adr/0026-mpu-stack-guard.md)) |
 | [ble/mod.rs](../src/ble/mod.rs) | Board shell | `BleCommand`, `BleEvent`, and `DiscoveredDevice` over the SoftDevice `Address`, and the GAP procedure lock |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
 | [ble/bond_table.rs](../src/ble/bond_table.rs) | Pure core | The bonding keys held in RAM, each saved or not: a new pairing never displaces a saved device's keys, and one that is not saved is discarded |
@@ -275,7 +275,8 @@ appear in the code and reach the host through RTT; see
    [diagnostics.rs](../src/diagnostics.rs) (version, source commit, profile,
    `DEFMT_LOG` filter, which `build.rs` supplies), turns on the MPU stack guard
    and logs `"stack guard: {} bytes at {}..{}"` (or `"stack guard off: {}"`;
-   [ADR 0026](adr/0026-mpu-stack-guard.md)), reads and clears
+   [ADR 0026](adr/0026-mpu-stack-guard.md)), logs and clears an overflow the
+   previous boot stored (`"previous boot: stack overflow: ..."`), reads and clears
    `POWER.RESETREAS` and logs the decoded `"reset reason: {}"` while the POWER
    peripheral is still the application's, then calls `embassy_nrf::init` with
    the GPIOTE and time-driver interrupt priorities set to P2.
@@ -1329,7 +1330,9 @@ stack, and the HardFault handler in [stack.rs](../src/stack.rs), the only
 `"stack overflow: stack pointer {}, guard {}..{}, PC not stacked"` (on UART0
 in the simulation) and spins. Every other HardFault spins there without a
 line, as cortex-m-rt's default handler did
-([ADR 0026](adr/0026-mpu-stack-guard.md)). A `probe-rs run` session, which is
+([ADR 0026](adr/0026-mpu-stack-guard.md)). The handler stores the report in
+`.uninit` RAM before it logs, and the next boot after a reset that keeps RAM
+logs it as `previous boot: stack overflow: ...`. A `probe-rs run` session, which is
 what `mask run` starts, halts the core on entry to the handler before it logs
 and prints `Firmware exited unexpectedly: Exception` instead; `mask selftest`
 turns that catch off ([the runbook](operations.md#the-stack-overflows)).

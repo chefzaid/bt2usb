@@ -361,9 +361,11 @@ and one `global_asm!` block. The `unsafe` lines were counted with
 `grep -rnw unsafe src build.rs tests`, which matches these twelve lines and
 the comment in `lib.rs` that states the rule; `build.rs`, `tests/`, and the
 Python and shell scripts contain no `unsafe`. There are no `unsafe impl`,
-`static mut`, `transmute`, `MaybeUninit`, `#[no_mangle]`, `#[link_section]`,
-or `asm!` in `src/` (`grep -rn` for each returns nothing); the one
-`global_asm!`, in `stack.rs`, is row 13. cortex-m-rt's `#[exception]`
+`static mut`, `transmute`, `MaybeUninit`, `#[no_mangle]`, or `asm!` in `src/`
+(`grep -rn` for each returns nothing); the one `global_asm!`, in `stack.rs`,
+is row 13, and the one `#[link_section]`, which puts `stack.rs`'s
+`OVERFLOW_RECORD` in `.uninit`, needs no `unsafe` (see the notes below).
+cortex-m-rt's `#[exception]`
 attribute on `HardFault` generates the exported symbol the vector table
 names, so `src/` itself declares none.
 
@@ -426,6 +428,13 @@ the simulation never calls `high_water`, because it has no painted stack.
   that writes the MPU: the vendored crate, Embassy, and the SoftDevice do not
   ([ADR 0026](adr/0026-mpu-stack-guard.md)), and the self-test's
   `stack guard` stage fails if anything changed the registers after boot.
+- **`OVERFLOW_RECORD`.** The fault handler stores the overflow report in six
+  `AtomicU32`s placed in `.uninit` with `#[link_section]`, the placement
+  defmt-rtt uses for its buffer. The section is `NOLOAD`, so the `0`
+  initializer is never written and the words hold whatever RAM holds at boot.
+  Every bit pattern is a valid `AtomicU32`, the atomics stop the compiler
+  from assuming the initializer, and `OverflowRecord::decode` rejects any
+  words without the record's tag and check word, so no `unsafe` is needed.
 - **Rows 6, 7, and 13.** They run after an overflow, on the guard's bytes with
   the MPU off. The handler's frame must fit in the guard; if the stack pointer
   went deeper than the guard can absorb, the frame lands in the statics below
@@ -720,7 +729,7 @@ Coverage measures only the code that host tests compile:
   parser, bond table, connection-parameter bounds, coordinator, scan result
   list, reconnect table, long-read assembler, management logic, and PnP ID
   parser, `src/power_logic.rs`, `src/diagnostics.rs`, the stack guard's placement and
-  register values in `src/stack_logic.rs`, and the UI display, input, and
+  register values and the overflow record's encoding in `src/stack_logic.rs`, and the UI display, input, and
   state-machine logic
 - `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
   `lib.rs` includes only under `cfg(test)`

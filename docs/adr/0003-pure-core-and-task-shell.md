@@ -65,7 +65,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [ui_logic.rs](../../src/ui/ui_logic.rs), [controller.rs](../../src/ui/controller.rs), [input_logic.rs](../../src/ui/input_logic.rs), [layout.rs](../../src/ui/layout.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions; the UI loop's decisions (the command each button sends, management request tracking and its deadline); list windowing; each screen's text and where it sits; display retry policy | UI loop in [main.rs](../../src/main.rs) and [sim.rs](../../src/sim.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
 | [diagnostics.rs](../../src/diagnostics.rs) | The build identity the boot line reports, which causes a `POWER.RESETREAS` value names, the event counters, and when the counts are logged | `main` in [main.rs](../../src/main.rs), which reads and clears the register and logs the counters; the shells that bump them; `selftest.rs` and `sim.rs`, which log the identity |
-| [stack_logic.rs](../../src/stack_logic.rs) | Where the stack guard goes, the MPU register values that make it a no-access region, whether a read-back matches them, and whether a stack pointer has overflowed ([ADR 0026](0026-mpu-stack-guard.md)) | [stack.rs](../../src/stack.rs), which writes and reads the MPU and handles the fault, called from `main.rs`, `selftest.rs`, and `sim.rs` |
+| [stack_logic.rs](../../src/stack_logic.rs) | Where the stack guard goes, the MPU register values that make it a no-access region, whether a read-back matches them, whether a stack pointer has overflowed, and how the overflow report kept across a reset is encoded and checked ([ADR 0026](0026-mpu-stack-guard.md)) | [stack.rs](../../src/stack.rs), which writes and reads the MPU and handles the fault, called from `main.rs`, `selftest.rs`, and `sim.rs` |
 
 Rules for the core:
 
@@ -214,11 +214,11 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 421 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 410 unit tests, 3 integration tests,
+  finds 426 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 415 unit tests, 3 integration tests,
   3 glyph-table tests, and 5 vendored-portal tests, which passed on
   2026-10-11 (the
-  [MPU stack guard record](../testing.md#validation-record--2026-10-11-mpu-stack-guard);
+  [overflow record kept across a reset](../testing.md#validation-record--2026-10-11-overflow-report-kept-across-a-reset);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

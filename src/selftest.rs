@@ -131,6 +131,7 @@ async fn main(spawner: Spawner) {
     );
     // As the firmware does; stage 7 checks that nothing changed it since.
     let guard = stack::enable_guard_logged();
+    stack::log_previous_overflow();
 
     // Same interrupt priorities as the firmware: the SoftDevice reserves 0, 1, 4.
     let mut nrf_config = embassy_nrf::config::Config::default();

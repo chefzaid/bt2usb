@@ -579,7 +579,9 @@ for adding or reviewing `unsafe` are in the same
 Since 2026-10-11 a stack overflow, whatever drives it, faults in the MPU guard
 at the bottom of the stack before it can overwrite the statics below, which
 hold every task's state, the bonds and saved devices among it; the bridge logs the
-overflow and stops ([ADR 0026](adr/0026-mpu-stack-guard.md)). A frame larger
+overflow and stops ([ADR 0026](adr/0026-mpu-stack-guard.md)). The report it
+keeps in RAM for the next boot holds only the stack pointer, the guard's
+bounds, and the PC, never input or key material. A frame larger
 than the guard plus the stack left above it can still skip over it; every
 firmware frame is under the 4 KiB guard (the largest, the self-test's main
 task, is 3,412 bytes; the bridge's is 2,668), and no parser recurses.

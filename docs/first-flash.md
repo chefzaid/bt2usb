@@ -142,7 +142,13 @@ USB enumeration (up to 10 s), each button prompt (up to 20 s), and the BLE scan
       SELECT when it offers the overflow. The log ends with
       `stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC not stacked`
       and probe-rs stays attached to the stopped core; press Ctrl-C, then
-      reset the board. Recorded line: ______
+      press the board's reset button. Recorded line: ______
+- [ ] Optional, after the deliberate overflow: the stored report. Run
+      `mask selftest` once more. Right after its `stack guard` line it logs
+      `previous boot: stack overflow: ...` with the values of the overflow
+      line, read from RAM the reset kept. A missing line is worth reporting,
+      though the flash download may also have reused that RAM (not yet seen
+      on a board). Recorded line: ______
 
 ## 3. Real firmware
 

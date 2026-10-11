@@ -128,6 +128,7 @@ NFC-pin setting ([dependency logs](security.md#dependency-logs)); a local
 ```text
 bt2usb firmware starting: version <version>, commit <commit>, <profile> build, DEFMT_LOG=<filter>
 stack guard: 4096 bytes at 0x<base>..0x<top>
+previous boot: stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC not stacked
 reset reason: <causes>
 softdevice RAM: N bytes
 You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to X
@@ -152,6 +153,11 @@ UI and isolated OLED tasks started
   addresses move with the size of the statics (`0x2000d000..0x2000e000` in the
   current release build). `stack guard off: <reason>` in its place means the
   bridge runs without one; report it.
+- `previous boot: stack overflow: ...` appears only on the first boot after
+  an overflow, when the reset kept RAM (the reset button, a lock-up, a soft
+  reset; not a power cycle): the fault handler stored the report before it
+  tried to log, and this boot logs and clears it. See
+  [the stack overflow incident](#the-stack-overflows).
 - `reset reason` decodes the nRF52840's `POWER.RESETREAS` register, which
   `main` reads and clears before the SoftDevice takes the POWER peripheral, so
   it names only the resets since the previous boot; see
@@ -287,6 +293,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `stack guard: {=u32} bytes at {=u32:#010x}..{=u32:#010x}` | The MPU stack guard is on: its size and address range | None; see [memory checks](#stack-and-memory-checks) |
 | warn | `stack guard off: {}` (`BadSize`, `StackInUse`, or `NoMpu`) | The guard could not be turned on, so an overflow would corrupt statics silently | Report it with the boot lines; `BadSize` means `STACK_GUARD_BYTES` is not a power of two of at least 32 |
 | error | `stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The stack ran into the guard and the core stopped; nothing below the guard was overwritten | [Stack overflow incident](#the-stack-overflows) |
+| warn | `previous boot: stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The boot before this one ended in a stack overflow; the values are the ones the fault handler stored. Logged once, after a reset that kept RAM | [Stack overflow incident](#the-stack-overflows); expected once after the self-test's deliberate overflow |
 | info | `reset reason: {}` | The causes of the last reset, joined with ` + `, and any undefined register bits | See [Reset Reasons](#reset-reasons) |
 | info | `softdevice RAM: {:?} bytes` (vendor) | RAM the SoftDevice configuration needs | Record it; must be at most 24576 |
 | warn | `You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to {:x}` (vendor) | The 24 KiB reservation exceeds the requirement | None required; see [memory checks](#stack-and-memory-checks) |
@@ -524,9 +531,12 @@ Under `mask run`, the log instead ends in probe-rs's
 `probe-rs run` halts the core on entry to every HardFault by default, before
 the handler logs, and the backtrace it prints after that line starts from a
 frame the overflow could not stack, so its frames are not trustworthy. An
-overflow that hits while a log line is being written leaves no line at all:
-the board resets, and the next boot logs `reset reason: CPU lock-up`
-([ADR 0026](adr/0026-mpu-stack-guard.md)).
+overflow that hits while a log line is being written cannot log at once: the
+board resets, and the next boot logs
+`previous boot: stack overflow: ...` and `reset reason: CPU lock-up`. With no
+probe attached the board just stops; after the reset button, the first boot
+logs `previous boot: stack overflow: ...`. Unplugging the board instead loses
+that record ([ADR 0026](adr/0026-mpu-stack-guard.md)).
 
 **Likely causes:** the call chain of the tasks, the interrupt handlers, and the
 SoftDevice's handlers, which all share one stack, needed more than the stack
@@ -547,7 +557,8 @@ off, as `mask selftest` already runs:
 A panic in that session still logs its message, but probe-rs prints no
 backtrace and stays attached until Ctrl-C.
 
-**Fix:** reset or power-cycle the board. File a defect with the log from boot,
+**Fix:** reset the board with its reset button, which keeps the record for
+the next boot's `previous boot` line, or power-cycle it. File a defect with the log from boot,
 including the `stack guard` and every `stack high-water` line: the fix is to
 shrink the deepest call chain or to give the stack more room, never to remove
 the guard. A deliberate overflow from the self-test (stage 8 in

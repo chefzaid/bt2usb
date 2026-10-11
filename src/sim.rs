@@ -232,6 +232,11 @@ async fn main(spawner: Spawner) {
         ),
         Err(err) => slog!(console, "stack guard off: {:?}", err),
     }
+    if let Some(record) = stack::take_previous_overflow() {
+        let mut line = heapless::String::<128>::new();
+        stack::describe_overflow(&record, &mut line);
+        slog!(console, "previous boot: {}", line);
+    }
 
     spawner.spawn(unwrap!(button_task(p.P0_11.into(), ButtonEvent::Up)));
     spawner.spawn(unwrap!(button_task(p.P0_12.into(), ButtonEvent::Down)));

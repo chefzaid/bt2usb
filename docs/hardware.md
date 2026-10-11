@@ -404,10 +404,15 @@ The memory decisions are recorded in
 - The bottom of the stack is a no-access MPU region of `STACK_GUARD_BYTES`
   (4 KiB), at the first 4 KiB boundary at or above the end of the statics
   (`_stack_end`), so an overflow faults before it overwrites `.bss`. In the
-  current release bridge the statics end at `0x2000CD8C`, the guard is
-  `0x2000D000–0x2000E000`, and the stack above it is 200 KiB; the 628 bytes
+  current release bridge the statics end at `0x2000CDA4`, the guard is
+  `0x2000D000–0x2000E000`, and the stack above it is 200 KiB; the 604 bytes
   between are never used. The high-water line counts only the stack above the
   guard ([ADR 0026](adr/0026-mpu-stack-guard.md)).
+- `.uninit` (1,048 bytes in the release bridge), the last section before
+  `_stack_end`, is neither zeroed nor painted at reset. It holds defmt-rtt's
+  1 KiB log buffer and the 24-byte record of the last stack overflow, which
+  the next boot logs as `previous boot: stack overflow: ...` when the reset
+  kept RAM.
 
 The simulation build has no SoftDevice and owns the whole device:
 

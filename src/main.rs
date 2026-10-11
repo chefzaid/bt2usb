@@ -188,6 +188,7 @@ async fn main(spawner: Spawner) {
     // Before anything deepens the stack: from here an overflow faults and is
     // reported instead of overwriting the statics below the stack.
     stack::enable_guard_logged();
+    stack::log_previous_overflow();
     // Read and clear the reset causes while the POWER peripheral is still
     // ours: once enabled, the SoftDevice restricts it.
     let resets = embassy_nrf::pac::POWER.resetreas();

@@ -67,6 +67,7 @@ measurement that supports each result in Notes.
 | `stack guard: 4096 bytes at ...` and `[PASS] stack guard` | | Guard range: |
 | `==== self-test done: P passed, F failed, S skipped ====` shows 0 failed | | P = , F = , S = |
 | Optional deliberate overflow ends in `stack overflow: ... PC not stacked` | | Line: |
+| Optional: after the reset button, the next self-test run logs `previous boot: stack overflow: ...` | | Line: |
 
 ## [3. Real firmware](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md#3-real-firmware)
 

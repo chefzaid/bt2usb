@@ -107,6 +107,20 @@ taken with the stack pointer in or at it as a stack overflow.**
   overflow always sets it, because the frame could not be stacked. Then, as the default handler did, the core
   spins until it is reset. Any other HardFault, including the one panic-probe
   raises after printing a panic, also spins as before.
+- **Keep the report across a reset** (added the same day, after the logging
+  failure under Consequences was found). Before it logs, the handler stores
+  the report as an `OverflowRecord` ([stack_logic.rs](../../src/stack_logic.rs)):
+  six words, a tag that also says whether a PC is present, the stack
+  pointer, the guard's bounds, the PC, and a check word, in a static in
+  `.uninit`, the RAM the reset handler neither zeroes nor paints. Every image
+  calls `take_previous_overflow` at boot, right after the guard line, which
+  clears the record and, if it decodes, logs
+  `previous boot: stack overflow: stack pointer ..., guard ..., PC ...` at
+  warning level. The nRF52 product specifications say RAM is never reset,
+  though some reset sources can corrupt it, so the record survives a lock-up,
+  a soft reset, and the reset button; the check word rejects the RAM's
+  power-on contents and a corrupted record, and a power cycle loses it. The
+  words are atomics, so storing and reading them needs no `unsafe`.
 - **MemManage.** A stackless MemManage handler, written in assembly in
   `stack.rs`, turns the MPU off and calls the same HardFault handler with the
   handler's stack pointer as the frame. The firmware never enables MemManage,
@@ -120,7 +134,9 @@ taken with the stack pointer in or at it as a stack overflow.**
   since reading the guard faults while it is on, and reports the stack above
   the guard as the total.
 - **Evidence.** The Renode scenario moves the stack pointer 256 bytes into the
-  guard while the core sleeps and expects the overflow line and a halted core.
+  guard while the core sleeps and expects the overflow line and a halted core,
+  then resets the machine, which keeps RAM, and expects the next boot's
+  `previous boot: stack overflow` line with the same guard.
   The self-test reads the MPU registers back after its SoftDevice, USB, and BLE
   stages (`[PASS] stack guard: ...`), and, if SELECT is held within 10 s at the
   end, recurses until the guard faults so a tester can see the board's report.
@@ -181,6 +197,9 @@ Positive:
   the SoftDevice has run, and can show a real overflow on demand.
 - `stack high-water: X of Y bytes` reports the usable stack (above the guard)
   as Y.
+- An overflow on a board with no probe attached, or one whose log line was
+  lost, is still reported: the first boot after a reset that keeps RAM logs
+  `previous boot: stack overflow: ...`.
 
 Negative:
 
@@ -198,13 +217,16 @@ Negative:
   the statics just below the guard, after the fault was already taken.
 - The bridge stops at an overflow and stays stopped until reset, like any
   other fault, until a watchdog exists.
-- An overflow that happens while a `defmt` line is being written loses its
-  report: the handler's own log call finds the logger taken, defmt-rtt
+- An overflow that happens while a `defmt` line is being written cannot log
+  at once: the handler's own log call finds the logger taken, defmt-rtt
   panics, panic-probe's `udf` faults inside the HardFault handler, and the
-  core locks up, which the nRF52840 turns into a reset
-  (`reset reason: CPU lock-up` on the next boot). The statics are still
-  intact. Storing the report in RAM that survives the reset, and logging it at
-  the next boot, is open as a FIXME in [TODO.md](../../TODO.md#fixme).
+  core locks up, which the nRF52840 turns into a reset. The statics are still
+  intact, and the next boot logs the stored
+  `previous boot: stack overflow: ...` line, then `reset reason: CPU lock-up`.
+- After a power cycle, which on this bus-powered board is what unplugging it
+  does, the record is gone: an overflow that was never logged leaves no trace.
+- The record takes 24 bytes of `.uninit`, which moves `_stack_end` up by as
+  much; the guard stays at the same 4 KiB boundary while the gap allows.
 - A debug session that catches HardFaults does not show the line. `probe-rs run`,
   the Cargo runner, sets the core's HardFault vector catch by default and
   halts at the handler's first instruction, printing
@@ -226,6 +248,7 @@ Negative:
 | Concern | Where |
 | --- | --- |
 | Placement and register values | `StackGuard` and `MPU_CTRL` in [stack_logic.rs](../../src/stack_logic.rs), with six host tests |
+| Report kept across a reset | `OverflowRecord` in [stack_logic.rs](../../src/stack_logic.rs), with five host tests; `OVERFLOW_RECORD`, `take_previous_overflow`, `log_previous_overflow`, and `describe_overflow` (simulation) in [stack.rs](../../src/stack.rs) |
 | Size | `STACK_GUARD_BYTES` in [config.rs](../../src/config.rs) |
 | Programming, read-back, high-water | `enable_guard`, `enable_guard_logged`, `guard_is_on`, and `high_water` in [stack.rs](../../src/stack.rs) |
 | Fault report | `HardFault`, the assembly `MemoryManagement` handler, and `report_overflow` in [stack.rs](../../src/stack.rs) |
@@ -236,17 +259,22 @@ Negative:
 ### Verification Status
 
 - **Implemented:** everything above, on 2026-10-11.
-- **Software-verified:** the six `stack_logic` host tests pin the placement,
-  the register values, and the read-back comparison. The Renode scenario
-  checks the boot line and that a stack pointer moved into the guard ends in
-  the `stack overflow` line and a halted core; with the MPU left off it fails
-  (checked by a run with `MPU_CTRL` written as 0, in which the simulation
-  crashed on the corrupted stack instead). Clippy, rustdoc, and the release
-  builds pass for every binary.
-- **Hardware-verified:** not yet. The self-test's `stack guard` stage and its
-  optional deliberate overflow, recorded through the
+- **Software-verified:** the eleven `stack_logic` host tests pin the
+  placement, the register values, the read-back comparison, and the
+  record's layout, round trip, and rejection of a cleared, corrupted, or
+  swapped record. The Renode scenario checks the boot line, that a stack
+  pointer moved into the guard ends in the `stack overflow` line and a
+  halted core, and that the boot after a machine reset logs the record;
+  with the MPU left off it fails (checked by a run with `MPU_CTRL` written
+  as 0, in which the simulation crashed on the corrupted stack instead), and
+  with the record's store removed it fails at the `previous boot` line.
+  Clippy, rustdoc, and the release builds pass for every binary.
+- **Hardware-verified:** not yet. The self-test's `stack guard` stage, its
+  optional deliberate overflow, and the `previous boot` line after the reset
+  button, recorded through the
   [first-flash checklist](../first-flash.md#2-self-test-image), are the evidence
-  still to collect.
+  still to collect. That the nRF52840 keeps the record through a lock-up and
+  the reset button rests on the product specification, not on a board run.
 
 ## Related
 

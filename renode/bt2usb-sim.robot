@@ -318,6 +318,8 @@ A Stack Overflow Faults In The Guard And Is Reported
     # and the fault handler reports the overflow on UART0 and stops the core
     # (src/stack.rs, docs/adr/0026-mpu-stack-guard.md). Renode takes the
     # fault as MemManage, not HardFault; both paths reach the same report.
+    # The handler also saves the report in .uninit RAM, which a reset keeps,
+    # so the next boot logs it again: the line a lost log would have carried.
     Create Sim Machine
     Create Terminal Tester    sysbus.uart0    timeout=20
     Start Emulation
@@ -333,6 +335,10 @@ A Stack Overflow Faults In The Guard And Is Reported
     Wait For Line On Uart     stack overflow: stack pointer 0x[0-9a-f]{8}, guard ${base}\\.\\.${top}, PC (0x[0-9a-f]{8}|not stacked)    treatAsRegex=true
     # The core spins in the handler: the 2 s scenario steps never come.
     Should Not Be On Uart     scenario:    timeout=5
+    # Renode's machine reset, like the chip's reset button, keeps RAM.
+    Execute Command           machine Reset
+    Wait For Line On Uart     bt2usb-sim starting
+    Wait For Line On Uart     previous boot: stack overflow: stack pointer 0x[0-9a-f]{8}, guard ${base}\\.\\.${top}, PC (0x[0-9a-f]{8}|not stacked)    treatAsRegex=true
 
 TWIM And SSD1306 Models Follow Their Specifications
     # Register-level checks of renode/nrf52840_twim.cs and renode/ssd1306.cs

@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that adds the MPU stack guard. The
-tree holds 421 `#[test]` functions: 410 in
+2026-10-11, in the commit that keeps the stack overflow report across a
+reset. The tree holds 426 `#[test]` functions: 415 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -228,7 +228,7 @@ protect.
 | [ui/layout_tests.rs](../src/ui/layout_tests.rs), for [layout.rs](../src/ui/layout.rs) | 12 | Every screen's lines and baselines: Home's title and hints, the scan's dots cycling, the one-line waiting screens, a device list that marks the selection with `> ` and scrolls to keep it among four rows, an empty list, the saved list ending with Factory reset and its footer, the Forget confirmation naming the device (or "Device unavailable") with Cancel as the default, the reset confirmation, and the name or message under each status title. Every fixed label fits the 21 columns of the panel, lines stay on the panel and never overlap, and a name wider than the panel is kept whole for the panel to cut. |
 | [diagnostics_tests.rs](../src/diagnostics_tests.rs), for [diagnostics.rs](../src/diagnostics.rs) | 14 | The build identity `build.rs` supplies: the crate version, a 40-digit commit with an optional `-dirty` or `unknown`, a `debug` or `release` profile, and a log filter. `POWER.RESETREAS` decoding: no defined bit reads as power-on or brown-out, each defined bit maps to its cause, accumulated causes list in bit order, undefined bits are kept for the report, the defined mask equals the cause bits, and every cause has a distinct name. Event counters: each counter has its own slot in log order and a distinct name, counts start at zero and stop at `u32::MAX`, and `CounterReport` never logs unchanged counts, logs the first change at once, then waits out `DIAGNOSTICS_REPORT_INTERVAL_SECS` and logs the latest counts, without its clock wrapping. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
-| [stack_logic.rs](../src/stack_logic.rs) | 6 | The MPU stack guard ([ADR 0026](adr/0026-mpu-stack-guard.md)): it starts at the first multiple of its size at or above `_stack_end`, so no static is inside it, and an aligned `_stack_end` is used as is; only powers of two of at least 32 bytes make a region, and a region that would pass the end of the address space is refused; a stack pointer above the guard's top has stack left, and one at the top, inside the guard, or below it (a frame larger than the stack left can skip past the guard) has overflowed; `RBAR` is the base, with the region number left to `RNR`, `RASR` is no access, execute-never, normal write-back memory, the size field, and ENABLE (`0x1003_0017` for 4 KiB, `0x1003_0009` for 32 bytes), and `MPU_CTRL` is `0b101`; the read-back accepts only the exact `CTRL` and `RASR` and the address bits of `RBAR`, whose low five bits are not address bits, so an MPU turned off, an MPU left on in HardFault, a moved region, or a disabled region fails it. |
+| [stack_logic.rs](../src/stack_logic.rs) | 11 | The MPU stack guard ([ADR 0026](adr/0026-mpu-stack-guard.md)): it starts at the first multiple of its size at or above `_stack_end`, so no static is inside it, and an aligned `_stack_end` is used as is; only powers of two of at least 32 bytes make a region, and a region that would pass the end of the address space is refused; a stack pointer above the guard's top has stack left, and one at the top, inside the guard, or below it (a frame larger than the stack left can skip past the guard) has overflowed; `RBAR` is the base, with the region number left to `RNR`, `RASR` is no access, execute-never, normal write-back memory, the size field, and ENABLE (`0x1003_0017` for 4 KiB, `0x1003_0009` for 32 bytes), and `MPU_CTRL` is `0b101`; the read-back accepts only the exact `CTRL` and `RASR` and the address bits of `RBAR`, whose low five bits are not address bits, so an MPU turned off, an MPU left on in HardFault, a moved region, or a disabled region fails it. The overflow record kept across a reset: it decodes to what was encoded, with or without a PC (a PC of 0 included); its six words are a tag that says whether a PC is present (`0x5354_4B4E` without, `0x5354_4B50` with), the stack pointer, the guard's base and top, the PC or 0, and a check word; a cleared or all-ones slot, a single flipped bit in any word, two swapped words, a PC stored in a record tagged without one, and an empty guard all decode to nothing. |
 
 ### Integration Tests
 
@@ -265,7 +265,7 @@ exercises.
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
 | `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` mirrors the order in which `ble/multi_conn.rs` calls the pure modules, but nothing checks that the two stay in step |
 | `ui/display.rs` | Embedded and simulation builds and Clippy; the screen layout (`ui::layout`) and the recovery policy are host-tested; the Renode scenario runs the display task on modelled TWIM and SSD1306 peripherals and reads every screen it draws back ([OLED checks](#oled-checks)); self-test OLED stages |
-| `stack.rs` | Embedded and simulation builds and Clippy; the guard's placement and register values (`stack_logic.rs`) are host-tested; the Renode case `A Stack Overflow Faults In The Guard And Is Reported` programs the MPU, takes a fault in the guard, and checks the report ([Robot test case](#robot-test-case)); self-test `stack` and `stack guard` stages and the optional deliberate overflow; the high-water scan runs only on the board |
+| `stack.rs` | Embedded and simulation builds and Clippy; the guard's placement and register values (`stack_logic.rs`) are host-tested; the Renode case `A Stack Overflow Faults In The Guard And Is Reported` programs the MPU, takes a fault in the guard, and checks the report ([Robot test case](#robot-test-case)); self-test `stack` and `stack guard` stages and the optional deliberate overflow; the Renode case also resets the machine and checks the next boot's `previous boot` line from the record kept in `.uninit`; the high-water scan runs only on the board |
 | `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice stage |
 | `power.rs` | Embedded build and Clippy; its policy (`power_logic.rs`) is host-tested; hardware acceptance (sleep and wake) |
 
@@ -544,7 +544,11 @@ own. The next interrupt's exception frame lands in the no-access region. The
 case expects
 `stack overflow: stack pointer 0x<sp>, guard <base>..<top>, PC <pc or not stacked>`
 with the bounds from the boot line, then no `scenario:` line for 5 s, which
-shows the core stopped in the handler. Renode 1.16.1 takes the fault as
+shows the core stopped in the handler. It then resets the machine, which in
+Renode keeps RAM as the chip's reset button does, and expects the next boot
+to log `previous boot: stack overflow: ...` with the same guard, read from
+the record the handler stored in `.uninit`; with that store removed the case
+fails there. Renode 1.16.1 takes the fault as
 MemManage, so the case runs the assembly `MemoryManagement` handler on its way
 to the report; on the nRF52840 the fault escalates to HardFault instead
 ([ADR 0026](adr/0026-mpu-stack-guard.md)). With `MPU_CTRL` written as 0 the
@@ -922,6 +926,33 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Overflow Report Kept Across A Reset
+
+This record covers the commit that fixes the P2 FIXME "A stack overflow
+during a log call is not reported" in [TODO.md](../TODO.md#fixme). The
+HardFault handler now stores the overflow as an `OverflowRecord` (new in the
+pure `src/stack_logic.rs`) in six atomics in `.uninit` before it logs, and
+every image logs and clears it at boot as
+`previous boot: stack overflow: ...`, so an overflow whose log call failed,
+or that happened with no probe attached, is still reported after a reset
+that keeps RAM ([ADR 0026](adr/0026-mpu-stack-guard.md)). The checks ran
+locally on Linux in a container, on the working tree just before that
+commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 415 unit tests (5 new in `stack_logic.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.92% of lines (from 98.90%), 98.92% of regions, 99.16% of functions; `stack_logic.rs` 100% of lines, regions, and functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge `.text` 125,108 bytes with `DEFMT_LOG=debug` and 124,096 with `DEFMT_LOG=info` (+388 each since `ba13354`); `.uninit` 1,048 (+24, the record at `0x2000C98C` before defmt-rtt's buffer, from `llvm-nm -S`); `.rodata`, `.data`, and `.bss` unchanged. `_stack_end` moves to `0x2000CDA4`; the guard stays at `0x2000D000`–`0x2000E000` |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 46 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 17.53 s, the stack overflow case, now with a machine reset and the `previous boot` line, in 7.66 s, and the model checks in 0.68 s, with the local platform copy without `ApplySVD` described in an earlier record. With the handler's store removed, the overflow case failed at the `previous boot` line |
+| Hosted CI | GitHub Actions | Push run 38114870036 (`ba13354`), the commit before this one, passed every job, including the new Renode overflow case on the stock platform |
+| Board/radio/USB acceptance | Physical hardware | Not performed; whether the nRF52840 keeps the record through the reset button and a lock-up rests on the product specification |
 
 ## Validation Record — 2026-10-11, MPU Stack Guard
 

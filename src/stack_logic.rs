@@ -92,9 +92,165 @@ impl StackGuard {
     }
 }
 
+/// Words in an encoded [`OverflowRecord`].
+pub const OVERFLOW_RECORD_WORDS: usize = 6;
+
+/// First word of a record whose PC was stacked ("STKP").
+const RECORD_WITH_PC: u32 = 0x5354_4B50;
+/// First word of a record whose PC was not stacked ("STKN").
+const RECORD_WITHOUT_PC: u32 = 0x5354_4B4E;
+
+/// A stack overflow as the HardFault handler saw it. The handler stores it,
+/// encoded, in RAM the reset handler leaves alone before it tries to log, so
+/// the next boot can report an overflow whose log line never got out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OverflowRecord {
+    /// The stack pointer the fault was taken with.
+    pub stack_pointer: u32,
+    /// The guard's lowest address.
+    pub guard_base: u32,
+    /// The first address above the guard.
+    pub guard_top: u32,
+    /// The faulting PC, when the fault's frame could be stacked.
+    pub pc: Option<u32>,
+}
+
+impl OverflowRecord {
+    /// The record as stored: a first word that also says whether a PC is
+    /// present, the four values (0 for no PC), and a check word, so words
+    /// RAM held at power-on are not mistaken for a record.
+    pub fn encode(&self) -> [u32; OVERFLOW_RECORD_WORDS] {
+        let (tag, pc) = match self.pc {
+            Some(pc) => (RECORD_WITH_PC, pc),
+            None => (RECORD_WITHOUT_PC, 0),
+        };
+        let (stack_pointer, base, top) = (self.stack_pointer, self.guard_base, self.guard_top);
+        let check = check_word(&[tag, stack_pointer, base, top, pc, 0]);
+        [tag, stack_pointer, base, top, pc, check]
+    }
+
+    /// The record `words` hold, or `None` when they are not one: a cleared
+    /// slot, the RAM's power-on contents, or a record with a changed word.
+    pub fn decode(words: [u32; OVERFLOW_RECORD_WORDS]) -> Option<Self> {
+        let [tag, stack_pointer, guard_base, guard_top, pc, check] = words;
+        let pc = match tag {
+            RECORD_WITH_PC => Some(pc),
+            RECORD_WITHOUT_PC if pc == 0 => None,
+            _ => return None,
+        };
+        (check == check_word(&words) && guard_base < guard_top).then_some(Self {
+            stack_pointer,
+            guard_base,
+            guard_top,
+            pc,
+        })
+    }
+}
+
+/// The inverted XOR of every word but the last, each rotated by five bits per
+/// position, so two swapped words do not cancel out.
+fn check_word(words: &[u32; OVERFLOW_RECORD_WORDS]) -> u32 {
+    !words
+        .iter()
+        .take(OVERFLOW_RECORD_WORDS - 1)
+        .zip(0u32..)
+        .fold(0, |check, (word, position)| {
+            check ^ word.rotate_left(position * 5)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const RECORD: OverflowRecord = OverflowRecord {
+        stack_pointer: 0x2000_DFC8,
+        guard_base: 0x2000_D000,
+        guard_top: 0x2000_E000,
+        pc: None,
+    };
+
+    #[test]
+    fn an_overflow_record_survives_encoding() {
+        assert_eq!(OverflowRecord::decode(RECORD.encode()), Some(RECORD));
+        let with_pc = OverflowRecord {
+            pc: Some(0x0003_1238),
+            ..RECORD
+        };
+        assert_eq!(OverflowRecord::decode(with_pc.encode()), Some(with_pc));
+        // A PC of 0 is still a PC.
+        let pc_zero = OverflowRecord {
+            pc: Some(0),
+            ..RECORD
+        };
+        assert_eq!(OverflowRecord::decode(pc_zero.encode()), Some(pc_zero));
+    }
+
+    #[test]
+    fn an_overflow_record_has_a_fixed_layout() {
+        let words = RECORD.encode();
+        assert_eq!(
+            words[..5],
+            [0x5354_4B4E, 0x2000_DFC8, 0x2000_D000, 0x2000_E000, 0]
+        );
+        assert_eq!(words[5], check_word(&words));
+        assert_eq!(
+            OverflowRecord {
+                pc: Some(7),
+                ..RECORD
+            }
+            .encode()[0],
+            0x5354_4B50
+        );
+    }
+
+    #[test]
+    fn anything_but_an_intact_record_decodes_to_none() {
+        assert_eq!(OverflowRecord::decode([0; OVERFLOW_RECORD_WORDS]), None);
+        assert_eq!(
+            OverflowRecord::decode([u32::MAX; OVERFLOW_RECORD_WORDS]),
+            None
+        );
+        let with_pc = OverflowRecord {
+            pc: Some(0x0003_1238),
+            ..RECORD
+        }
+        .encode();
+        for words in [RECORD.encode(), with_pc] {
+            for index in 0..OVERFLOW_RECORD_WORDS {
+                for bit in [0, 13, 31] {
+                    let mut changed = words;
+                    changed[index] ^= 1 << bit;
+                    assert_eq!(
+                        OverflowRecord::decode(changed),
+                        None,
+                        "word {index} bit {bit}"
+                    );
+                }
+            }
+        }
+        // Two swapped words are caught too, which a plain XOR would miss.
+        let mut swapped = RECORD.encode();
+        swapped.swap(1, 2);
+        assert_eq!(OverflowRecord::decode(swapped), None);
+    }
+
+    #[test]
+    fn a_record_without_a_pc_must_store_zero_for_it() {
+        let mut words = RECORD.encode();
+        words[4] = 0x1234;
+        words[5] = check_word(&words);
+        assert_eq!(OverflowRecord::decode(words), None);
+    }
+
+    #[test]
+    fn a_record_with_an_empty_guard_is_refused() {
+        let empty = OverflowRecord {
+            guard_top: RECORD.guard_base,
+            ..RECORD
+        };
+        assert_eq!(OverflowRecord::decode(empty.encode()), None);
+    }
 
     #[test]
     fn the_guard_starts_at_the_first_aligned_address_above_the_statics() {

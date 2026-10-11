@@ -1301,7 +1301,16 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   flowing, and have the hardware-result template ask for it. Accept when
   reports support reproduction without logging key material or keystroke
   content
-  ([operations](docs/operations.md#reporting-a-defect)).
+  ([operations](docs/operations.md#reporting-a-defect)). Progress
+  (2026-10-11): every image logs its version, source commit (`-dirty` for a
+  modified checkout), profile, and `DEFMT_LOG` filter at boot, which
+  `build.rs` supplies and `src/diagnostics.rs` holds; the firmware also logs
+  the decoded `POWER.RESETREAS` causes, read and cleared before the
+  SoftDevice starts (seven host tests). Release staging refuses an image
+  that does not report the tagged commit clean, Renode checks the identity
+  line, and the bug and hardware-result templates ask for both boot lines
+  ([reset reasons](docs/operations.md#reset-reasons)). Still open: the
+  bounded counters with their collection method, and the PnP ID.
 
 ## Device Security And Provisioning
 

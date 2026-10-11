@@ -207,8 +207,8 @@ class ReleaseTests(unittest.TestCase):
     def test_staging_records_exact_compiled_bytes_and_build_identity(self):
         build = Path(self.temp.name) / "build"
         build.mkdir()
-        (build / "bt2usb").write_bytes(b"compiled application")
-        (build / "bt2usb-selftest").write_bytes(b"compiled selftest")
+        (build / "bt2usb").write_bytes(b"compiled application " + self.commit.encode())
+        (build / "bt2usb-selftest").write_bytes(b"compiled selftest " + self.commit.encode())
         output = Path(self.temp.name) / "stage"
         environment = {
             "GITHUB_SHA": self.commit,
@@ -241,6 +241,22 @@ class ReleaseTests(unittest.TestCase):
         release.package_release(
             self.root, output, self.output, "v0.1.0", self.commit, "chefzaid/bt2usb", "123"
         )
+
+    def test_staging_refuses_firmware_that_reports_another_or_dirty_commit(self):
+        build = Path(self.temp.name) / "build"
+        build.mkdir()
+        commit = self.commit.encode()
+        for application in (b"compiled application " + b"c" * 40, b"build " + commit + b"-dirty"):
+            (build / "bt2usb").write_bytes(application)
+            (build / "bt2usb-selftest").write_bytes(b"compiled selftest " + commit)
+            with (
+                self.subTest(application=application),
+                patch.dict(release.os.environ, {"GITHUB_SHA": self.commit}),
+                patch.object(release, "command", side_effect=["", self.commit]),
+                self.assertRaisesRegex(release.ReleaseError, "bt2usb does not report"),
+            ):
+                release.stage_build(self.root, build, self.output, Path("llvm-objcopy"))
+            self.assertFalse(self.output.exists())
 
     def test_staging_refuses_dirty_source_or_wrong_checkout(self):
         for results in ([" M src/main.rs"], ["", "b" * 40]):

@@ -28,7 +28,7 @@ hardware-verified result; record board results with the
 | USB enumeration | Host device manager, `lsusb` | Keyboard, mouse, and consumer interfaces; VID/PID, strings, per-unit serial |
 | Self-test | `mask selftest` | Staged `[PASS]`/`[FAIL]`/`[SKIP]` results for each peripheral |
 | Simulation UART | Renode `mask sim` | Logs from the SoftDevice-free build; no probe needed |
-| Release metadata | `BUILD-INFO.json`, `SHA256SUMS` | Which build a unit was flashed with; the firmware itself does not report it |
+| Release metadata | `BUILD-INFO.json`, `SHA256SUMS` | Which build a unit was flashed with; the firmware's boot line reports the same commit ([boot sequence](#boot-sequence)) |
 
 On the USB host the bridge appears with the development identity from
 [config.rs](../src/config.rs):
@@ -118,13 +118,14 @@ firmware, so flash the bridge again afterwards. The
 The main task logs these lines in this order, with no `.await` between them, so
 no other task can interleave. At the release `info` level no other line
 appears between them, except an `embassy-nrf` warning right after
-`bt2usb firmware starting` when UICR already holds a different reset-pin or
+`reset reason` when UICR already holds a different reset-pin or
 NFC-pin setting ([dependency logs](security.md#dependency-logs)); a local
 `debug` build adds dependency lines. Placeholders are shown as `N`, `X`, and
 `<...>`.
 
 ```text
-bt2usb firmware starting
+bt2usb firmware starting: version <version>, commit <commit>, <profile> build, DEFMT_LOG=<filter>
+reset reason: <causes>
 softdevice RAM: N bytes
 You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to X
 USB power: vbus=true ready=true
@@ -135,6 +136,17 @@ BLE task started
 UI and isolated OLED tasks started
 ```
 
+- The first line names the build ([diagnostics.rs](../src/diagnostics.rs)):
+  the version from `Cargo.toml`, the git commit `build.rs` found (40
+  hexadecimal digits, with `-dirty` when tracked files differed from it, or
+  `unknown` for a build outside git), the Cargo profile, and the `DEFMT_LOG`
+  filter the build was compiled with. A release package's `BUILD-INFO.json`
+  names the same commit, and staging refuses an image that reports another
+  one ([deployment](deployment.md#version-and-build-policy)).
+- `reset reason` decodes the nRF52840's `POWER.RESETREAS` register, which
+  `main` reads and clears before the SoftDevice takes the POWER peripheral, so
+  it names only the resets since the previous boot; see
+  [Reset Reasons](#reset-reasons).
 - `softdevice RAM: N bytes` is the RAM the configured SoftDevice needs. N must
   be at most 24576 (the `0x6000` reservation in [memory_sd.x](../memory_sd.x)).
 - The "giving more RAM" warning appears only when N is below 24576. It is
@@ -148,7 +160,8 @@ UI and isolated OLED tasks started
 - On the first boot after UICR was erased, `bt2usb firmware starting` can
   appear twice: `embassy_nrf::init` writes the reset-pin setting (and, on
   chips with build code `F` or later, the debug-port setting) to UICR and
-  resets the chip once before the rest of the sequence. Later boots log it once. This is source-derived, not
+  resets the chip once before the rest of the sequence, and the second boot
+  reports `reset reason: soft reset`. Later boots log it once. This is source-derived, not
   observed on a board; see
   [security](security.md#physical-access-and-debug-port).
 
@@ -254,7 +267,8 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 
 | Level | Message | Meaning | Action |
 | --- | --- | --- | --- |
-| info | `bt2usb firmware starting` | `main` started | None; twice in a row on the first boot after a UICR erase is expected ([boot sequence](#boot-sequence)) |
+| info | `bt2usb firmware starting: version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}` | `main` started; names the build | Quote the line in a report; twice in a row on the first boot after a UICR erase is expected ([boot sequence](#boot-sequence)) |
+| info | `reset reason: {}` | The causes of the last reset, joined with ` + `, and any undefined register bits | See [Reset Reasons](#reset-reasons) |
 | info | `softdevice RAM: {:?} bytes` (vendor) | RAM the SoftDevice configuration needs | Record it; must be at most 24576 |
 | warn | `You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to {:x}` (vendor) | The 24 KiB reservation exceeds the requirement | None required; see [memory checks](#stack-and-memory-checks) |
 | panic | `too little RAM for softdevice. Change your app's RAM start address to {:x}` (vendor) | The reservation in `memory_sd.x` is too small | [RAM panic incident](#boot-panics-while-enabling-the-softdevice) |
@@ -883,6 +897,26 @@ reset or power-cycle the board, then reflash a known-working application using a
 probe. If SoftDevice was erased, reinstall it before the application. The
 firmware does not yet provide a watchdog recovery guarantee.
 
+### Reset Reasons
+
+The boot line `reset reason: {}` says why the chip last restarted. `main`
+clears the register after reading it, so the causes are those since the
+previous boot; several are joined with ` + ` when more than one happened
+before a boot could clear them. The firmware never resets itself, enters
+System OFF, or starts the watchdog, so most causes come from outside it.
+
+| Logged cause | What restarted the chip | What it tells a report |
+| --- | --- | --- |
+| `power-on or brown-out` | Power was applied, or the supply fell below the brown-out level | The usual first boot. After a hang, it means the unit was unplugged or power-cycled: a panic leaves the core stopped until then ([panics](#firmware-panics-or-stops-responding)). Unexpected during use, it points at the USB supply, such as a hub port that sags |
+| `reset pin` | The nRESET pin, such as the board's reset button | Someone pressed reset, or a probe reset the chip through the pin |
+| `soft reset` | `AIRCR.SYSRESETREQ` | A probe restarting the chip after flashing, or `embassy_nrf::init` after writing UICR on the first boot ([boot sequence](#boot-sequence)); the bridge's own code never requests it |
+| `watchdog` | The watchdog timer | Not expected: this firmware does not start the watchdog ([ADR 0020](adr/0020-watchdog-and-progress-based-recovery.md) is Proposed) |
+| `CPU lock-up` | The core locked up, for example after a fault inside the HardFault handler | A defect: report it with the log before the reset, if a probe caught one |
+| `wake from System OFF (...)` | A wake-up from System OFF by GPIO, LPCOMP, debug interface, NFC, or VBUS | Not expected: the bridge never enters System OFF ([ADR 0012](adr/0012-bus-powered-no-system-off.md)); another image ran before this one |
+
+`(undefined bits 0x...)` after the causes quotes register bits the nRF52840
+does not define; include it in a report as printed.
+
 ## Stack And Memory Checks
 
 The memory map is fixed at link time ([hardware](hardware.md#memory-layout),
@@ -965,8 +999,11 @@ internal flash; see [key storage](security.md#key-storage-and-deletion).
 ## Reporting A Defect
 
 For a defect report, record the artifact hash, exact firmware version, board,
-peripheral, host/hub, reproduction sequence, and relevant log interval. Sanitize
-device identifiers and never share bond keys or private input captures publicly.
+peripheral, host/hub, reproduction sequence, and relevant log interval. The
+first two boot lines carry the version, the source commit, the profile, the
+`DEFMT_LOG` filter, and the reset reason ([boot sequence](#boot-sequence)), so
+quote them rather than retyping the build details. Sanitize device
+identifiers and never share bond keys or private input captures publicly.
 Suspected vulnerabilities follow the [security policy](../SECURITY.md) instead.
 
 Use the [bug report template](../.github/ISSUE_TEMPLATE/bug.md), which asks

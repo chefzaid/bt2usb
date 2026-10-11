@@ -182,6 +182,9 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     #
     # Boot + executor reached the UI loop.
     Wait For Line On Uart     bt2usb-sim starting
+    # The build script's identity (src/diagnostics.rs): a full commit, or
+    # `unknown` for a build outside git.
+    Wait For Line On Uart     version \\d+\\.\\d+\\.\\d+, commit ([0-9a-f]{40}(-dirty)?|unknown), (debug|release) build    treatAsRegex=true
     Wait For Line On Uart     buttons ready
     Wait For Line On Uart     display task started
     Wait For Line On Uart     entering sim UI loop (screen=Home)    pauseEmulation=true

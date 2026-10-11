@@ -16,7 +16,8 @@ Describe the observed behavior and its impact.
 ## Environment
 
 - Firmware commit or release tag, and ELF/HEX SHA-256:
-- Build: local `mask`/`cargo` or a release package; `DEFMT_LOG` level:
+- Boot lines `bt2usb firmware starting: ...` and `reset reason: ...`, copied from the log:
+- Build: local `mask`/`cargo` or a release package:
 - Board and revision, pin changes, power arrangement:
 - SoftDevice version:
 - BLE peripheral make, model, and firmware:
@@ -34,8 +35,10 @@ checklist step that describes the intended result.
 
 ## Evidence
 
-Attach the sanitized RTT log around the failure. Local builds log at `debug`,
-which includes peer BLE addresses; see
+Attach the sanitized RTT log around the failure, from the boot lines on if you
+have them. Local builds log at `debug`, which includes device names; only a
+build with the `log-sensitive-data` feature adds peer BLE addresses and
+keystroke bytes, and such a log must not be shared; see
 [logging and privacy](https://github.com/chefzaid/bt2usb/blob/main/docs/security.md#logging-and-privacy).
 
 - [ ] No bond keys (LTK/IRK), raw flash dumps, or private keystrokes are attached.

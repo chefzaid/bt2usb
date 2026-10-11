@@ -63,6 +63,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [devices.rs](../../src/storage/devices.rs), [codec.rs](../../src/storage/codec.rs), [framing.rs](../../src/storage/framing.rs), [record.rs](../../src/storage/record.rs) | The paired-device list (fail-closed load, legacy format, identity merge, eviction, Forget and reset candidates), the record codec, and frame and record validation, on SoftDevice-free types; IRK resolution is passed in as a function | `DeviceStore` in `storage.rs`, which converts SoftDevice types and does the flash I/O |
 | [ui_logic.rs](../../src/ui/ui_logic.rs), [controller.rs](../../src/ui/controller.rs), [input_logic.rs](../../src/ui/input_logic.rs), [layout.rs](../../src/ui/layout.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions; the UI loop's decisions (the command each button sends, management request tracking and its deadline); list windowing; each screen's text and where it sits; display retry policy | UI loop in [main.rs](../../src/main.rs) and [sim.rs](../../src/sim.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
+| [diagnostics.rs](../../src/diagnostics.rs) | The build identity the boot line reports, and which causes a `POWER.RESETREAS` value names | `main` in [main.rs](../../src/main.rs), which reads and clears the register; `selftest.rs` and `sim.rs`, which log the identity |
 
 Rules for the core:
 
@@ -174,7 +175,8 @@ Follow-up obligations:
   `ui` files (`controller.rs`, `display_logic.rs`, `input_logic.rs`,
   `layout.rs`, `ui_logic.rs`) through `#[path]`, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
-  under `#[cfg(test)]`, in an inline `storage` module.
+  under `#[cfg(test)]`, in an inline `storage` module. It declares `config`
+  and, since 2026-10-11, `diagnostics` as ordinary modules.
 - The self-test includes `ble/adv_parser.rs` through `#[path]`, and the
   simulation compiles the same pure modules and the four `storage` files for
   the ARM target and runs the coordinator, management, the device store,
@@ -185,7 +187,7 @@ Follow-up obligations:
   `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
   `src/hid_classify_tests.rs`, `src/ble/coordinator_tests.rs`,
   `src/ble/coordinator_attempt_tests.rs`, `src/ble/scan_list_tests.rs`,
-  `src/ble/bond_table_tests.rs`,
+  `src/ble/bond_table_tests.rs`, `src/diagnostics_tests.rs`,
   `src/ble/reconnect_tests.rs`, `src/storage/devices_tests.rs`,
   `src/storage/devices_format_tests.rs`, `src/ui/ui_logic_tests.rs`,
   `src/ui/controller_tests.rs`, `src/ui/layout_tests.rs`,
@@ -207,11 +209,11 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 395 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 384 unit tests, 3 integration tests,
+  finds 402 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 391 unit tests, 3 integration tests,
   3 glyph-table tests, and 5 vendored-portal tests, which passed on
   2026-10-11 (the
-  [portal record](../testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait);
+  [boot diagnostics record](../testing.md#validation-record--2026-10-11-boot-identity-and-reset-reason);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

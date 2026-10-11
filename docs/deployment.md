@@ -189,6 +189,7 @@ fixed inputs, and packaging rejects a build that differs:
 | Target and features | `thumbv7em-none-eabihf`, `embedded` | The `embedded` job's build command; `stage` writes both as fixed values, so the packaging comparison checks the metadata, not how the files were actually built |
 | Profile | `release`: `opt-level = "s"`, fat LTO, one codegen unit, `debug = 2` | The `--release` build command; `stage` reads only `target/thumbv7em-none-eabihf/release` and records the fixed string `release` |
 | Log level | `DEFMT_LOG=info` | Packaging requires `info` |
+| Source identity | The tagged commit, which `build.rs` embeds and the boot line reports ([boot sequence](operations.md#boot-sequence)) | `stage` refuses an application or self-test ELF that does not contain the checked-out commit, or contains it followed by `-dirty` |
 
 `debug = 2` keeps DWARF debug information in the ELF for probe-rs; it does not
 add code to the flashed image.
@@ -198,7 +199,8 @@ add code to the flashed image.
 1. The `embedded` job builds and lints the ARM firmware. It converts that ELF to
    Intel HEX with the toolchain's `llvm-objcopy` and stages the application,
    self-test, build inputs, and metadata. Staging rejects changes to tracked
-   source and a checkout that differs from the workflow's source commit.
+   source, a checkout that differs from the workflow's source commit, and an
+   image that does not report that commit as clean.
 2. After host checks, host coverage, audit, embedded checks, and Renode succeed, `release-package`
    downloads the **immutable artifact ID** emitted by that build job. Artifact
    download digest mismatches fail the job. No firmware is rebuilt in this job.

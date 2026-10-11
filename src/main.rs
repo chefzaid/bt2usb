@@ -41,6 +41,7 @@
 
 mod ble;
 mod config;
+mod diagnostics;
 mod hid;
 mod power;
 mod power_logic;
@@ -176,7 +177,19 @@ async fn button_select_task(pin: Peri<'static, AnyPin>) -> ! {
 
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
-    info!("bt2usb firmware starting");
+    info!(
+        "bt2usb firmware starting: version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}",
+        diagnostics::FIRMWARE_VERSION,
+        diagnostics::SOURCE_COMMIT,
+        diagnostics::BUILD_PROFILE,
+        diagnostics::LOG_FILTER
+    );
+    // Read and clear the reset causes while the POWER peripheral is still
+    // ours: once enabled, the SoftDevice restricts it.
+    let resets = embassy_nrf::pac::POWER.resetreas();
+    let reasons = diagnostics::ResetReasons::from_register(resets.read().0);
+    resets.write_value(embassy_nrf::pac::power::regs::Resetreas(reasons.bits()));
+    info!("reset reason: {}", reasons);
 
     let mut nrf_config = embassy_nrf::config::Config::default();
     nrf_config.gpiote_interrupt_priority = Priority::P2;

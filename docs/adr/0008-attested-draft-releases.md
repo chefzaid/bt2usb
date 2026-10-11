@@ -36,8 +36,10 @@ below.
 - **No rebuild.** The `embedded` job builds and lints the firmware once, stages
   it with its build inputs and metadata, and uploads it. Packaging downloads
   that upload by its immutable artifact ID, verifies it, and never compiles.
-- **Verified identity.** Staging refuses a modified tracked source tree or a
-  checkout that differs from the workflow's commit, and records the source
+- **Verified identity.** Staging refuses a modified tracked source tree, a
+  checkout that differs from the workflow's commit, or (since 2026-10-11) an
+  application or self-test image that does not report that commit clean in
+  its boot line (`build.rs` embeds it; `src/diagnostics.rs`), and records the source
   commit, ref, repository, run ID and attempt, compiler and Cargo versions,
   target, profile, features, log level, and the SHA-256 of every input and
   firmware file in `BUILD-INFO.json`. Packaging checks the version, source
@@ -170,11 +172,12 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Publication | The `release` job's "Refuse to modify a published release" step (`gh api --paginate .../releases`), then `softprops/action-gh-release` with `draft: true`, the prerelease flag, `target_commitish` set to the tagged commit, `fail_on_unmatched_files: true`, `body_path` pointing at the filled release notes, and generated notes appended after them |
 | Ordering and permissions | `release-package` needs `lint-and-test`, `coverage`, `audit`, `embedded`, and `simulation`; both release jobs run only for tag pushes; the workflow default is `contents: read`; tag runs are never cancelled by a newer run (`cancel-in-progress` is false for tags) |
 | Action pins | Every action is pinned to a commit SHA with a comment naming its exact upstream release, in [ci.yml](../../.github/workflows/ci.yml); the release jobs use `actions/download-artifact` v8.0.1, `actions/attest` v4.2.2, `actions/upload-artifact` v7.0.1, and `softprops/action-gh-release` v3.0.3, all on Node 24, on the pinned `ubuntu-24.04` image |
-| Helper tests | [release_test.py](../../scripts/release_test.py), run on Linux and Windows in CI; `grep -c 'def test_'` counts 17 tests covering exact and prerelease tags, tampering, metadata identity, changed lockfiles, rehashed artifacts, checksum entries, overwrites, staging identity, dirty checkouts, and the filled release notes |
+| Helper tests | [release_test.py](../../scripts/release_test.py), run on Linux and Windows in CI; `grep -c 'def test_'` counts 18 tests covering exact and prerelease tags, tampering, metadata identity, changed lockfiles, rehashed artifacts, checksum entries, overwrites, staging identity, firmware that reports another or a dirty commit, dirty checkouts, and the filled release notes |
 
 Error messages are specific, for example
 `release tag must be exactly v{version}; received {tag!r}`,
 `refusing to stage a build from a modified tracked source tree`,
+`{name} does not report the clean source commit {commit}`,
 `build input differs from release source: {name}`, and
 `build compiler does not match the pinned Rust toolchain`. A rerun against a
 published release fails with
@@ -183,7 +186,7 @@ published release fails with
 ### Verification Status
 
 - **Implemented:** everything in the table above.
-- **Software-verified:** the 17 release-helper tests and actionlint pass in
+- **Software-verified:** the 18 release-helper tests and actionlint pass in
   the CI host-test job, and the `embedded` job stages and uploads the checked
   firmware on every run. Those check jobs passed on GitHub-hosted runners in
   push runs 36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`,

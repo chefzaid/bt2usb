@@ -902,7 +902,8 @@ lines, pass condition, and fix are in
 The bridge logs over `defmt` RTT. Development builds use the `debug` level from
 [`.cargo/config.toml`](../.cargo/config.toml); every CI build, including the
 release artifacts, sets `DEFMT_LOG` to `info`.
-Useful lines include `bt2usb firmware starting`, `SoftDevice started`,
+Useful lines include `bt2usb firmware starting` with the build's version,
+commit, profile, and log filter, `reset reason`, `SoftDevice started`,
 `USB HID device started`, `BLE task started`,
 `UI and isolated OLED tasks started`, `USB configured by host: true`, and
 `stack high-water: {} of {} bytes`, printed whenever the painted-stack
@@ -923,8 +924,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 395 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 384 unit tests, the 3
+- The source contains 402 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 391 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs),
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   and the 5 tests of the vendored SoftDevice crate's event portal in

@@ -48,7 +48,7 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 ├── rust-toolchain.toml    pinned compiler, components, and ARM target
 ├── memory_sd.x            linker memory map for SoftDevice builds
 ├── memory_sim.x           linker memory map for the simulation
-├── build.rs               linker-script selection and feature guards
+├── build.rs               linker-script selection, feature guards, build identity
 ├── maskfile.md            task recipes (`mask <task>`)
 ├── docs/                  guides and architecture decision records
 └── TODO.md                complete work plan, done and open
@@ -207,6 +207,26 @@ selected map after two symbols, `__bt2usb_storage_start` and
 either map or `src/config.rs` changes, or when the `sim` feature toggles. The map contents are in
 [hardware](hardware.md#memory-layout) and
 [ADR 0010](adr/0010-static-memory-layout.md).
+
+`build.rs` also passes the build's identity to the crate as compile-time
+environment variables, which [diagnostics.rs](../src/diagnostics.rs) reads and
+every image logs at boot ([boot sequence](operations.md#boot-sequence)):
+
+| Variable | Value |
+| --- | --- |
+| `BT2USB_SOURCE_COMMIT` | `git rev-parse HEAD`, with `-dirty` when `git status --porcelain --untracked-files=no` lists a change (the test `scripts/release.py stage` applies); outside a git checkout, the variable of the same name from the environment when it holds a full 40-digit commit, else `unknown` |
+| `BT2USB_BUILD_PROFILE` | Cargo's `PROFILE`: `debug` or `release` |
+| `BT2USB_DEFMT_LOG` | The `DEFMT_LOG` filter, or `unset` |
+
+The script reruns when `HEAD` or the branch it names moves, and when anything
+under `src/`, `vendor/`, `.cargo/`, `Cargo.toml`, or `Cargo.lock` changes, so
+an edit to the firmware refreshes the `-dirty` flag. An edit only to other
+tracked files, such as the documents, does not rerun it, so the flag of a
+local build can lag those. Release builds come from a clean checkout of the
+tag, and staging refuses an image that does not report that commit clean
+([deployment](deployment.md#version-and-build-policy)). A build from a source
+archive without `.git` reports `unknown` unless `BT2USB_SOURCE_COMMIT` is set,
+and its ELF then differs from the release in those bytes.
 
 ## Build And Check
 
@@ -416,7 +436,7 @@ build panics on integer overflow, and a release build wraps.
 
 | Variable | Read by | Default | Purpose |
 | --- | --- | --- | --- |
-| `DEFMT_LOG` | defmt at compile time; `scripts/release.py stage` | `debug` from `.cargo/config.toml`; `info` in CI | Log filter compiled into the firmware |
+| `DEFMT_LOG` | defmt at compile time; `build.rs`, for the boot line; `scripts/release.py stage` | `debug` from `.cargo/config.toml`; `info` in CI | Log filter compiled into the firmware |
 | `RENODE_VERSION` | `install-renode.sh` | `1.16.1` | Renode release to install |
 | `RENODE_DIR` | `install-renode.sh` | `$HOME/.local/share/renode` | Install location |
 | `BIN_DIR` | `install-renode.sh` | `$HOME/.local/bin` | Location of the `renode` and `renode-test` wrappers |
@@ -425,6 +445,7 @@ build panics on integer overflow, and a release build wraps.
 | `RUSTUP_TOOLCHAIN` | rustup | Unset | Overrides `rust-toolchain.toml`; leave it unset |
 | `CARGO_TARGET_DIR` | Cargo | Unset | Moves `target/`. `mask rtt`, the Renode script, the Robot test, and the CI staging step assume `target/` |
 | `CARGO_FEATURE_SIM`, `CARGO_FEATURE_EMBEDDED` | `build.rs` | Set by Cargo from `--features` | Memory-map selection and the feature guard; never set them by hand |
+| `BT2USB_SOURCE_COMMIT` | `build.rs` | Unset | The commit to report for a build outside a git checkout, such as from a source archive; must be a full 40-digit lower-case commit, and is ignored inside a checkout |
 | `GITHUB_SHA`, `GITHUB_REF`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_OUTPUT` | `scripts/release.py` | Set by GitHub Actions | Build identity in `BUILD-INFO.json`; tag outputs |
 | `CARGO_TERM_COLOR`, `PYTHONDONTWRITEBYTECODE` | CI workflow | `always`, `1` | Log color; no `.pyc` files |
 

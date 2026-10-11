@@ -61,7 +61,7 @@ Clippy warning into an error.
 | Documentation checks | `python scripts/check_docs.py` ([Markdown Checks](#markdown-checks)) | `mask ci`, `mask docs-check` | Host tests, Linux only | Fails the Linux job and lists each finding as file, line, and the value or name the repository has instead |
 | Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
 | Module comments | `find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`, failing when it lists a file ([Documentation Comments](#documentation-comments)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file without a `//!` line |
-| Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 17 tests (`grep -c 'def test' scripts/release_test.py`) |
+| Release helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 18 tests (`grep -c 'def test' scripts/release_test.py`) |
 | Tag matches version | `python scripts/release.py validate-tag --tag "$RELEASE_TAG"` | None | Host tests and the packaging job, `v*` tags only | Fails the tag run |
 | Release staging | `python scripts/release.py stage …` | None | Embedded build & clippy | Refuses a modified tracked source tree, an existing output directory, an empty firmware file, or a commit that differs from `GITHUB_SHA` |
 | Release notes | `python scripts/release.py notes …` ([release notes](deployment.md#release-notes)) | None | Verify and attest release package, `v*` tags only | Fails the tag run on a checksum entry that does not match its file, build metadata without the release's identity, a template field it cannot fill, or a SoftDevice version that `maskfile.md` and `memory_sd.x` disagree on |
@@ -693,7 +693,7 @@ Coverage measures only the code that host tests compile:
 
 - the host library as built for tests: `src/hid/`, the BLE advertisement
   parser, bond table, connection-parameter bounds, coordinator, scan result
-  list, reconnect table, long-read assembler, and management logic, `src/power_logic.rs`, and the UI display, input, and state-machine
+  list, reconnect table, long-read assembler, and management logic, `src/power_logic.rs`, `src/diagnostics.rs`, and the UI display, input, and state-machine
   logic
 - `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
   `lib.rs` includes only under `cfg(test)`
@@ -706,6 +706,7 @@ of the llvm-cov report: `tests/integration.rs`, `tests/oled_font.rs`,
 totals did not change when it was added on 2026-10-11), the `src/*_tests.rs` files
 that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
 `coordinator_attempt_tests.rs`, `scan_list_tests.rs`, `bond_table_tests.rs`,
+`diagnostics_tests.rs`,
 `reconnect_tests.rs`, `delivery_tests.rs`, `ui_logic_tests.rs`,
 `devices_tests.rs`, and `devices_format_tests.rs`. On 2026-10-10, after the device-store move,
 cargo-llvm-cov 0.9.1's summary listed 24 files, all of them source modules; passing

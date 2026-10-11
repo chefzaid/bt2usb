@@ -104,10 +104,17 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
     if os.environ.get("GITHUB_SHA", commit) != commit:
         raise ReleaseError("checked-out source does not match the workflow source commit")
     input_hashes = {name: digest(root / name) for name in INPUTS}
+    identity = commit.encode()
     for name in ("bt2usb", "bt2usb-selftest"):
         if (build_dir / name).stat().st_size == 0:
             raise ReleaseError(f"empty firmware: {name}")
         digest(build_dir / name)
+        # build.rs embeds the commit the boot log reports (src/diagnostics.rs),
+        # with "-dirty" when tracked files differed: an image built from
+        # other source must not be packaged under this commit.
+        firmware = (build_dir / name).read_bytes()
+        if identity not in firmware or identity + b"-dirty" in firmware:
+            raise ReleaseError(f"{name} does not report the clean source commit {commit}")
     rustc = command(["rustc", "--version"], root)
     cargo = command(["cargo", "--version"], root)
     output.mkdir(parents=True, exist_ok=False)

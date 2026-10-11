@@ -24,6 +24,7 @@
 #![allow(dead_code, unused_imports)]
 
 mod config;
+mod diagnostics;
 mod hid;
 mod power;
 mod power_logic;
@@ -116,6 +117,13 @@ async fn usb_device_task(device: embassy_usb::UsbDevice<'static, hid_device::Usb
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("==== bt2usb self-test ====");
+    info!(
+        "version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}",
+        diagnostics::FIRMWARE_VERSION,
+        diagnostics::SOURCE_COMMIT,
+        diagnostics::BUILD_PROFILE,
+        diagnostics::LOG_FILTER
+    );
 
     // Same interrupt priorities as the firmware: the SoftDevice reserves 0, 1, 4.
     let mut nrf_config = embassy_nrf::config::Config::default();

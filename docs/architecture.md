@@ -61,6 +61,8 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [selftest.rs](../src/selftest.rs) | Entry point | Staged board bring-up image |
 | [lib.rs](../src/lib.rs) | Host crate | Host-test entry point for hardware-free logic |
 | [config.rs](../src/config.rs) | Constants | Timing, scan, connection, USB identity, and storage constants |
+| [diagnostics.rs](../src/diagnostics.rs) | Pure core | The build identity the boot line reports (version, source commit, profile, `DEFMT_LOG` filter) and the decoding of `POWER.RESETREAS` into reset causes |
+| [build.rs](../build.rs) | Build script | Writes the linker memory layout with the storage bounds, and passes the build identity (git commit, profile, `DEFMT_LOG`) to the crate |
 | [sd_setup.rs](../src/sd_setup.rs) | Board shell | Shared SoftDevice setup and USB power events |
 | [power.rs](../src/power.rs) | Board shell | Activity tracking and power state over `embassy-time` |
 | [power_logic.rs](../src/power_logic.rs) | Pure core | Pure power/display policy |
@@ -260,8 +262,12 @@ appear in the code and reach the host through RTT; see
 
 `main` in [main.rs](../src/main.rs) runs these steps in order:
 
-1. Logs `"bt2usb firmware starting"` and calls `embassy_nrf::init` with the
-   GPIOTE and time-driver interrupt priorities set to P2.
+1. Logs `"bt2usb firmware starting: ..."` with the build identity from
+   [diagnostics.rs](../src/diagnostics.rs) (version, source commit, profile,
+   `DEFMT_LOG` filter, which `build.rs` supplies), reads and clears
+   `POWER.RESETREAS` and logs the decoded `"reset reason: {}"` while the POWER
+   peripheral is still the application's, then calls `embassy_nrf::init` with
+   the GPIOTE and time-driver interrupt priorities set to P2.
 2. Sets the USBD and TWISPI0 interrupts to P2, because the SoftDevice reserves
    priorities 0, 1, and 4 (see [interrupt priorities](#interrupt-priorities)).
 3. Enables the SoftDevice with `sd_setup::softdevice_config()`: the internal RC

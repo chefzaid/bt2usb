@@ -146,15 +146,19 @@ mask run --release
 The main task logs these lines in order before it first waits, so no other
 task's output comes between them:
 
-1. `bt2usb firmware starting`
-2. `softdevice RAM: N bytes`, logged by nrf-softdevice; the same value as in the
+1. `bt2usb firmware starting: version <version>, commit <commit>, <profile> build, DEFMT_LOG=<filter>`;
+   the commit is the one you built, without `-dirty` for a clean checkout
+2. `reset reason: <causes>`: `soft reset` right after `mask run` restarts the
+   chip, or `power-on or brown-out` after plugging the board in
+   ([reset reasons](operations.md#reset-reasons))
+3. `softdevice RAM: N bytes`, logged by nrf-softdevice; the same value as in the
    self-test
-3. `USB power: vbus=true ready=true` (`false` until the nRF USB port is powered)
-4. `USB HID composite device initialised (keyboard + mouse + consumer)`
-5. `SoftDevice started`
-6. `USB HID device started`
-7. `BLE task started`
-8. `UI and isolated OLED tasks started`
+4. `USB power: vbus=true ready=true` (`false` until the nRF USB port is powered)
+5. `USB HID composite device initialised (keyboard + mouse + consumer)`
+6. `SoftDevice started`
+7. `USB HID device started`
+8. `BLE task started`
+9. `UI and isolated OLED tasks started`
 
 The spawned tasks log afterwards, in an order set by the executor, for example
 `USB device task started`, `HID dispatcher and three endpoint workers started`,
@@ -419,9 +423,10 @@ Open a GitHub issue from the **Hardware acceptance result** template
 suggests the title `Hardware result: <board> / <firmware commit or tag>`,
 labels the issue `hardware-evidence`, and has these parts:
 
-- **Build:** commit or tag, ELF SHA-256 (and HEX SHA-256 for a release
-  package), Rust version, build profile and `DEFMT_LOG` level, SoftDevice
-  version and archive SHA-256.
+- **Build:** commit or tag, the firmware's `bt2usb firmware starting` line,
+  which reports the version, commit, profile, and `DEFMT_LOG` filter it was
+  built with, ELF SHA-256 (and HEX SHA-256 for a release package), Rust
+  version, SoftDevice version and archive SHA-256.
 - **Setup:** board and revision, pin changes, supply, debug probe; peripheral
   make, model, and firmware; host OS and version, BIOS/UEFI, monitor and hub.
 - **Measurements:** the `softdevice RAM` value, the stack high-water after

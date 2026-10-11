@@ -114,7 +114,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/diagnostics.rs` (with `diagnostics_tests.rs`), `src/ui/controller.rs` (with `controller_tests.rs`), `display_logic.rs`, `input_logic.rs`, `layout.rs` (with `layout_tests.rs`), `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that makes the vendored event portal clear only its
-own wait. The tree holds 395 `#[test]` functions: 384 in
+2026-10-11, in the commit that logs the build identity and reset reason at
+boot. The tree holds 402 `#[test]` functions: 391 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -225,6 +225,7 @@ protect.
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | 2 | OLED retry backoff of 1, 2, 4, 8, 16, then 30 s (capped) without blocking new frames, reset on recovery, and saturating deadlines. |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | 3 | The device-list window keeps the selection visible, handles an empty list and a stale selection, and the scan spinner recovers from an out-of-range state. |
 | [ui/layout_tests.rs](../src/ui/layout_tests.rs), for [layout.rs](../src/ui/layout.rs) | 12 | Every screen's lines and baselines: Home's title and hints, the scan's dots cycling, the one-line waiting screens, a device list that marks the selection with `> ` and scrolls to keep it among four rows, an empty list, the saved list ending with Factory reset and its footer, the Forget confirmation naming the device (or "Device unavailable") with Cancel as the default, the reset confirmation, and the name or message under each status title. Every fixed label fits the 21 columns of the panel, lines stay on the panel and never overlap, and a name wider than the panel is kept whole for the panel to cut. |
+| [diagnostics_tests.rs](../src/diagnostics_tests.rs), for [diagnostics.rs](../src/diagnostics.rs) | 7 | The build identity `build.rs` supplies: the crate version, a 40-digit commit with an optional `-dirty` or `unknown`, a `debug` or `release` profile, and a log filter. `POWER.RESETREAS` decoding: no defined bit reads as power-on or brown-out, each defined bit maps to its cause, accumulated causes list in bit order, undefined bits are kept for the report, the defined mask equals the cause bits, and every cause has a distinct name. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
 
 ### Integration Tests
@@ -504,7 +505,7 @@ interrupted by a scenario step.
 
 | Order | Stimulus | Expected UART text (abridged) | What it proves |
 | --- | --- | --- | --- |
-| 1 | Boot | `bt2usb-sim starting`, `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, three button tasks, UI loop |
+| 1 | Boot | `bt2usb-sim starting`, `version 0.1.0, commit <40 hex digits, or unknown>, debug build` (matched as a pattern), `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, the build identity from `build.rs` in a target build, three button tasks, UI loop |
 | 2 | Timer (step 0, pauses emulation) | `connect device 0 (Keyboard)`, `ConnectSlot slot=0 addr=0xa1`, `PersistDevice addr=0xa1`, `holds 1 device(s); reload matches`, `active_count=1 occupied_count=1`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | RTC time driver, `plan_connect` and `on_slot_connected`, the store's encode and load on the target, the controller's link update |
 | 3 | SELECT | `button Select -> screen Scanning (selected 0)`, `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, `ScanStarted`, `DeviceFound 'Keyboard' addr=0xa1 rssi=-42`, `DeviceFound 'Mouse' addr=0xb2 rssi=-55`, `event: ScanComplete -> screen DeviceList (selected 0)` | GPIO edge to `UiController::button`; scan merging drops the non-HID phone; scan events build the list |
 | 4 | DOWN, UP, DOWN | `button Down -> screen DeviceList (selected 1)`, then `selected 0`, then `selected 1` | List navigation both ways |
@@ -566,6 +567,7 @@ python -m unittest discover -s scripts -p "release_test.py" -v
 | `test_missing_extra_duplicate_and_unsafe_checksum_entries_fail` | Missing, duplicate, path-escaping, and unexpected entries or files fail |
 | `test_existing_destination_is_not_overwritten` | Packaging refuses an existing output directory and keeps its contents |
 | `test_staging_records_exact_compiled_bytes_and_build_identity` | Staging records the compiled bytes' digests and build identity, and its output packages successfully |
+| `test_staging_refuses_firmware_that_reports_another_or_dirty_commit` | An application image that carries another commit, or the checked-out commit followed by `-dirty`, stops staging before anything is written |
 | `test_staging_refuses_dirty_source_or_wrong_checkout` | Modified tracked files, or a checkout whose `HEAD` differs from `GITHUB_SHA`, stop staging |
 | `test_notes_fill_every_field_from_the_package_and_source` | The repository's release notes template, filled from a fixture package, leaves no field unfilled, carries the commit, run, SoftDevice S140 v7.3.0 with its HEX and origins, the connection, saved-device, and USB identity limits, the storage pages, magic, and version, and the exact `SHA256SUMS`, and keeps its four `REVIEW:` lines |
 | `test_notes_links_reach_existing_guide_headings` | Each guide link in the filled notes names a heading that exists in that guide |
@@ -893,6 +895,35 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Boot Identity And Reset Reason
+
+This record covers the commit that starts P1 "Diagnostics without sensitive
+input" in [TODO.md](../TODO.md#platform-memory-and-recovery). `build.rs`
+passes the git commit (with `-dirty` for a modified checkout), the Cargo
+profile, and the `DEFMT_LOG` filter to the new pure `src/diagnostics.rs`; the
+bridge, the self-test, and the simulation log them at boot, and the bridge
+reads, clears, and logs the decoded `POWER.RESETREAS` causes before the
+SoftDevice starts. `scripts/release.py stage` now refuses an application or
+self-test image that does not report the checked-out commit clean. The checks
+ran locally on Linux in a container, on the working tree just before that
+commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 391 unit tests (7 new in `diagnostics_tests.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.80% of lines (from 98.79%), 98.79% of regions, 99.08% of functions; `diagnostics.rs` 100% of lines |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 119,924 bytes (+420 since `55b6492`), `.rodata` 12,084 (+424: the identity strings and the reset cause names), `.data` 1,640, `.bss` 24,636 (+8: `__embassy_main::POOL` grows from 704 to 712 bytes, measured with `llvm-nm -S`), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 118,944 bytes |
+| Embedded identity | `strings` on the release `bt2usb` ELF | The version `0.1.0`, the working tree's commit followed by `-dirty` (the tree held the uncommitted change), and the profile strings are in `.rodata` |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped, including the new staging refusal test; `ruff check` and `ruff format --check` passed |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record; the new pattern matched `version 0.1.0, commit <working-tree commit>-dirty, debug build` |
+| Reset reason on the target | Review | Built and reviewed, not tested: Renode's nRF52840 model and the host tests do not run `main`'s register read; which causes a board reports after `mask run`, the reset button, and a power cycle is a first-flash check ([3. Real firmware](first-flash.md#3-real-firmware)) |
+| Hosted CI | GitHub Actions | Push run 38108019218 (`55b6492`), the commit before this one, passed every job, including the vendored-portal tests on Windows |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
 
 ## Validation Record — 2026-10-11, Portal Clears Only Its Own Wait
 

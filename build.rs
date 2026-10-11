@@ -10,6 +10,10 @@
 //! the SoftDevice-free `sim` build link at the SoftDevice offset. Keeping the
 //! sources as `memory_sd.x` / `memory_sim.x` ensures OUT_DIR/memory.x is the
 //! only `memory.x` and is always the one used.
+//!
+//! It also passes the build's identity to the crate (`src/diagnostics.rs`),
+//! which the firmware logs at boot: the git commit, the Cargo profile, and the
+//! `DEFMT_LOG` filter.
 
 #![allow(
     clippy::unwrap_used,
@@ -18,7 +22,8 @@
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // The firmware's constants, compiled here too so the linker script and the
 // pairing store read the storage pages from one place.
@@ -71,4 +76,81 @@ fn main() {
     // ...and, crucially, re-run when the `sim` feature toggles, otherwise cargo
     // would reuse a previously-copied memory.x with the wrong layout.
     println!("cargo:rerun-if-env-changed=CARGO_FEATURE_SIM");
+
+    // The build's identity for the boot log (`src/diagnostics.rs`).
+    println!("cargo:rustc-env=BT2USB_SOURCE_COMMIT={}", source_commit());
+    println!(
+        "cargo:rustc-env=BT2USB_BUILD_PROFILE={}",
+        env::var("PROFILE").unwrap()
+    );
+    println!("cargo:rerun-if-env-changed=DEFMT_LOG");
+    let log_filter = env::var("DEFMT_LOG").unwrap_or_else(|_| "unset".into());
+    println!("cargo:rustc-env=BT2USB_DEFMT_LOG={log_filter}");
+}
+
+/// The commit the firmware was built from, as the boot log reports it: the
+/// checkout's `HEAD` with `-dirty` when tracked files differ from it (the
+/// test `scripts/release.py` applies), else `BT2USB_SOURCE_COMMIT` for a build
+/// outside git, else `unknown`.
+///
+/// The script reruns when `HEAD` moves (a checkout or a commit) and when a
+/// firmware source changes, so the flag follows edits to the code it builds;
+/// a change only to other tracked files, such as the documents, leaves the
+/// flag from the last run.
+fn source_commit() -> String {
+    println!("cargo:rerun-if-env-changed=BT2USB_SOURCE_COMMIT");
+    for source in ["src", "vendor", "Cargo.toml", "Cargo.lock", ".cargo"] {
+        println!("cargo:rerun-if-changed={source}");
+    }
+    let Some(commit) = git(&["rev-parse", "HEAD"]).filter(|c| is_full_commit(c)) else {
+        return match env::var("BT2USB_SOURCE_COMMIT") {
+            Ok(commit) => {
+                assert!(
+                    is_full_commit(&commit),
+                    "BT2USB_SOURCE_COMMIT must be a full 40-digit lower-case commit"
+                );
+                commit
+            }
+            Err(_) => "unknown".into(),
+        };
+    };
+    // `HEAD` names the branch, whose ref moves on a commit; a packed ref
+    // lives in `packed-refs`. Watch only the files that exist: Cargo reruns
+    // the script on every build for a missing one.
+    let branch = git(&["symbolic-ref", "-q", "HEAD"]);
+    let watched = ["HEAD", branch.as_deref().unwrap_or("HEAD"), "packed-refs"];
+    for name in watched {
+        if let Some(path) = git(&["rev-parse", "--git-path", name]) {
+            if Path::new(&path).exists() {
+                println!("cargo:rerun-if-changed={path}");
+            }
+        }
+    }
+    // `--no-optional-locks` keeps `git status` from rewriting the index.
+    let changes = git(&[
+        "--no-optional-locks",
+        "status",
+        "--porcelain",
+        "--untracked-files=no",
+    ]);
+    match changes {
+        Some(changes) if changes.is_empty() => commit,
+        _ => format!("{commit}-dirty"),
+    }
+}
+
+/// Runs git in the crate root and returns its trimmed output, or `None` when
+/// git is missing or fails.
+fn git(args: &[&str]) -> Option<String> {
+    let output = Command::new("git").args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()
+        .map(|text| text.trim().to_owned())
+}
+
+fn is_full_commit(text: &str) -> bool {
+    text.len() == 40 && text.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }

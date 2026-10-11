@@ -32,6 +32,7 @@
 
 mod ble;
 mod config;
+mod diagnostics;
 mod ui;
 
 // The pure parts of the paired-device store, mounted as the host library mounts
@@ -187,6 +188,13 @@ async fn main(spawner: Spawner) {
     slog!(
         console,
         "bt2usb-sim starting (SoftDevice-free Renode build)"
+    );
+    slog!(
+        console,
+        "version {}, commit {}, {} build",
+        diagnostics::FIRMWARE_VERSION,
+        diagnostics::SOURCE_COMMIT,
+        diagnostics::BUILD_PROFILE
     );
 
     spawner.spawn(unwrap!(button_task(p.P0_11.into(), ButtonEvent::Up)));

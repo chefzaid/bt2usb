@@ -293,6 +293,10 @@ pub enum Action<A> {
     },
     /// Persist a newly connected device (+ its bond) to flash.
     PersistDevice(DeviceInfo<A>),
+    /// Drop the keys of any pairing made with the device at this address that
+    /// the store has not saved: its attempt ended before the link was
+    /// reported up, so nothing will save them.
+    DiscardUnsavedBond(A),
     /// Emit a UI event.
     Emit(UiEvent),
 }
@@ -402,89 +406,11 @@ pub fn plan_disconnect<A: Clone + PartialEq>(
     actions
 }
 
-/// A slot worker reported a successful connection.
-pub fn on_slot_connected<A: Clone + PartialEq>(
-    manager: &mut ConnManager<A>,
-    slot: usize,
-    attempt: u32,
-    device: &DeviceInfo<A>,
-) -> Vec<Action<A>, 2> {
-    let mut actions = Vec::new();
-    if !manager.is_current(slot, attempt) {
-        return actions;
-    }
-    manager.connect_slot(slot, device);
-    let _ = actions.push(Action::PersistDevice(device.clone()));
-    let _ = actions.push(Action::Emit(UiEvent::Connected(connection_summary(
-        manager,
-    ))));
-    actions
-}
-
-/// A slot worker reported its slot free.
-pub fn on_slot_disconnected<A: Clone + PartialEq>(
-    manager: &mut ConnManager<A>,
-    slot: usize,
-    attempt: u32,
-) -> Vec<Action<A>, 1> {
-    let mut actions = Vec::new();
-    if !manager.is_current(slot, attempt) {
-        return actions;
-    }
-    manager.disconnect_slot(slot);
-    let _ = actions.push(Action::Emit(link_state(manager)));
-    actions
-}
-
-/// A slot worker's established link dropped (peer asleep, out of range or
-/// powered off) and the worker is now silently trying to reconnect to it.
-///
-/// The slot stays reserved for that device, under the same attempt number,
-/// so a connect request for another device cannot take it (selecting the same
-/// device turns the retry into a user connection, see [`plan_connect`]), and
-/// the UI shows only the links that are actually up.
-pub fn on_slot_link_lost<A: Clone + PartialEq>(
-    manager: &mut ConnManager<A>,
-    slot: usize,
-    attempt: u32,
-    device: &DeviceInfo<A>,
-) -> Vec<Action<A>, 1> {
-    let mut actions = Vec::new();
-    if !manager.is_current(slot, attempt) {
-        return actions;
-    }
-    manager.set_slot(slot, device, attempt, false, true);
-    let _ = actions.push(Action::Emit(link_state(manager)));
-    actions
-}
-
-/// A slot worker reported an error. When `retrying`, the failed attempt was
-/// a user connection that took over a background reconnect, and the worker
-/// has gone back to that reconnect, so the slot stays reserved for the
-/// device under the same attempt number; otherwise the slot is free.
-pub fn on_slot_error<A: Clone + PartialEq>(
-    manager: &mut ConnManager<A>,
-    slot: usize,
-    attempt: u32,
-    tag: ErrorTag,
-    retrying: bool,
-) -> Vec<Action<A>, 2> {
-    let mut actions = Vec::new();
-    if !manager.is_current(slot, attempt) {
-        return actions;
-    }
-    match manager.slots.get_mut(slot) {
-        Some(entry) if retrying => {
-            entry.connected = false;
-            entry.connecting = true;
-            entry.retrying = true;
-        }
-        _ => manager.disconnect_slot(slot),
-    }
-    let _ = actions.push(Action::Emit(UiEvent::Error(tag)));
-    let _ = actions.push(Action::Emit(link_state(manager)));
-    actions
-}
+// The reducers for slot-worker events live in a child module, which can read
+// the slots' private state as this module does.
+#[path = "coordinator_events.rs"]
+mod events;
+pub use events::*;
 
 #[cfg(test)]
 #[path = "coordinator_tests.rs"]

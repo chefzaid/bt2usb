@@ -50,7 +50,7 @@ const FLASH_RETRY_BACKOFF_MS: u64 = 20;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BondRefused;
 
-fn refuse_bond() -> Result<(), BondRefused> {
+fn refuse_bond<T>() -> Result<T, BondRefused> {
     warn!("Device store refused a bond whose identity is not public or random static");
     Err(BondRefused)
 }
@@ -337,11 +337,13 @@ impl DeviceStore {
         .await
     }
 
-    /// Add a newly paired device. A device whose bond names an identity that
-    /// is not a public or random static address is not stored, and
-    /// `Err(BondRefused)` returned (see [`DeviceList::add`]). `Bonder` refuses
-    /// such a bond when it is made, so this is a second line of defense.
-    pub fn add(&mut self, device: PairedDevice) -> Result<(), BondRefused> {
+    /// Add a newly paired device, returning the identity address of a device
+    /// evicted to make room when that device had keys, which the bonder must
+    /// drop as well. A device whose bond names an identity that is not a
+    /// public or random static address is not stored, and `Err(BondRefused)`
+    /// returned (see [`DeviceList::add`]). `Bonder` refuses such a bond when it
+    /// is made, so this is a second line of defense.
+    pub fn add(&mut self, device: PairedDevice) -> Result<Option<Address>, BondRefused> {
         let Some(address) = to_peer(device.address) else {
             // The SoftDevice gives every link and advertiser a defined type,
             // so this does not happen; storing nothing is still safer than a
@@ -365,13 +367,14 @@ impl DeviceStore {
             AddOutcome::Added => {
                 info!("Added paired device - now storing {}", self.list.len());
             }
-            AddOutcome::AddedAfterEviction => {
+            AddOutcome::AddedAfterEviction(identity) => {
                 warn!("Paired device store full - evicting oldest entry");
                 info!("Added paired device - now storing {}", self.list.len());
+                return Ok(identity.map(to_address));
             }
             AddOutcome::BondRefused => return refuse_bond(),
         }
-        Ok(())
+        Ok(None)
     }
 
     /// Iterate paired devices most-recently-added first, for auto-reconnect of

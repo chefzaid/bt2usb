@@ -277,14 +277,26 @@ fn a_full_store_evicts_the_oldest_added_device() {
         );
     }
     let newest = identity(MAX_PAIRED_DEVICES as u8);
+    // The evicted device had no keys, so the bonder has nothing to drop.
     assert_eq!(
         list.add(device(newest, "D"), &resolve),
-        AddOutcome::AddedAfterEviction
+        AddOutcome::AddedAfterEviction(None)
     );
     assert_eq!(list.len(), MAX_PAIRED_DEVICES);
     assert_eq!(addresses(&list).first(), Some(&newest));
     assert!(list.find(identity(0), &resolve).is_none());
     assert!(list.find(identity(1), &resolve).is_some());
+}
+
+#[test]
+fn evicting_a_bonded_device_names_its_identity() {
+    let mut list = DeviceList::new();
+    for id in 0..MAX_PAIRED_DEVICES as u8 {
+        list.add(bonded(id, 0, "D"), &resolve);
+    }
+    let outcome = list.add(bonded(MAX_PAIRED_DEVICES as u8, 0, "D"), &resolve);
+    assert_eq!(outcome, AddOutcome::AddedAfterEviction(Some(identity(0))));
+    assert!(list.find(identity(0), &resolve).is_none());
 }
 
 #[test]

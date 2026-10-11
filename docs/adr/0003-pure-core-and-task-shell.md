@@ -38,7 +38,7 @@ The decision recorded here was implemented on 2026-06-22:
   whose "imperative shell" is the task code.
 - `e3bc620` removed the duplicate ("Unify HID classification on the real hid
   module (drop lib.rs duplicate + dead hid/tests.rs)"). `src/lib.rs` became a
-  list of `#[path]` includes of the firmware's own files and is now 159 lines.
+  list of `#[path]` includes of the firmware's own files and is now 166 lines.
 
 The 2026-09-28 hardening (`2479c79`) followed the same pattern for everything
 it added: input aggregation, endpoint delivery, wake policy, long reads,
@@ -51,7 +51,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | Core module (host-tested) | Decides | Shell (firmware only) |
 | --- | --- | --- |
 | [hid/](../../src/hid/): `report_protocol`, `keyboard`, `mouse`, `consumer`, `coalesce`, `aggregate`, `delivery`, `wake`, `host_leds` | Report Map parsing, report classification and serialization, per-source union, endpoint queue and replay policy, wake eligibility, host LED forwarding | [hid_client.rs](../../src/ble/hid_client.rs), [hid_device.rs](../../src/usb/hid_device.rs), [host_requests.rs](../../src/usb/host_requests.rs) |
-| [coordinator.rs](../../src/ble/coordinator.rs) | Slot reservation, the attempt numbers that let the coordinator ignore a replaced attempt's events, and the `Action`s for each command and slot event | `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
+| [coordinator.rs](../../src/ble/coordinator.rs) | Slot reservation, the attempt numbers that let the coordinator ignore a replaced attempt's events, and the `Action`s for each command and slot event (the slot-event reducers in its child module [coordinator_events.rs](../../src/ble/coordinator_events.rs)) | `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
 | [scan_list.rs](../../src/ble/scan_list.rs) | Which HID advertisers a user scan lists, and which listed device a newcomer replaces when the list is full | `scan` in [scanner.rs](../../src/ble/scanner.rs) |
 | [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, whether two saved-device records are the same device, how long a sighting stays usable, when a slot is due a wake, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` and `update` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
@@ -59,6 +59,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [messages.rs](../../src/ble/messages.rs) | The commands and events between the UI and the BLE side, and the per-request management IDs they carry | The channels in [main.rs](../../src/main.rs) and `ble_task` in `multi_conn.rs` |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
+| [bond_table.rs](../../src/ble/bond_table.rs) | Which bonding keys the security handler holds: saved devices' keys beside unsaved pairings, which a new pairing never displaces, and which an unsaved connection's end or a store eviction drops | `Bonder` in [bonder.rs](../../src/ble/bonder.rs), and `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
 | [devices.rs](../../src/storage/devices.rs), [codec.rs](../../src/storage/codec.rs), [framing.rs](../../src/storage/framing.rs), [record.rs](../../src/storage/record.rs) | The paired-device list (fail-closed load, legacy format, identity merge, eviction, Forget and reset candidates), the record codec, and frame and record validation, on SoftDevice-free types; IRK resolution is passed in as a function | `DeviceStore` in `storage.rs`, which converts SoftDevice types and does the flash I/O |
 | [ui_logic.rs](../../src/ui/ui_logic.rs), [controller.rs](../../src/ui/controller.rs), [input_logic.rs](../../src/ui/input_logic.rs), [layout.rs](../../src/ui/layout.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions; the UI loop's decisions (the command each button sends, management request tracking and its deadline); list windowing; each screen's text and where it sits; display retry policy | UI loop in [main.rs](../../src/main.rs) and [sim.rs](../../src/sim.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
@@ -184,6 +185,7 @@ Follow-up obligations:
   `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
   `src/hid_classify_tests.rs`, `src/ble/coordinator_tests.rs`,
   `src/ble/coordinator_attempt_tests.rs`, `src/ble/scan_list_tests.rs`,
+  `src/ble/bond_table_tests.rs`,
   `src/ble/reconnect_tests.rs`, `src/storage/devices_tests.rs`,
   `src/storage/devices_format_tests.rs`, `src/ui/ui_logic_tests.rs`,
   `src/ui/controller_tests.rs`, `src/ui/layout_tests.rs`,
@@ -203,10 +205,10 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 381 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 375 unit tests, 3 integration tests,
+  finds 390 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 384 unit tests, 3 integration tests,
   and 3 glyph-table tests, which passed on 2026-10-11 (the
-  [discovery link-drop record](../testing.md#validation-record--2026-10-11-link-dropped-during-discovery);
+  [bond eviction record](../testing.md#validation-record--2026-10-11-bonds-follow-the-saved-devices);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

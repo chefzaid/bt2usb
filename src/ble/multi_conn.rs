@@ -224,12 +224,14 @@ async fn handle_slot_event(
     slot_txs: &SlotSenders,
     flash: &mut nrf_softdevice::Flash,
 ) {
-    let actions: Vec<Action<Address>, 2> = match event {
+    let actions: Vec<Action<Address>, 3> = match event {
         SlotEvent::Connected {
             slot,
             attempt,
             device,
-        } => coordinator::on_slot_connected(manager, slot, attempt, &device),
+        } => coordinator::on_slot_connected(manager, slot, attempt, &device)
+            .into_iter()
+            .collect(),
         SlotEvent::Disconnected { slot, attempt } => {
             coordinator::on_slot_disconnected(manager, slot, attempt)
                 .into_iter()
@@ -382,16 +384,28 @@ async fn execute_action(
             let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
             let bond = bonder().bond_for_address(device.address);
             paired.bond = bond;
-            if store.add(paired).is_err() {
+            match store.add(paired) {
+                // RAM now holds what the store does: the new keys are saved,
+                // and the keys of a device evicted to make room are gone.
+                Ok(evicted) => {
+                    if let Some(bond) = bond {
+                        bonder().mark_saved(&bond);
+                    }
+                    if let Some(identity) = evicted {
+                        bonder().forget_identity(identity);
+                    }
+                }
                 // The store refuses what `Bonder` should already have
                 // refused; drop exactly those keys so RAM holds what flash
                 // will.
-                if let Some(bond) = bond {
-                    bonder().forget_bond(&bond);
+                Err(_) => {
+                    if let Some(bond) = bond {
+                        bonder().forget_bond(&bond);
+                    }
+                    event_tx
+                        .send(BleEvent::Error(BleErrorTag::BondRefused))
+                        .await;
                 }
-                event_tx
-                    .send(BleEvent::Error(BleErrorTag::BondRefused))
-                    .await;
             }
             if store.save_to_flash(flash).await.is_err() {
                 event_tx
@@ -399,6 +413,7 @@ async fn execute_action(
                     .await;
             }
         }
+        Action::DiscardUnsavedBond(address) => bonder().discard_unsaved(address),
         Action::Emit(ui) => event_tx.send(ui.into()).await,
     }
 }

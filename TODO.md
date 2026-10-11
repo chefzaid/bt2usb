@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 46 | 1 | 0 |
+| [FIXME](#fixme) | 47 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **133** | **72** | **21** |
+| **Total** | **134** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -678,7 +678,7 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   connect, secure, discover, and run phases moved from
   `src/ble/slot_worker.rs` to `src/ble/slot_link.rs`
   ([architecture](docs/architecture.md#background-reconnect)).
-- [ ] **P2** **Keys held in RAM and saved records are evicted separately.**
+- [x] **P2** **Keys held in RAM and saved records are evicted separately.**
   Found by the independent review of "The retry takeover raced the slot's own
   events". `Bonder` keeps the keys of up to four peers in RAM, loaded from
   the store's bonded records at boot, and `on_bonded` drops the oldest of
@@ -691,12 +691,26 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   nothing yet drops the oldest saved device's keys until restart: a slot
   retrying that device stops (`slot N has no keys to reconnect`), and the P0
   Security Request path opens without a fifth device ever being saved. And
-  when one of the four saved records has no bond, so RAM held only three keys,
-  saving a fifth device evicts the oldest record while its keys stay: a slot
-  retrying it keeps retrying and, when it reconnects, saves the record again
-  and evicts another. Accept when the keys in RAM match the store's bonded
+  when one of the four saved records has no bond and is not the oldest, so
+  RAM held only three keys, saving a fifth device evicts the oldest record
+  while its keys stay: a slot retrying it keeps retrying and, when it
+  reconnects, saves the record again and evicts another. Accept when the keys in RAM match the store's bonded
   records except for pairings not yet saved, a pairing that is never saved
-  drops no other device's keys, and host tests show both.
+  drops no other device's keys, and host tests show both. Fixed: the new
+  pure `BondTable` (`src/ble/bond_table.rs`, eight host tests) holds the
+  saved devices' keys plus one unsaved pairing per link (`BOND_SLOTS`, six),
+  and `on_bonded` adds a new peer unsaved instead of dropping the oldest.
+  `PersistDevice` marks the keys saved and, when the store evicts a record,
+  drops its keys by identity address (`AddOutcome::AddedAfterEviction` now
+  names it; `DeviceStore::add` returns it; one host test). An attempt that
+  ends before its link was reported up makes `on_slot_error` or
+  `on_slot_disconnected` return `Action::DiscardUnsavedBond` first, which
+  drops a pairing's unsaved keys and leaves saved ones; the coordinator
+  handles a slot's events in order, so a `Connected` and its save always come
+  before a later report. The slot-event reducers moved to
+  `src/ble/coordinator_events.rs`, a child module of `coordinator.rs`, to
+  keep it under 500 lines
+  ([security](docs/security.md#pairing-and-authentication)).
 
 ## Needs Your Input
 
@@ -860,8 +874,9 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   `vendor/nrf-softdevice/src/ble/gap.rs`). Since 2026-10-11 a background
   reconnect starts an attempt only while `Bonder` holds the device's keys, so
   the crate answers such a request by encrypting with them; a pairing can
-  still start when a pairing on the other slot drops the keys during an
-  attempt or while the link it opened is up. Accept when a
+  still start when saving a device on the other slot evicts this device's
+  record and keys during an attempt or while the link it opened is up.
+  Accept when a
   Security Request on a link whose request does not allow pairing cannot create
   or replace a bond, shown by a test or by recorded on-air evidence
   ([security](docs/security.md#threat-model)).
@@ -1168,14 +1183,16 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   `src/storage.rs`, `Bonder::on_bonded` in `src/ble/bonder.rs`), leaving
   only the `Updated existing paired device` log line. A full store evicts its
   oldest peer with only the
-  `Paired device store full - evicting oldest entry` log line. A background
+  `Paired device store full - evicting oldest entry` log line, and its keys
+  go with it, so a slot retrying that peer stops with only
+  `slot {} has no keys to reconnect` in the log. A background
   reconnect whose link cannot be secured because the peer lost its keys fails
   with `ConnectFailed`, which a silent reconnect treats as "try again"
   (`connection_slot_task` in `src/ble/slot_worker.rs`); the slot retries after
   each `BLE_RECONNECT_BACKOFF_MS` pause, with no limit, and the UI shows
   nothing until the user selects the device, which ends in `Connect failed`.
-  A device the store holds no keys for is no longer retried: since
-  2026-10-11 its slot is freed and only the log says why
+  A device the bridge (`Bonder`) holds no keys for is no longer retried:
+  since 2026-10-11 its slot is freed and only the log says why
   (`slot {} has no keys to reconnect`, `slot {} link lost; no keys to
   reconnect`). Accept when UI tests cover every state; the user is told, before or
   when it happens, that a pairing replaced an existing peer's bond or evicted

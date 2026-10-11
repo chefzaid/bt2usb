@@ -144,7 +144,7 @@ implemented in the source cited; none is hardware-verified.
 | Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [slot_link.rs](../src/ble/slot_link.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Advertise a look-alike HID device so the user selects and pairs it, then inject input | Pairing only after an explicit Connect from the device list (`allow_pairing`, [slot_worker.rs](../src/ble/slot_worker.rs)); only advertisements carrying the HID UUID are listed (`merge_advertisement` in [scan_list.rs](../src/ble/scan_list.rs)) | Names are attacker-chosen and the list shows names only; no confirmation code, allowlist, or pairing window. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Act as a man in the middle during pairing | None: `IoCapabilities::None` offers no user-confirmed authentication | TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing); [ADR 0011](adr/0011-interim-just-works-pairing.md) records the interim decision |
-| Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. Since 2026-10-11 a background reconnect runs only while `Bonder` holds the device's keys, so a peer's Security Request on it is answered by encrypting with them; if a pairing on the other slot drops those keys while an attempt is under way or while the link it opened is up, a Security Request makes the vendored crate request pairing; untested. TODO: [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing) |
+| Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. Since 2026-10-11 a background reconnect runs only while `Bonder` holds the device's keys, so a peer's Security Request on it is answered by encrypting with them; if saving a device on the other slot evicts this device's record and keys while an attempt is under way or while the link it opened is up, a Security Request makes the vendored crate request pairing; untested. TODO: [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Fill the scan list with fake HID advertisers, or jam the radio | Scan list bounded to `BLE_MAX_DISCOVERED` (8), keeping the eight HID advertisers received most strongly (`merge_advertisement` in [scan_list.rs](../src/ble/scan_list.rs)); scan window 8 s plus a 2 s backstop; connect attempts bounded to 6 s ([config.rs](../src/config.rs), [scanner.rs](../src/ble/scanner.rs)) | Fake advertisers received more strongly than the intended device, such as a transmitter closer to the bridge, can still push it out of the list, and a listed name is whatever the advertiser chooses ([ADR 0011](adr/0011-interim-just-works-pairing.md)); jamming cannot be prevented |
 | Nearby attacker | Crash or hang the bridge with malformed advertisements | Bounded AD-structure walk and UTF-8 name handling ([adv_parser.rs](../src/ble/adv_parser.rs)) | No fuzzing. TODO: [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) |
 | Paired peripheral (malicious or compromised) | Type or click anything, including consumer usages and host wake | By design it is trusted as local input; consumer usages capped at `0x0FFF`; wake only on a newly pressed input ([wake.rs](../src/hid/wake.rs)) | No per-device capability limits: a peer whose Report Map declares a keyboard can type. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
@@ -198,8 +198,14 @@ Just Works pairing.
 Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
 
 - `on_bonded` replaces the entry whose identity address equals the new one, or
-  whose IRK resolves the connection's address; otherwise it appends, evicting
-  the oldest in-memory bond when `MAX_PAIRED_DEVICES` (4) are held.
+  whose IRK resolves the connection's address; otherwise it adds the bond as
+  unsaved. The table ([bond_table.rs](../src/ble/bond_table.rs)) holds the
+  `MAX_PAIRED_DEVICES` (4) saved devices' keys plus one unsaved pairing per
+  link (`BOND_SLOTS`, 6), so a new pairing never displaces a saved device's
+  keys. A saved device's keys go when the store evicts or forgets its record
+  (`Bonder::forget_identity`, `Bonder::forget`); an unsaved pairing's keys go
+  when its attempt ends before the link was reported up
+  (`Action::DiscardUnsavedBond`, `Bonder::discard_unsaved`).
 - The identity address and IRK are asserted by the peer during pairing. A newly
   paired device that claims an existing peer's identity address replaces that
   peer's bond in memory and, on its first successful connection, in flash.
@@ -232,10 +238,9 @@ reconnect starts an attempt only while `Bonder` holds the device's keys
 (`connection_slot_task` checks before each attempt, and power-up skips a
 stored peer without a bond), so the crate answers such a request by
 encrypting. The keys can still disappear while an attempt is under way or
-while the link it opened is up: a pairing on the other slot that bonds while
-`Bonder` holds four keys drops the oldest, even if that device is never saved
-(the RAM keys and the store's records are evicted separately, a
-[FIXME](../TODO.md#fixme)). During an attempt the firmware's own `encrypt()`
+while the link it opened is up: saving a fifth device on the other slot
+evicts the oldest record and its keys, which may be this device's (a pairing
+that is not saved evicts nothing). During an attempt the firmware's own `encrypt()`
 then finds no keys and closes the link, but whether a peer-requested pairing
 can complete first has not been tested; on a link already up nothing closes
 it, and the crate answers the peer's request by pairing. Closing this path is

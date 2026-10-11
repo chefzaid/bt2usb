@@ -334,6 +334,8 @@ impl SimBle {
                     let _ = events.push(Event::Error(ErrorTag::StorageFailed));
                 }
             }
+            // The simulation pairs nothing, so it holds no keys to discard.
+            Action::DiscardUnsavedBond(_) => {}
             Action::Emit(event) => {
                 let _ = events.push(event.into());
             }

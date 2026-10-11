@@ -43,7 +43,7 @@ are not translated.
 | Capability | Status | Source | More detail |
 | --- | --- | --- | --- |
 | BLE scan with HID filtering and name merging | Software-verified (parsing, merging) | [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/adv_parser.rs`](../src/ble/adv_parser.rs), [`ble/scan_list.rs`](../src/ble/scan_list.rs) | [Scanning](#scanning) |
-| Just Works bonding with encrypted links required | Implemented | [`ble/bonder.rs`](../src/ble/bonder.rs), [`ble/slot_link.rs`](../src/ble/slot_link.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
+| Just Works bonding with encrypted links required | Implemented | [`ble/bonder.rs`](../src/ble/bonder.rs), [`ble/bond_table.rs`](../src/ble/bond_table.rs), [`ble/slot_link.rs`](../src/ble/slot_link.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
 | Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/bonder.rs`](../src/ble/bonder.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
 | Report Map long reads up to 512 bytes | Software-verified (fragment assembly) | [`ble/long_read.rs`](../src/ble/long_read.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
@@ -270,17 +270,12 @@ connect it again from a scan, or after a restart if it is one of the two most
 recently added devices with keys. Forget and Factory reset also stop the
 retries of the slots they target, and remove the record.
 
-Pairing a fifth device evicts the oldest saved one: its keys leave memory as
-soon as the new pairing bonds, and its record leaves the store when the new
-device is saved. A slot still retrying the evicted device stops and is freed,
-and the log shows `slot N has no keys to reconnect`. The two evictions are
-separate, which leaves two gaps until they are kept in step
-([FIXME](../TODO.md#fixme)). A pairing that bonds but is never saved, because
-its HID discovery failed or it was cancelled, still drops the oldest device's
-keys until the next restart, while that device's record stays. And when one
-of the four saved devices has no keys, saving a fifth evicts the oldest record
-while its keys stay in memory, so a slot retrying it keeps retrying and saves
-it again if it reconnects.
+Saving a fifth device evicts the oldest saved one, its record and its keys
+together, and a slot still retrying it stops and is freed, logging
+`slot N has no keys to reconnect`. A pairing that is never saved, because its
+HID discovery failed or it was cancelled, evicts nothing: until a device is
+saved, its keys are held beside the saved devices' keys, and they are
+discarded when its connection ends unsaved.
 
 The screen stays on Home until a saved device connects, then shows Connected.
 An error stays until acknowledged with DOWN. A scan you start yourself keeps its
@@ -467,8 +462,9 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   nrf-softdevice event handler still answers a peripheral's own security
   request by pairing when it holds no keys for that peer
   ([`gap.rs`](../vendor/nrf-softdevice/src/ble/gap.rs)), which a background
-  reconnect meets only when the keys are dropped while its attempt is under
-  way or while the link it opened is up
+  reconnect meets only when saving another device evicts this device's record,
+  and with it its keys, while its attempt is under way or while the link it
+  opened is up
   ([technical boundaries](#current-technical-boundaries)).
 - Bonds are scoped to the peer's identity. Re-pairing replaces only the keys of
   the peer whose identity address or identity key matches, never another
@@ -541,8 +537,8 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   the same device takes the retry over, and a failed takeover hands the slot
   back to the retry.
 - A retry runs only while the bridge holds the device's keys: power-up skips
-  a saved device without them, and a retry whose keys a newer pairing evicted
-  stops and frees its slot.
+  a saved device without them, and a retry whose record saving a newer device
+  evicted, keys included, stops and frees its slot.
 - Every reservation of a slot is numbered, and a report from an attempt the
   bridge has since replaced is ignored, so a late report from a retry cannot
   end or complete the connection that took it over
@@ -927,8 +923,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 381 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 375 unit tests, the 3
+- The source contains 390 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 384 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), and
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   all of which run with `mask test`.
@@ -1075,10 +1071,10 @@ implemented, so do not describe them as features.
   never starts pairing for a background reconnect, and since 2026-10-11 runs
   one only while it holds the device's keys, so the device's own request to
   pair is answered by encrypting with those keys (read from the code path;
-  not yet shown by a test or on air). If pairing another device drops those
-  keys while an attempt is under way, or while the link it opened is up, and
-  the device at the other end then asks to pair, the pairing still goes ahead
-  without you choosing anything
+  not yet shown by a test or on air). If saving another device evicts this
+  one's record, and with it its keys, while an attempt is under way or while
+  the link it opened is up, and the device at the other end then asks to
+  pair, the pairing still goes ahead without you choosing anything
   ([Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing)).
 - **The scan list holds eight devices.** Since 2026-10-10 it keeps the eight
   HID advertisers received most strongly, so a peripheral held next to the

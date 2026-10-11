@@ -80,10 +80,14 @@ protects.
 - **Persistence.** After a successful connection the coordinator persists the
   device with the bond the handler holds, using the fail-closed store from
   [ADR 0006](0006-fail-closed-pairing-store.md). The store keeps the bond's
-  identity address rather than the advertised private address. The handler
-  and the store each hold at most `MAX_PAIRED_DEVICES` (4) peers and evict
-  their oldest entry when a new peer arrives while full; the store logs
-  `Paired device store full - evicting oldest entry`.
+  identity address rather than the advertised private address. The store
+  holds at most `MAX_PAIRED_DEVICES` (4) peers and evicts its oldest entry
+  when a new peer is saved while full, logging
+  `Paired device store full - evicting oldest entry`. Since 2026-10-11 the
+  handler follows it: it holds the saved peers' keys plus one unsaved pairing
+  per link, drops the evicted peer's keys when the store evicts it, and
+  discards a pairing whose connection ended before it was saved
+  ([bond_table.rs](../../src/ble/bond_table.rs)).
 - **Superseded by authenticated pairing.** No new feature may depend on Just
   Works being the pairing method. The replacement is a new ADR written before
   the P0 "Authenticated pairing and enrollment policy" item is implemented.
@@ -161,8 +165,9 @@ Negative:
   which updates the in-memory bond cache. Since 2026-10-11 a background
   reconnect starts an attempt only while `Bonder` holds the device's keys
   (power-up skips a stored peer without a bond, and each attempt checks
-  first), so this arises only when a pairing on the other slot drops those
-  keys during an attempt or while the link it opened is up; on a link already
+  first), so this arises only when saving a device on the other slot evicts
+  this peer's record and keys during an attempt or while the link it opened
+  is up; on a link already
   up the slot does not close it. Whether such a pairing can complete has not
   been tested or observed; the TODO item below exists to close this path.
 - The connect path tries stored keys first and requests pairing only when no

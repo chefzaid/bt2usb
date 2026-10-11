@@ -330,6 +330,18 @@ list ends with a "Factory reset" entry, and UP on the first entry goes back.
       "Pairings reset" notice, reset the board (the firmware does not reboot by
       itself); no prior peer auto-reconnects. Re-pair the test keyboard/mouse
       afterwards.
+- [ ] **Fifth device:** with four test devices saved, the oldest still
+      powered and reconnecting, pair a fifth. The log shows
+      `Paired device store full - evicting oldest entry`; the oldest device
+      leaves the "Saved devices" list, and when its link next drops or the
+      board resets it no longer reconnects (`slot N has no keys to
+      reconnect` if its slot was retrying). The other three still reconnect
+      after a reset.
+- [ ] **Unsaved pairing evicts nothing:** with four test devices saved, start
+      pairing a BLE device that is not a keyboard or mouse (a phone or a
+      heart-rate strap that bonds), so that it ends in `No HID service` or
+      `Connect failed`. All four saved devices still reconnect, including
+      after a link loss, and the list still shows them.
 - [ ] **Failure reporting:** inject a flash write failure in a controlled test.
       The UI retains a storage error and does not report deletion/enrollment
       success. Record cached/persistent state and behavior after reboot. No

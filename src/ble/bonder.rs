@@ -3,13 +3,17 @@
 //!
 //! [`Bonder`] keeps the bonds loaded from flash and those made since boot,
 //! finds a bonded peer's keys when a link is encrypted again, and replaces only
-//! the bonding peer's own record on a new pairing. Its
+//! the bonding peer's own record on a new pairing. The pure
+//! [`bond_table`](crate::ble::bond_table)
+//! keeps a new pairing apart from the saved devices' keys until the store
+//! saves it, so the keys in RAM follow the store's records. Its
 //! `conn_param_update_request` bounds a peripheral's request through the pure
 //! [`conn_params`] policy (docs/adr/0016-bounded-peer-connection-parameters.md).
 //! Every connection slot shares the one instance returned by [`bonder`].
 
 use core::cell::RefCell;
 
+use crate::ble::bond_table::{BondTable, Inserted, BOND_SLOTS};
 use crate::ble::conn_params::{self, ConnParamLimits, ConnParams};
 use crate::config;
 use crate::config::{BLE_MAX_CONNECTIONS, MAX_PAIRED_DEVICES};
@@ -46,7 +50,8 @@ pub(crate) fn key_matches(key: &IdentityKey, address: Address) -> bool {
 }
 
 pub(crate) struct Bonder {
-    peers: RefCell<Vec<BondInfo, MAX_PAIRED_DEVICES>>,
+    /// The saved devices' keys and those of pairings not saved yet.
+    peers: RefCell<BondTable<BondInfo, BOND_SLOTS>>,
     /// The addresses of links whose pairing named an identity the store
     /// refuses, until [`Self::take_refused`] reports them.
     refused: RefCell<Vec<Address, BLE_MAX_CONNECTIONS>>,
@@ -55,7 +60,7 @@ pub(crate) struct Bonder {
 impl Bonder {
     fn new() -> Self {
         Self {
-            peers: RefCell::new(Vec::new()),
+            peers: RefCell::new(BondTable::new()),
             refused: RefCell::new(Vec::new()),
         }
     }
@@ -85,20 +90,16 @@ impl Bonder {
         }
     }
 
+    /// Hold exactly the store's bonds, all saved.
     pub(crate) fn load_bonds(&self, bonds: &Vec<BondInfo, MAX_PAIRED_DEVICES>) {
         let mut peers = self.peers.borrow_mut();
-        peers.clear();
-        for bond in bonds {
-            if let Some(existing) = peers
-                .iter_mut()
-                .find(|p| p.peer_id.addr == bond.peer_id.addr)
-            {
-                *existing = *bond;
-            } else {
-                let _ = peers.push(*bond);
-            }
-        }
-        info!("Loaded {} BLE bonds into security handler", peers.len());
+        peers.load(bonds.iter().copied(), |held, bond| {
+            held.peer_id.addr == bond.peer_id.addr
+        });
+        info!(
+            "Loaded {} BLE bonds into security handler",
+            peers.saved_len()
+        );
     }
 
     pub(crate) fn bond_for_address(&self, address: Address) -> Option<BondInfo> {
@@ -112,14 +113,34 @@ impl Bonder {
     pub(crate) fn forget(&self, address: Address) {
         self.peers
             .borrow_mut()
-            .retain(|bond| !key_matches(&bond.peer_id, address));
+            .forget(|bond| key_matches(&bond.peer_id, address));
     }
 
     /// Drop exactly `bond`. [`Self::forget`] drops every bond whose key matches
     /// an address, and peers that distributed no IRK all hold the all-zero
     /// key, which resolves any private address built from it.
     pub(crate) fn forget_bond(&self, bond: &BondInfo) {
-        self.peers.borrow_mut().retain(|kept| kept != bond);
+        self.peers.borrow_mut().forget(|kept| kept == bond);
+    }
+
+    /// Drop the keys of the device the store evicted, by its identity address.
+    pub(crate) fn forget_identity(&self, identity: Address) {
+        self.peers
+            .borrow_mut()
+            .forget(|bond| bond.peer_id.addr == identity);
+    }
+
+    /// The store saved `bond`: a later failed connection no longer discards it.
+    pub(crate) fn mark_saved(&self, bond: &BondInfo) {
+        self.peers.borrow_mut().mark_saved(bond);
+    }
+
+    /// Drop the keys of a pairing with the device at `address` that the store
+    /// never saved, because its attempt ended first. Saved keys stay.
+    pub(crate) fn discard_unsaved(&self, address: Address) {
+        self.peers
+            .borrow_mut()
+            .discard_unsaved(|bond| key_matches(&bond.peer_id, address));
     }
 
     pub(crate) fn clear(&self) {
@@ -160,29 +181,22 @@ impl SecurityHandler for Bonder {
             return;
         }
         drop(refused);
-        let mut peers = self.peers.borrow_mut();
-        // MasterId is not a peer identity (LE Secure Connections can use the
-        // same all-zero EDIV/RAND for multiple peers). Re-pairing replaces only
-        // this peer's keys and must not overwrite another keyboard's bond.
-        if let Some(existing) = peers
-            .iter_mut()
-            .find(|p| p.peer_id.addr == peer_id.addr || key_matches(&p.peer_id, link))
-        {
-            existing.master_id = master_id;
-            existing.key = key;
-            existing.peer_id = peer_id;
-            return;
-        }
-
-        if peers.is_full() {
-            peers.remove(0);
-        }
-
-        let _ = peers.push(BondInfo {
+        let bond = BondInfo {
             master_id,
             key,
             peer_id,
+        };
+        // MasterId is not a peer identity (LE Secure Connections can use the
+        // same all-zero EDIV/RAND for multiple peers). Re-pairing replaces only
+        // this peer's keys and must not overwrite another keyboard's bond. A
+        // new peer is held unsaved, beside every saved device's keys, until
+        // the store saves it.
+        let inserted = self.peers.borrow_mut().insert(bond, |held| {
+            held.peer_id.addr == peer_id.addr || key_matches(&held.peer_id, link)
         });
+        if inserted == Inserted::AddedAfterDroppingUnsaved {
+            warn!("Bond table full - dropped the oldest unsaved pairing");
+        }
     }
 
     fn get_key(&self, conn: &Connection, master_id: MasterId) -> Option<EncryptionInfo> {

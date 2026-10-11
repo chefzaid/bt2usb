@@ -179,8 +179,10 @@ pub enum AddOutcome {
     Updated,
     /// Appended to a list with room.
     Added,
-    /// Appended after evicting the oldest-added device from a full list.
-    AddedAfterEviction,
+    /// Appended after evicting the oldest-added device from a full list. Holds
+    /// the evicted device's identity address when it had keys, which the
+    /// shell drops from the bonder too.
+    AddedAfterEviction(Option<PeerAddress>),
     /// Not stored: its bond names an identity that is not a public or random
     /// static address ([`AddressKind::is_identity`]).
     BondRefused,
@@ -355,16 +357,15 @@ impl DeviceList {
             }
             return AddOutcome::Unchanged;
         }
-        let evicted = self.devices.is_full();
-        if evicted {
-            self.devices.remove(0);
-        }
+        let evicted = self
+            .devices
+            .is_full()
+            .then(|| self.devices.remove(0).bond.map(|bond| bond.identity));
         let _ = self.devices.push(device);
         self.dirty = true;
-        if evicted {
-            AddOutcome::AddedAfterEviction
-        } else {
-            AddOutcome::Added
+        match evicted {
+            Some(identity) => AddOutcome::AddedAfterEviction(identity),
+            None => AddOutcome::Added,
         }
     }
 

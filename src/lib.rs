@@ -5,13 +5,13 @@
 //! reimplementation. This crate root simply exposes the hardware-free modules so
 //! they can be unit-tested on the host with `cargo test` / `mask test`.
 //!
-//! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
-//! reconnect, scan_list, long_read, management, messages}`, `ui::{controller, ui_logic,
+//! The library compiles `hid`, `ble::{adv_parser, bond_table, conn_params,
+//! coordinator, reconnect, scan_list, long_read, management, messages}`, `ui::{controller, ui_logic,
 //! input_logic, layout, display_logic}` and
 //! `power_logic`, plus `storage::{codec, devices, framing, record}` under `cfg(test)` only, and
 //! `config`, whose capacities the pure modules size their buffers from.
-//! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, bonder,
-//! hid_client, scanner}`,
+//! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, slot_link,
+//! bonder, hid_client, scanner}`,
 //! the `storage` shell, `usb`, `power`, `sd_setup`, `stack`,
 //! `ui::{display, buttons}`) are *not* included here.
 
@@ -29,6 +29,9 @@ pub mod hid;
 
 #[path = "ble/adv_parser.rs"]
 mod ble_adv_parser_impl;
+
+#[path = "ble/bond_table.rs"]
+mod ble_bond_table_impl;
 
 #[path = "ble/conn_params.rs"]
 mod ble_conn_params_impl;
@@ -90,6 +93,10 @@ pub mod ble {
         pub use crate::ble_adv_parser_impl::{
             advertised_name, contains_hid_service_uuid, extract_device_name,
         };
+    }
+    /// The bonding keys held in RAM, saved or not yet saved.
+    pub mod bond_table {
+        pub use crate::ble_bond_table_impl::*;
     }
     /// Pure bounds for a peripheral's connection parameter request.
     pub mod conn_params {

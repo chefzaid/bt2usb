@@ -97,9 +97,12 @@ fn a_failed_takeover_goes_back_to_the_retry() {
     plan_connect(&mut m, core::slice::from_ref(&kb), 0, PartialEq::eq);
     let attempt = m.slot_attempt(0);
     let acts = on_slot_error(&mut m, 0, attempt, ErrorTag::ConnectFailed, true);
+    // A pairing the failed connection made was never saved; the retry's own
+    // keys are saved, so discarding leaves them.
     assert_eq!(
         acts.as_slice(),
         &[
+            Action::DiscardUnsavedBond(7),
             Action::Emit(UiEvent::Error(ErrorTag::ConnectFailed)),
             Action::Emit(UiEvent::Disconnected),
         ]
@@ -140,9 +143,11 @@ fn a_reserved_slot_is_freed_when_its_attempt_ends() {
         let mut m = mgr();
         let attempt = reserve(&mut m);
         let acts = on_slot_error(&mut m, 0, attempt, ErrorTag::HidNotFound, false);
+        // Any pairing the attempt made goes with it: it was never saved.
         assert_eq!(
             acts.as_slice(),
             &[
+                Action::DiscardUnsavedBond(7),
                 Action::Emit(UiEvent::Error(ErrorTag::HidNotFound)),
                 Action::Emit(UiEvent::Disconnected),
             ]
@@ -159,7 +164,13 @@ fn a_reserved_slot_is_freed_when_its_attempt_ends() {
         let mut m = mgr();
         let attempt = reserve(&mut m);
         let acts = on_slot_disconnected(&mut m, 0, attempt);
-        assert_eq!(acts.as_slice(), &[Action::Emit(UiEvent::Disconnected)]);
+        assert_eq!(
+            acts.as_slice(),
+            &[
+                Action::DiscardUnsavedBond(7),
+                Action::Emit(UiEvent::Disconnected),
+            ]
+        );
         assert!(!m.is_slot_occupied(0));
         assert_eq!(m.find_empty_slot(), Some(0));
     }

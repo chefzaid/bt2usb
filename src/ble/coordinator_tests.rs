@@ -232,7 +232,8 @@ fn on_slot_disconnected_last_link_emits_disconnected() {
     let mut m = mgr();
     let attempt = m.connect_slot(0, &dev(1, "kb"));
     let acts = on_slot_disconnected(&mut m, 0, attempt);
-    assert_eq!(acts[0], Action::Emit(UiEvent::Disconnected));
+    // The connected device was saved when it connected: nothing to discard.
+    assert_eq!(acts.as_slice(), &[Action::Emit(UiEvent::Disconnected)]);
 }
 
 #[test]

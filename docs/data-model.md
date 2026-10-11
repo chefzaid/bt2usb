@@ -67,7 +67,7 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 8 host tests | None recorded |
 | Record prefix and bond-flag validation | [storage/record.rs](../src/storage/record.rs) | 3 host tests | None recorded |
 | Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
-| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 17 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
+| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 18 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
 | Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
@@ -307,6 +307,15 @@ which then erases pages 240–243 before writing an empty frame. Ordinary saves 
 - Every successful connection adds or updates the record and saves if
   anything changed (`Action::PersistDevice`); a failure raises
   `BleEvent::Error(StorageFailed)` while the link stays up.
+- The keys `Bonder` holds follow the store
+  ([bond_table.rs](../src/ble/bond_table.rs)). A new pairing is held unsaved
+  beside the saved devices' keys, never displacing them. `PersistDevice`
+  marks the bond saved and, when the store evicted a record to make room
+  (`AddOutcome::AddedAfterEviction` names the evicted identity, and
+  `DeviceStore::add` returns it), drops that record's keys
+  (`Bonder::forget_identity`). An attempt that ends before its link was
+  reported up returns `Action::DiscardUnsavedBond`, which drops its pairing's
+  unsaved keys (`Bonder::discard_unsaved`).
 - A new pairing whose bond names an identity that is not a public or random
   static address stores nothing. The bond is refused because a reload would
   refuse it and with it the whole store; the device is refused too, because
@@ -548,7 +557,7 @@ backpressure ([hid/coalesce.rs](../src/hid/coalesce.rs)).
 | `HID_ACTIVITY` | `AtomicBool` | HID dispatcher | Power manager tick | Input counts as activity for display power |
 | `DEVICE_STORE` | Async `Mutex<DeviceStore>` | BLE coordinator | BLE coordinator | Pairing cache; held across flash writes |
 | `GAP_PROCEDURE` | Async `Mutex<()>` | Scanner, connection workers | Same | One SoftDevice scan or connection setup at a time |
-| Bonder | `StaticCell` around a `RefCell` | SoftDevice security callbacks, coordinator | Same, plus connection workers | In-RAM bond table loaded from the store |
+| Bonder | `StaticCell` around a `RefCell` | SoftDevice security callbacks, coordinator | Same, plus connection workers | In-RAM bond table: the store's bonds, marked saved, plus one unsaved pairing per link ([bond_table.rs](../src/ble/bond_table.rs)) |
 
 ## Internal Message Contracts
 
@@ -622,9 +631,9 @@ current one: it comes from an attempt since replaced or ended.
 | Variant | Fields | Meaning | Coordinator action |
 | --- | --- | --- | --- |
 | `Connected` | `slot`, `attempt`, `device` | Link encrypted, HID discovered and subscribed; sent again under the new number when a takeover finds the link up | Mark slot connected, persist the device and its bond, emit `Connected` |
-| `Disconnected` | `slot`, `attempt` | The attempt is over: a command ended it (the slot is free unless that command was a takeover `Connect`, whose new number makes the coordinator ignore this report), the link dropped without keys to reconnect, or a retry found the keys gone | Clear slot, emit link status |
+| `Disconnected` | `slot`, `attempt` | The attempt is over: a command ended it (the slot is free unless that command was a takeover `Connect`, whose new number makes the coordinator ignore this report), the link dropped without keys to reconnect, or a retry found the keys gone | Return `DiscardUnsavedBond` first when the slot never connected, clear slot, emit link status |
 | `LinkLost` | `slot`, `attempt`, `device` | An established link to a device `Bonder` holds keys for dropped; the worker is retrying. Without keys the worker sends `Disconnected` instead | Keep the slot reserved under the same number, emit link status |
-| `Error` | `slot`, `attempt`, `tag`, `retrying` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed`. `retrying` when the failed connection took over a background retry, which the worker resumed because `Bonder` still holds the device's keys | Emit `Error(tag)` and link status; clear the slot, or with `retrying` keep it reserved and retrying under the same number |
+| `Error` | `slot`, `attempt`, `tag`, `retrying` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed`. `retrying` when the failed connection took over a background retry, which the worker resumed because `Bonder` still holds the device's keys | Return `DiscardUnsavedBond` first when the slot never connected, emit `Error(tag)` and link status; clear the slot, or with `retrying` keep it reserved and retrying under the same number |
 | `Quiesced` | `slot`, `token` | Reply to `Quiesce` | Counted only by the management barrier |
 
 ### HidEvent And HidReport

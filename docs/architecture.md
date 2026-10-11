@@ -67,8 +67,9 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement |
 | [ble/mod.rs](../src/ble/mod.rs) | Board shell | `BleCommand`, `BleEvent`, and `DiscoveredDevice` over the SoftDevice `Address`, and the GAP procedure lock |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
+| [ble/bond_table.rs](../src/ble/bond_table.rs) | Pure core | The bonding keys held in RAM, each saved or not: a new pairing never displaces a saved device's keys, and one that is not saved is discarded |
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
-| [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot and event reducers |
+| [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot state and command reducers; the slot-event reducers are in its child module [coordinator_events.rs](../src/ble/coordinator_events.rs) |
 | [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
@@ -111,7 +112,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, scan_list, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -146,7 +147,7 @@ flowchart TD
         SDS["sd_setup and stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, scan_list, messages, reconnect, conn_params, management, long_read, adv_parser"]
+        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, adv_parser"]
         HID["hid modules"]
         UIL["ui::controller, ui_logic, input_logic, display_logic"]
         PL["power_logic"]
@@ -416,7 +417,9 @@ which can be too late for a firmware setup key.
    encrypted mode (`JustWorks`, `Mitm`, or `LescMitm`); otherwise it logs
    `"slot {} failed to secure BLE link"` and fails with `ConnectFailed`. New
    keys land in the in-RAM `Bonder` through `on_bonded`, replacing that peer's
-   previous keys or evicting the oldest bond when four are held.
+   previous keys or, for a new peer, held as unsaved beside every saved
+   device's keys until step 10 saves them
+   ([bond_table.rs](../src/ble/bond_table.rs)).
 8. HID discovery in `hid_client::discover_and_subscribe`
    (`"Discovering HID service..."`): it collects every Report characteristic
    (up to 8) and the Report Map and Protocol Mode handles, writes Report
@@ -432,12 +435,18 @@ which can be too late for a firmware setup key.
    link, waiting until the SoftDevice reports the connection gone, and is
    processed next. A `Connect` for the same device is the exception: it takes
    over a background attempt, which carries on under the new attempt number.
+   When an attempt ends before step 10, its `SlotEvent::Error` or
+   `SlotEvent::Disconnected` makes the coordinator return
+   `Action::DiscardUnsavedBond` for the device first, which drops the keys of
+   a pairing it made (`Bonder::discard_unsaved`); a saved device's keys stay.
 10. On success the worker sends `SlotEvent::Connected` with the attempt
     number. `on_slot_connected` ignores the event when the number is not the
     slot's current one; otherwise it
     marks the slot connected and returns two actions in order: persist the
     device with its bond (`store.add`, then `save_to_flash`), then emit the
-    connection summary. The UI shows Connected after the flash write finishes;
+    connection summary. Persisting marks the bond saved in `Bonder`, and when
+    the store evicts its oldest record to make room, drops that record's keys
+    too (`Bonder::forget_identity`), so the keys in RAM follow the store. The UI shows Connected after the flash write finishes;
     a failed write shows "Storage failed" while the link stays up. A pairing
     whose identity is not a public or random static address is refused in
     `Bonder::on_bonded`: no keys are kept, nothing is stored for the device,
@@ -514,8 +523,8 @@ flowchart TD
 ```
 
 - Before each silent attempt the worker asks `Bonder::bond_for_address` for
-  the device's keys. Without them (a newer pairing evicted them from the four
-  held in RAM) it clears the target, sends `SlotEvent::Disconnected`, and logs
+  the device's keys. Without them (saving a newer device evicted its record and
+  keys) it clears the target, sends `SlotEvent::Disconnected`, and logs
   `"slot {} has no keys to reconnect"`; the attempt could never secure the
   link and would hold the slot for good. Power-up reserves slots only for the
   two most recently added saved devices that have a bond, so a record without
@@ -604,8 +613,8 @@ flowchart TD
   take it (selecting the same device turns the retry into a user connection,
   [below](#attempt-numbers-and-retry-takeover)), and the UI shows only links
   that are up. When `Bonder::bond_for_address` finds no keys for the device
-  (its pairing was refused, the peripheral paired without bonding, or a newer
-  pairing evicted them from the four held in RAM), the worker sends
+  (its pairing was refused, the peripheral paired without bonding, or saving a
+  newer device evicted its record and keys), the worker sends
   `SlotEvent::Disconnected` instead and logs
   `"slot {} link lost; no keys to reconnect"`: a silent attempt never pairs,
   so it could never secure the link, and would hold the slot until the user

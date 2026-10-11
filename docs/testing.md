@@ -113,7 +113,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -147,8 +147,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that retries a link dropped during HID discovery.
-The tree holds 381 `#[test]` functions: 375 in
+2026-10-11, in the commit that keeps the bonder's keys in step with the saved
+devices. The tree holds 390 `#[test]` functions: 384 in
 files compiled into the host library, 3 in `tests/integration.rs`, and 3 in
 `tests/oled_font.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
@@ -163,7 +163,8 @@ device-store tests, 17 controller, message, and management-target tests, and
 identity fixes, the refused-pairing fix, the retry takeover, and the attempt
 numbers then added 20, and the 373 passed on 2026-10-11 with the 6
 integration tests; the review fixes and the retry of a link dropped during
-discovery added one each, and the 375 passed the same day. There are no `#[ignore]` or
+discovery added one each, the bond table eight and the store eviction one,
+and the 384 passed the same day. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -189,9 +190,10 @@ discovery added one each, and the 375 passed the same day. There are no `#[ignor
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 25 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success with the reservation's attempt number on the command, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved under the same attempt number, reconnection, disconnect during retry, and `ErrorTag::for_failed_setup` turning any security or discovery failure whose link dropped into `ConnectFailed` while keeping the error on a link still up. |
-| [ble/coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs) | 8 | Attempt numbers and retry takeovers ([architecture](architecture.md#attempt-numbers-and-retry-takeover)): a selection takes over the slot retrying the same device in the background, at power-up or after a link loss, under a new number, and the slot then waits like a user connection; Connected, Error, LinkLost, and Disconnected from the replaced retry change nothing, while Connected under the new number completes the connection; a free or out-of-range slot ignores every event, including one numbered like a reservation it has dropped; a failed takeover reported with `retrying` keeps the slot reserved and retrying under the same number, still completes when the retry connects, and can be taken over again; a slot reserved for the user's connection, for a background retry, or for a selection that took a retry over, with no link up yet, is freed by an `Error` without `retrying` or by `Disconnected`, and the next selection reserves it afresh; numbers wrap past 0; connecting keeps the reservation's number; a bonded peer selected at a new address uses the slot that holds it, retrying or connected. |
+| [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 25 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success with the reservation's attempt number on the command, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved under the same attempt number, reconnection, disconnect during retry, and `ErrorTag::for_failed_setup` turning any security or discovery failure whose link dropped into `ConnectFailed` while keeping the error on a link still up; a connected slot's disconnect returns no `DiscardUnsavedBond`, since its device was saved when it connected. |
+| [ble/coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs) | 8 | Attempt numbers and retry takeovers ([architecture](architecture.md#attempt-numbers-and-retry-takeover)): a selection takes over the slot retrying the same device in the background, at power-up or after a link loss, under a new number, and the slot then waits like a user connection; Connected, Error, LinkLost, and Disconnected from the replaced retry change nothing, while Connected under the new number completes the connection; a free or out-of-range slot ignores every event, including one numbered like a reservation it has dropped; a failed takeover reported with `retrying` keeps the slot reserved and retrying under the same number, still completes when the retry connects, and can be taken over again; a slot reserved for the user's connection, for a background retry, or for a selection that took a retry over, with no link up yet, is freed by an `Error` without `retrying` or by `Disconnected`, which first return `DiscardUnsavedBond` for its device, and the next selection reserves it afresh; a failed takeover also returns `DiscardUnsavedBond` for the selection; numbers wrap past 0; connecting keeps the reservation's number; a bonded peer selected at a new address uses the slot that holds it, retrying or connected. |
 | [ble/scan_list_tests.rs](../src/ble/scan_list_tests.rs), for [scan_list.rs](../src/ble/scan_list.rs) | 8 | `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
+| [ble/bond_table_tests.rs](../src/ble/bond_table_tests.rs), for [bond_table.rs](../src/ble/bond_table.rs) | 8 | The bonding keys held in RAM: loading the store marks every bond saved and merges one peer's bonds; a new pairing is added unsaved beside the four saved devices' keys, and one more fits for each link; discarding drops only unsaved pairings, never a saved bond that matches; saving a fifth device and forgetting the evicted one leaves exactly the store's four, all saved; re-pairing replaces the keys and keeps the saved mark, saved or not; a full table drops the oldest unsaved pairing first, and a table of saved bonds only the oldest; marking saved needs the exact keys. |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 8 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. A zero-length or overrunning structure ends the walk, keeping the structures before it. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
 | [ble/management.rs](../src/ble/management.rs) | 6 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. `forget_targets` picks the connected or reconnecting slots of the forgotten peer only. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |
@@ -207,7 +209,7 @@ discovery added one each, and the 375 passed the same day. There are no `#[ignor
 | [storage/record.rs](../src/storage/record.rs) | 3 | Record metadata validation: name encoding, capacity, and base length; agreement between the bond flag and the record size; UTF-8 name lengths counted in bytes. |
 | [storage/codec.rs](../src/storage/codec.rs) | 1 | `encode_device` writes nothing, and leaves the buffer unchanged, when it is one byte too small for a bonded device record. |
 | [storage/devices_format_tests.rs](../src/storage/devices_format_tests.rs) | 15 | The flash format of the device list in `devices.rs` and `codec.rs`. Codec: device records with and without a bond round trip and need their whole buffer, every address kind round trips and kind 5 is rejected, bond fields sit at their offsets, a bond identity must be public or random static, names truncate at a character boundary. Load: a full store of four bonded devices with 32-byte names round trips through the flash item; an empty area is writable; a legacy store loads without bonds and is rewritten versioned on the next change, and a bad legacy count or length is refused; empty, truncated, future-version, over-capacity, and malformed items, like an unreadable area, leave the store empty and refusing saves until a factory reset, which erases first only for an unreadable store; a save reports an item that does not fit its buffer; loading merges records of one bonded peer. |
-| [storage/devices_tests.rs](../src/storage/devices_tests.rs) | 17 | The device list in `devices.rs`. Merge: a bonded device is stored under its identity address; RSSI alone is not saved but a name change is; new keys replace the bond of the same identity; a device without keys never clears a bond; keys merge with an entry under the identity or a private address. Identity: every SoftDevice address type decodes and the other 251 values are refused; a device whose bond has any other identity is not stored and leaves nothing to save, and the saved list reloads for every identity kind; a refused bond leaves the stored bond of the same peer; 256 refused pairings from rotating addresses leave every bond of a full store; an all-zero IRK resolves no private address, so such a device neither matches nor merges with a peer bonded without an IRK. Capacity and removal: a fifth device evicts the oldest; lookup follows the stored address or a resolvable private address with `IdentityKey::is_match` rules, and address equality ignores the resolved flag; Forget builds a candidate and leaves the list unchanged; bonds list oldest first and devices newest first; Forget and reset publish only after the save succeeds (through `management::commit`). Both files resolve private addresses with a fake in place of the SoftDevice's AES block. |
+| [storage/devices_tests.rs](../src/storage/devices_tests.rs) | 18 | The device list in `devices.rs`. Merge: a bonded device is stored under its identity address; RSSI alone is not saved but a name change is; new keys replace the bond of the same identity; a device without keys never clears a bond; keys merge with an entry under the identity or a private address. Identity: every SoftDevice address type decodes and the other 251 values are refused; a device whose bond has any other identity is not stored and leaves nothing to save, and the saved list reloads for every identity kind; a refused bond leaves the stored bond of the same peer; 256 refused pairings from rotating addresses leave every bond of a full store; an all-zero IRK resolves no private address, so such a device neither matches nor merges with a peer bonded without an IRK. Capacity and removal: a fifth device evicts the oldest, and the outcome names the evicted device's identity when it had keys, so the bonder drops them too; lookup follows the stored address or a resolvable private address with `IdentityKey::is_match` rules, and address equality ignores the resolved flag; Forget builds a candidate and leaves the list unchanged; bonds list oldest first and devices newest first; Forget and reset publish only after the save succeeds (through `management::commit`). Both files resolve private addresses with a fake in place of the SoftDevice's AES block. |
 
 The [data model](data-model.md#pairing-store) describes the layout these tests
 protect.
@@ -889,6 +891,35 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-11, Bonds Follow The Saved Devices
+
+This record covers the commit that keeps the keys `Bonder` holds in RAM in
+step with the device store (FIXME "Keys held in RAM and saved records are
+evicted separately" in [TODO.md](../TODO.md#fixme)). The new pure
+`BondTable` holds the saved devices' keys plus one unsaved pairing per link;
+a new pairing is added unsaved instead of dropping the oldest bond;
+`PersistDevice` marks the keys saved and drops the keys of a record the store
+evicts; and an attempt that ends before its link was reported up returns
+`Action::DiscardUnsavedBond`, which drops its pairing's unsaved keys. The
+slot-event reducers moved to `coordinator_events.rs`, a child module of
+`coordinator.rs`. The checks ran locally on Linux in a container, on the
+working tree just before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 384 unit tests, 3 integration tests, and 3 glyph-table tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.79% of lines (from 98.91%), 98.79% of regions, 99.06% of functions; `ble/coordinator_events.rs` 100% of lines. Every line of `ble/bond_table.rs` runs in the line report, but the summary gives it 91.80% of lines because it counts each closure's instantiation of the generic methods on its own, and no single test drives every branch with the same closure |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 119,316 bytes (+1,840 since `44fa5c7`: the table's methods, instantiated for each caller's closure, and the save, evict and discard actions), `.rodata` 11,676 (+48, the new log lines), `.data` 1,640, `.bss` 24,596 (+112: `Bonder`'s table holds six bonds instead of four, 348 bytes in all; `ble_slot_task::POOL` is still 5,728 bytes), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 118,300 bytes |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 51 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record |
+| Bonder and store wiring | Review | Built and reviewed, not tested: `Bonder`, `execute_action`, and the `DeviceStore` shell depend on SoftDevice types. The table's policy, the store's eviction outcome, and the reducers' discard action are host-tested |
+| Hosted CI | GitHub Actions | Push run 38106172492 (`44fa5c7`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the "Fifth device" and "Unsaved pairing evicts nothing" checks in [6. Device management and degraded display](first-flash.md#6-device-management-and-degraded-display) exercise saving, evicting and discarding on a board |
+
 ## Validation Record — 2026-10-11, Link Dropped During Discovery
 
 This record covers the commit that retries a background reconnect whose link
@@ -906,7 +937,7 @@ that commit; nothing ran on a board.
 | Check | Environment | Result |
 | --- | --- | --- |
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 375 unit tests, 3 integration tests, and 3 glyph-table tests |
-| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.90% of lines, 99.02% of functions |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.91% of lines, 98.90% of regions, 99.02% of functions |
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
 | Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
@@ -936,7 +967,7 @@ that commit; nothing ran on a board.
 | Check | Environment | Result |
 | --- | --- | --- |
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 374 unit tests, 3 integration tests, and 3 glyph-table tests |
-| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.90% of lines, 99.01% of functions |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.91% of lines, 98.90% of regions, 99.01% of functions |
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
 | Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
@@ -961,7 +992,7 @@ on the working tree just before that commit; nothing ran on a board.
 | Check | Environment | Result |
 | --- | --- | --- |
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 373 unit tests, 3 integration tests, and 3 glyph-table tests |
-| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.90% of lines, 99.01% of functions |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.91% of lines, 98.90% of regions, 99.01% of functions |
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
 | Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
@@ -986,7 +1017,7 @@ nothing ran on a board.
 | Check | Environment | Result |
 | --- | --- | --- |
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 366 unit tests, 3 integration tests, and 3 glyph-table tests |
-| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.88% of lines, 99.00% of functions |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.89% of lines, 98.88% of regions, 99.00% of functions |
 | Mutation check | Host tests | With `DeviceList::add` storing the device without keys instead of refusing it, all three refusal tests fail |
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
@@ -1013,7 +1044,7 @@ before that commit; nothing ran on a board.
 | Check | Environment | Result |
 | --- | --- | --- |
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 364 unit tests, 3 integration tests, and 3 glyph-table tests |
-| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.88% of lines, 99.00% of functions; `storage/devices.rs` 99.66% of lines |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.88% of lines, 99.00% of functions; `storage/devices.rs` 100% of lines, 99.66% of regions |
 | Mutation checks | Host tests | Without the identity filter in `DeviceList::add`, two of the new tests fail; without it in `codec::decode_bond`, the per-type format test fails |
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation, each after `cargo clean -p bt2usb` | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |

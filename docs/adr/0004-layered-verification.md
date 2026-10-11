@@ -46,7 +46,7 @@ layer before it cannot see.
 | 1. Host tests | Unit and integration tests of the shared hardware-free modules ([ADR 0003](0003-pure-core-and-task-shell.md)) | Wrong decisions: parsing, reducers, aggregation, delivery and replay, storage validation, UI and power rules | CI on Linux and Windows, plus a line-coverage floor on Linux ([ADR 0023](0023-host-coverage-floor.md)); `mask test` |
 | 2. Static and build checks | `rustfmt`; Clippy with warnings denied for host, `embedded`, and `sim`; rustdoc with private items and warnings denied for every build; release builds of `bt2usb` and `bt2usb-selftest`; the `memory_sd.x` assertion; the `build.rs` feature guard; release-helper tests; actionlint; Ruff and ShellCheck over the Python helpers, shell scripts, and mask recipes; `cargo audit`; the Markdown checks | Code that does not build for the target, lint regressions, a broken memory map, a mixed feature set, workflow, script, or release-helper mistakes, known vulnerable dependencies, and documentation that disagrees with the code | CI; `mask ci` runs the formatting, Clippy, test, rustdoc, Markdown, and build subset |
 | 3. Renode simulation | `bt2usb-sim` on an emulated nRF52840, with injected GPIO edges and a scripted BLE scenario | Boot, the executor and time driver, the GPIO and GPIOTE path, and the real UI and coordinator reducers running on the ARM target | CI `simulation` job; `mask sim-test` |
-| 4. Board self-test | `bt2usb-selftest` brings up each peripheral in stages and prints PASS, FAIL, or SKIP | SoftDevice RAM and enable, pairing-region flash, USB enumeration and an endpoint write, OLED, buttons, radio reception, stack margin | A board and probe; `mask selftest` |
+| 4. Board self-test | `bt2usb-selftest` brings up each peripheral in stages and prints PASS, FAIL, or SKIP | SoftDevice RAM and enable, pairing-region flash, USB enumeration and an endpoint write, OLED, buttons, radio reception, stack margin, the MPU stack guard still programmed, and on request a real overflow caught by it | A board and probe; `mask selftest` |
 | 5. Hardware acceptance | The [first-flash checklist](../first-flash.md) on real peripherals, hosts, and hubs | Pairing, reconnect, held-input release, two active slots, LEDs, monitor hubs, sleep and wake, pre-OS use | A board and a person; a dated result record |
 
 Rules:
@@ -182,9 +182,11 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   `scenario: active_count=0`.
 - Self-test: [selftest.rs](../../src/selftest.rs) reports the stages
   `softdevice`, `flash`, `usb enumeration`, `usb hid report`, `oled i2c`,
-  `oled render`, the three buttons, `ble scan`, and `stack`, each as
-  `[PASS]`, `[FAIL]`, or `[SKIP]`, and ends with
-  `==== self-test done: N passed, N failed, N skipped ====`. The only HID report
+  `oled render`, the three buttons, `ble scan`, `stack`, and `stack guard`,
+  each as `[PASS]`, `[FAIL]`, or `[SKIP]`, ends with
+  `==== self-test done: N passed, N failed, N skipped ====`, and then offers an
+  optional deliberate stack overflow
+  ([ADR 0026](0026-mpu-stack-guard.md)). The only HID report
   it sends is an all-zero mouse report.
 - Acceptance: [first-flash.md](../first-flash.md), recorded through the
   `.github/ISSUE_TEMPLATE/hardware-result.md` template.

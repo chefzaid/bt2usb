@@ -47,6 +47,7 @@ mod power;
 mod power_logic;
 mod sd_setup;
 mod stack;
+mod stack_logic;
 mod storage;
 mod ui;
 mod usb;
@@ -184,6 +185,9 @@ async fn main(spawner: Spawner) {
         diagnostics::BUILD_PROFILE,
         diagnostics::LOG_FILTER
     );
+    // Before anything deepens the stack: from here an overflow faults and is
+    // reported instead of overwriting the statics below the stack.
+    stack::enable_guard_logged();
     // Read and clear the reset causes while the POWER peripheral is still
     // ours: once enabled, the SoftDevice restricts it.
     let resets = embassy_nrf::pac::POWER.resetreas();

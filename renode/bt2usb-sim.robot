@@ -185,6 +185,8 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     # The build script's identity (src/diagnostics.rs): a full commit, or
     # `unknown` for a build outside git.
     Wait For Line On Uart     version \\d+\\.\\d+\\.\\d+, commit ([0-9a-f]{40}(-dirty)?|unknown), (debug|release) build    treatAsRegex=true
+    # The MPU stack guard (src/stack.rs) is on; the overflow test checks it.
+    Wait For Line On Uart     stack guard: 4096 bytes at 0x[0-9a-f]{8}\\.\\.0x[0-9a-f]{8}    treatAsRegex=true
     Wait For Line On Uart     buttons ready
     Wait For Line On Uart     display task started
     Wait For Line On Uart     entering sim UI loop (screen=Home)    pauseEmulation=true
@@ -307,6 +309,30 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Wait For Line On Uart     holds 1 device(s); reload matches
     Wait For Line On Uart     event: Connected 'Keyboard' -> screen Connected (selected 0)    pauseEmulation=true
     Oled Should Show          Connected    Keyboard    SEL:add DOWN:disc    UP:saved devices
+
+A Stack Overflow Faults In The Guard And Is Reported
+    # The firmware has no code path that overflows, so the test moves the
+    # stack pointer 256 bytes into the guard while the core sleeps between
+    # tasks, as a function whose frame no longer fits would leave it. The
+    # next interrupt's frame lands in the no-access MPU region and faults,
+    # and the fault handler reports the overflow on UART0 and stops the core
+    # (src/stack.rs, docs/adr/0026-mpu-stack-guard.md). Renode takes the
+    # fault as MemManage, not HardFault; both paths reach the same report.
+    Create Sim Machine
+    Create Terminal Tester    sysbus.uart0    timeout=20
+    Start Emulation
+    ${guard}=                 Wait For Line On Uart    stack guard: 4096 bytes at (0x[0-9a-f]{8})\\.\\.(0x[0-9a-f]{8})    treatAsRegex=true
+    ${base}=                  Set Variable    ${guard.Groups[0]}
+    ${top}=                   Set Variable    ${guard.Groups[1]}
+    Wait For Line On Uart     entering sim UI loop (screen=Home)    pauseEmulation=true
+    # The display task has drawn Home by then and the next scenario step is
+    # about 1 s away, so the core is asleep in the executor.
+    Execute Command           emulation RunFor "1"
+    ${sp}=                    Evaluate    hex(int('${top}', 16) - 256)
+    Execute Command           sysbus.cpu SP ${sp}
+    Wait For Line On Uart     stack overflow: stack pointer 0x[0-9a-f]{8}, guard ${base}\\.\\.${top}, PC (0x[0-9a-f]{8}|not stacked)    treatAsRegex=true
+    # The core spins in the handler: the 2 s scenario steps never come.
+    Should Not Be On Uart     scenario:    timeout=5
 
 TWIM And SSD1306 Models Follow Their Specifications
     # Register-level checks of renode/nrf52840_twim.cs and renode/ssd1306.cs

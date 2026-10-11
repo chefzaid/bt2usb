@@ -1,6 +1,7 @@
 # ADR 0010: Fix The Memory Map In The Linker Script And Assert It
 
-- Status: Accepted
+- Status: Accepted; the undetected stack overflow it accepted is addressed by
+  [ADR 0026](0026-mpu-stack-guard.md) (2026-10-11)
 - Date: 2026-09-26
 
 This record was written retroactively on 2026-10-09 from the source and the
@@ -155,7 +156,9 @@ names the cause.
 
 Dropping flip-link gives up an automatic stack-overflow fault, but the
 alternative was a RAM layout the SoftDevice cannot work with. The painted-stack
-measurement is the compensating control. Because Embassy keeps task state in
+measurement is the compensating control. Since 2026-10-11 an MPU guard region
+at the bottom of the stack restores the fault without moving the stack
+([ADR 0026](0026-mpu-stack-guard.md)). Because Embassy keeps task state in
 statics, worst-case stack use is the deepest poll chain plus interrupt frames.
 A high-water mark records the deepest path exercised since reset, so it is only
 as good as the workload that ran before it was read.
@@ -178,7 +181,10 @@ Negative:
 
 - A stack overflow is not detected. The stack grows down toward `.bss`, and an
   overflow corrupts statics silently. No MPU guard region is configured. The
-  high-water mark is evidence after the fact, not protection.
+  high-water mark is evidence after the fact, not protection. *Superseded by
+  [ADR 0026](0026-mpu-stack-guard.md) on 2026-10-11: the lowest 4 KiB-aligned
+  4 KiB of the stack region is a no-access MPU region, so an overflow faults
+  and is logged before it reaches `.bss`, with this RAM layout unchanged.*
 - The pairing boundary is still written twice, as page constants in
   `config.rs` and as the `FLASH` length in `memory_sd.x`, so a change edits
   both; the link fails until they agree. Generating the `FLASH` line instead
@@ -199,7 +205,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   worst-case stack high-water mark with two links, scanning, display, and
   persistence, and record reviewed margins before changing `memory_sd.x`.
 - "Stack overflow detection": evaluate a guard compatible with the SoftDevice
-  RAM layout, so an overflow faults with a diagnosable message.
+  RAM layout, so an overflow faults with a diagnosable message. Done on
+  2026-10-11 in [ADR 0026](0026-mpu-stack-guard.md); the board evidence is the
+  self-test's `stack guard` stage and optional deliberate overflow.
 - Keep the documentation checker's `memory` check passing: since 2026-10-10
   it fails CI when the documented memory map, address ranges, or pairing page
   numbers disagree with the storage constants and the linker scripts
@@ -250,3 +258,4 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - [ADR 0006: Fail-closed pairing store](0006-fail-closed-pairing-store.md)
 - [ADR 0007: Vendored nrf-softdevice patch](0007-vendored-softdevice-patch.md)
 - [ADR 0014: Renode GPIO models](0014-renode-gpio-models.md)
+- [ADR 0026: Guard The Bottom Of The Stack With An MPU Region](0026-mpu-stack-guard.md)

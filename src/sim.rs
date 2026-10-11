@@ -33,6 +33,8 @@
 mod ble;
 mod config;
 mod diagnostics;
+mod stack;
+mod stack_logic;
 mod ui;
 
 // The pure parts of the paired-device store, mounted as the host library mounts
@@ -95,6 +97,30 @@ impl Console {
         let _ = line.write_fmt(args);
         let _ = line.push_str("\r\n");
         let _ = self.0.blocking_write(line.as_bytes());
+    }
+}
+
+/// Write `bytes` (up to 128) to UART0 without the driver and wait until they
+/// are out: the HardFault handler's overflow report, written after the
+/// driver's task can no longer run. EasyDMA reads only RAM, so the bytes are
+/// copied to the stack first; the console must already be set up.
+pub fn uart_write_blocking(bytes: &[u8]) {
+    let mut buffer = [0u8; 128];
+    let len = bytes.len().min(buffer.len());
+    let (Some(target), Some(source)) = (buffer.get_mut(..len), bytes.get(..len)) else {
+        return;
+    };
+    target.copy_from_slice(source);
+    let uarte = embassy_nrf::pac::UARTE0;
+    uarte.events_endtx().write_value(0);
+    uarte.txd().ptr().write_value(buffer.as_ptr() as u32);
+    uarte.txd().maxcnt().write(|w| w.set_maxcnt(len as u16));
+    uarte.tasks_starttx().write_value(1);
+    // Bounded, so a UART that never finishes cannot hang the report forever.
+    for _ in 0..1_000_000 {
+        if uarte.events_endtx().read() != 0 {
+            break;
+        }
     }
 }
 
@@ -196,6 +222,16 @@ async fn main(spawner: Spawner) {
         diagnostics::SOURCE_COMMIT,
         diagnostics::BUILD_PROFILE
     );
+    match stack::enable_guard() {
+        Ok(guard) => slog!(
+            console,
+            "stack guard: {} bytes at {:#010x}..{:#010x}",
+            guard.size(),
+            guard.base(),
+            guard.top()
+        ),
+        Err(err) => slog!(console, "stack guard off: {:?}", err),
+    }
 
     spawner.spawn(unwrap!(button_task(p.P0_11.into(), ButtonEvent::Up)));
     spawner.spawn(unwrap!(button_task(p.P0_12.into(), ButtonEvent::Down)));

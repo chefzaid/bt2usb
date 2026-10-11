@@ -117,7 +117,7 @@ USB enumeration (up to 10 s), each button prompt (up to 20 s), and the BLE scan
 
 | Stage | Log lines to look for | Good | If it fails |
 | ----- | --------------------- | ---- | ----------- |
-| Start | `==== bt2usb self-test ====` | Printed first | No output at all: check the probe connection and that step 1 completed |
+| Start | `==== bt2usb self-test ====`, the version line, then `stack guard: 4096 bytes at 0x<base>..0x<top>` | Printed first | No output at all: check the probe connection and that step 1 completed. `stack guard off: <reason>` instead of the guard line fails the stack guard stage below |
 | SoftDevice | `softdevice RAM: N bytes`, then `[PASS] softdevice: enabled (…)` | N is at most 24576 (0x6000) | A panic saying `too little RAM for softdevice. Change your app's RAM start address to X`: set `RAM : ORIGIN` in `memory_sd.x` to `0x` followed by X (printed in hex without a prefix) and shrink `LENGTH` by the same amount. Other panics in `Softdevice::enable`, such as `sd_ble_enable err …` or `selected configuration has too high RAM requirements.`, also stop here. No `[PASS] softdevice` line at all usually means the SoftDevice isn't flashed (step 1) or is the wrong version |
 | Flash | `flash: no saved pairings yet` or `flash: saved pairing record present (N bytes)`, then `[PASS] flash: write, read-back and remove OK` | Write, read-back and remove all OK; saved pairings are only read | `[FAIL] flash:` with `reading the pairing region failed`, `write failed`, `read-back didn't match what was written`, or `remove failed`. The pairing region (pages 240–243, `0x000F0000–0x000F4000`, end exclusive) can't be used; check nothing else uses it on this board |
 | USB enumeration | `[PASS] usb enumeration: configured by the PC` | The PC lists "BT-to-USB HID Bridge" from "bt2usb" | `USB: no VBUS yet; plug the nRF USB port (not the debugger port) into the PC`, then `[FAIL] usb enumeration: not configured within 10 s: …` and `[SKIP] usb hid report: needs enumeration`. Wrong port, a charge-only cable, or a PC that blocks new USB devices |
@@ -126,8 +126,10 @@ USB enumeration (up to 10 s), each button prompt (up to 20 s), and the BLE scan
 | OLED render | `[PASS] oled render: initialization and Home framebuffer sent` | The Home screen appears: `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` | `[FAIL] oled render: SSD1306 initialization failed` or `framebuffer transfer failed`. Runs only after the ACK stage passes |
 | Buttons (×3) | `>>> press button UP (P0.11) now (20 s)`, then `[PASS] button UP (P0.11): press detected`; the same for `button DOWN (P0.12)` and `button SELECT (P0.24)` | Each press is seen when prompted | `[FAIL] … reads pressed at rest: shorted to GND or wrong pin` (no prompt follows). `[SKIP] … no press seen: check wiring to GND`: no press arrived in 20 s |
 | BLE scan | `BLE: scanning 8 s; …`, one `BLE: HID device 'NAME' (RSSI -NN)` per HID device, `BLE: N advertisements, M HID devices`, then `[PASS] ble scan: radio receives advertisements` | Some advertisements heard; HID devices listed | `[FAIL] ble scan: heard nothing in 8 s: check the antenna, or test near any BLE device`, or `SoftDevice refused to scan`. Put a keyboard in pairing mode during the scan to see it listed by name |
-| Stack | `stack high-water: X of Y bytes`, then `[PASS] stack: under half the stack region used` | X is less than half of Y | `[FAIL] stack: over half the stack region used` |
-| Summary | `==== self-test done: P passed, F failed, S skipped ====` | `11 passed, 0 failed, 0 skipped` | Fix the first failure before going on |
+| Stack | `stack high-water: X of Y bytes`, then `[PASS] stack: under half the stack region used` | X is less than half of Y (Y is the stack above the guard) | `[FAIL] stack: over half the stack region used` |
+| Stack guard | `[PASS] stack guard: MPU region still set after the SoftDevice, USB, and BLE stages` | The MPU still holds the guard the image set at boot ([ADR 0026](adr/0026-mpu-stack-guard.md)) | `[FAIL] stack guard: MPU registers changed since boot: something else programs the MPU` (report it: the SoftDevice or a dependency reprogrammed the MPU), or `[FAIL] stack guard: not enabled at boot (see 'stack guard off' above)` |
+| Summary | `==== self-test done: P passed, F failed, S skipped ====` | `12 passed, 0 failed, 0 skipped` | Fix the first failure before going on |
+| Deliberate overflow (optional) | `>>> optional: hold SELECT within 10 s to overflow the stack on purpose; …`, then `no deliberate overflow` when SELECT is not held | Hold SELECT: `overflowing the stack on purpose`, then `stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC not stacked`, with the stack pointer inside the guard, and no further output | `the deliberate overflow returned without a fault: the stack guard is not working`, or no `stack overflow` line before the log stops: the guard did not catch it; report it with the log. `Firmware exited unexpectedly: Exception` instead of the line means probe-rs caught the HardFault before the handler ran: start the self-test with `mask selftest`, which turns that catch off |
 
 - [ ] Recorded: SoftDevice RAM = ______ bytes. If it is below 24576,
       nrf-softdevice also logs `You're giving more RAM to the softdevice than
@@ -136,6 +138,11 @@ USB enumeration (up to 10 s), each button prompt (up to 20 s), and the BLE scan
       memory-budget task in [TODO.md](../TODO.md); do not shrink the
       reservation on this one measurement alone.
 - [ ] Self-test: 0 failed.
+- [ ] Optional: deliberate overflow. Run `mask selftest` again and hold
+      SELECT when it offers the overflow. The log ends with
+      `stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC not stacked`
+      and probe-rs stays attached to the stopped core; press Ctrl-C, then
+      reset the board. Recorded line: ______
 
 ## 3. Real firmware
 
@@ -148,17 +155,19 @@ task's output comes between them:
 
 1. `bt2usb firmware starting: version <version>, commit <commit>, <profile> build, DEFMT_LOG=<filter>`;
    the commit is the one you built, without `-dirty` for a clean checkout
-2. `reset reason: <causes>`: `soft reset` right after `mask run` restarts the
+2. `stack guard: 4096 bytes at 0x<base>..0x<top>`: the MPU stack guard is on
+   ([ADR 0026](adr/0026-mpu-stack-guard.md))
+3. `reset reason: <causes>`: `soft reset` right after `mask run` restarts the
    chip, or `power-on or brown-out` after plugging the board in
    ([reset reasons](operations.md#reset-reasons))
-3. `softdevice RAM: N bytes`, logged by nrf-softdevice; the same value as in the
+4. `softdevice RAM: N bytes`, logged by nrf-softdevice; the same value as in the
    self-test
-4. `USB power: vbus=true ready=true` (`false` until the nRF USB port is powered)
-5. `USB HID composite device initialised (keyboard + mouse + consumer)`
-6. `SoftDevice started`
-7. `USB HID device started`
-8. `BLE task started`
-9. `UI and isolated OLED tasks started`
+5. `USB power: vbus=true ready=true` (`false` until the nRF USB port is powered)
+6. `USB HID composite device initialised (keyboard + mouse + consumer)`
+7. `SoftDevice started`
+8. `USB HID device started`
+9. `BLE task started`
+10. `UI and isolated OLED tasks started`
 
 The spawned tasks log afterwards, in an order set by the executor, for example
 `USB device task started`, `HID dispatcher and three endpoint workers started`,
@@ -181,6 +190,8 @@ The storage load reports `No paired devices in flash` or
       Home without a flash of random pixels. The firmware clears the panel's
       memory before the display driver turns it on
       ([ADR 0024](adr/0024-renode-oled-models.md)); watch a few cold power-ups.
+- [ ] `stack guard: 4096 bytes at 0x<base>..0x<top>` follows the boot line, not
+      `stack guard off: …`.
 - [ ] `stack high-water: X of Y bytes` lines appear; the firmware logs a new one
       whenever the high-water mark grows.
 

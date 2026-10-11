@@ -356,31 +356,44 @@ scripts are executable.
 
 ### Inventory
 
-The application has six `unsafe` blocks in five files. They were counted with
-`grep -rnw unsafe src build.rs tests`, which matches only these six lines;
-`build.rs`, `tests/`, and the Python and shell scripts contain no `unsafe`.
-There are no `unsafe fn`, `unsafe impl`, `static mut`, `transmute`,
-`MaybeUninit`, `#[no_mangle]`, `#[link_section]`, or inline `asm!` in `src/`
-(`grep -rn` for each returns nothing).
+The application has eleven `unsafe` blocks and one `unsafe fn` in five files,
+and one `global_asm!` block. The `unsafe` lines were counted with
+`grep -rnw unsafe src build.rs tests`, which matches these twelve lines and
+the comment in `lib.rs` that states the rule; `build.rs`, `tests/`, and the
+Python and shell scripts contain no `unsafe`. There are no `unsafe impl`,
+`static mut`, `transmute`, `MaybeUninit`, `#[no_mangle]`, `#[link_section]`,
+or `asm!` in `src/` (`grep -rn` for each returns nothing); the one
+`global_asm!`, in `stack.rs`, is row 13. cortex-m-rt's `#[exception]`
+attribute on `HardFault` generates the exported symbol the vector table
+names, so `src/` itself declares none.
 
 | # | Location | Operation | Purpose | Invariant the code relies on | `SAFETY` comment | Compiled into |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | [stack.rs](../src/stack.rs) `high_water` | `core::ptr::read_volatile` of a `u32` | Find the first overwritten word of the painted stack | Each address is word-aligned and lies between the linker symbols `_stack_end` and `_stack_start`, which is RAM owned by the program; the read is volatile so the compiler cannot assume the contents | Yes | Bridge, self-test |
-| 2 | [scanner.rs](../src/ble/scanner.rs) `scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | View advertisement bytes from a SoftDevice scan report | `p_data` and `len` describe the report inside the scan buffer, and the slice does not outlive the callback | Yes | Bridge |
-| 3 | [bonder.rs](../src/ble/bonder.rs) `bonder`, first branch | `&*ptr` | Return the shared `&'static Bonder` | The pointer came from `StaticCell::try_init`, so it is non-null, aligned, initialized, and lives forever; after initialization the `Bonder` is only reached through shared references | Yes | Bridge |
-| 4 | [bonder.rs](../src/ble/bonder.rs) `bonder`, spin fallback | `&*ptr` | Same as 3, after waiting for another caller's initialization | Same as 3 | Yes ("as above") | Bridge |
-| 5 | [sd_setup.rs](../src/sd_setup.rs) `enable_usb_power_events` | `sd_power_usbdetected_enable`, `sd_power_usbremoved_enable`, `sd_power_usbpwrrdy_enable`, `sd_power_usbregstatus_get` | Turn on the SoftDevice's USB power events and read the USB regulator state | The SoftDevice is enabled before the call (the function's doc comment says it must run after `Softdevice::enable`); `status` is a valid local the SVC writes | Yes | Bridge, self-test |
-| 6 | [selftest.rs](../src/selftest.rs) `check_ble_scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | Same as 2, in the self-test's scan stage | Same as 2 | Yes | Self-test |
+| 1 | [stack.rs](../src/stack.rs) `high_water` | `core::ptr::read_volatile` of a `u32` | Find the first overwritten word of the painted stack | Each address is word-aligned and lies between the guard's top and the linker symbol `_stack_start`, which is RAM owned by the program; the scan starts above the guard, which faults while it is on; the read is volatile so the compiler cannot assume the contents | Yes | Bridge, self-test |
+| 2 | [stack.rs](../src/stack.rs) `enable_guard`, first block | `&*MPU::PTR` | Read the MPU's `TYPE` register to check that the core has regions | `MPU::PTR` is the fixed address of the MPU's register block, which every Cortex-M4 with an MPU maps; the reference is shared and the registers are volatile cells | Yes | Bridge, self-test, simulation |
+| 3 | [stack.rs](../src/stack.rs) `enable_guard`, second block | Writes to `MPU_CTRL`, `MPU_RNR`, `MPU_RBAR`, and `MPU_RASR` | Make the guard a no-access, execute-never region 0 and turn the MPU on | The region covers only the guard: the stack pointer is above it (checked first), and no static lies in it, because it starts at or above `_stack_end`. `PRIVDEFENA` keeps the default memory map for every other address, so no other access the firmware makes changes meaning. The MPU is off while it is reprogrammed, and `dsb` and `isb` follow. No dependency programs the MPU | Yes | Bridge, self-test, simulation |
+| 4 | [stack.rs](../src/stack.rs) `guard_is_on`, first block | `&*MPU::PTR` | Read the MPU back for the self-test's `stack guard` stage | Same as 2 | Yes | Self-test (compiled unused into the bridge and the simulation) |
+| 5 | [stack.rs](../src/stack.rs) `guard_is_on`, second block | Write 0 to `MPU_RNR` | Select region 0 so `RBAR` and `RASR` read it | Only `enable_guard` programs the MPU, and it uses region 0, so selecting it changes nothing another user depends on | Yes | Same as 4 |
+| 6 | [stack.rs](../src/stack.rs) `HardFault` | `unsafe fn` | The HardFault handler | cortex-m-rt's `#[exception]` requires the HardFault handler to be an `unsafe fn` and exports it as `_HardFault`, which its trampoline calls with the frame's address; nothing in `src/` calls it, and only the exception and row 13 enter it | Doc comment (no `# Safety` section: no caller) | Bridge, self-test, simulation |
+| 7 | [stack.rs](../src/stack.rs) `HardFault` | Read `SCB_CFSR` through `SCB::PTR` | Tell whether the fault's frame was stacked (`MSTKERR` clear) before reporting its PC | The SCB's register block is always mapped on a Cortex-M core; the read has no side effect | Yes | Bridge, self-test, simulation |
+| 8 | [scanner.rs](../src/ble/scanner.rs) `scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | View advertisement bytes from a SoftDevice scan report | `p_data` and `len` describe the report inside the scan buffer, and the slice does not outlive the callback | Yes | Bridge |
+| 9 | [bonder.rs](../src/ble/bonder.rs) `bonder`, first branch | `&*ptr` | Return the shared `&'static Bonder` | The pointer came from `StaticCell::try_init`, so it is non-null, aligned, initialized, and lives forever; after initialization the `Bonder` is only reached through shared references | Yes | Bridge |
+| 10 | [bonder.rs](../src/ble/bonder.rs) `bonder`, spin fallback | `&*ptr` | Same as 9, after waiting for another caller's initialization | Same as 9 | Yes ("as above") | Bridge |
+| 11 | [sd_setup.rs](../src/sd_setup.rs) `enable_usb_power_events` | `sd_power_usbdetected_enable`, `sd_power_usbremoved_enable`, `sd_power_usbpwrrdy_enable`, `sd_power_usbregstatus_get` | Turn on the SoftDevice's USB power events and read the USB regulator state | The SoftDevice is enabled before the call (the function's doc comment says it must run after `Softdevice::enable`); `status` is a valid local the SVC writes | Yes | Bridge, self-test |
+| 12 | [selftest.rs](../src/selftest.rs) `check_ble_scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | Same as 8, in the self-test's scan stage | Same as 8 | Yes | Self-test |
+| 13 | [stack.rs](../src/stack.rs) `global_asm!` | The `MemoryManagement` exception handler in Thumb assembly: store 0 to `MPU_CTRL`, `dsb`, `isb`, `mov r0, sp`, `b _HardFault` | Reach the HardFault handler from a MemManage exception, which nothing enables but Renode 1.16.1 raises anyway, without touching the stack | It pushes nothing, because the stack pointer is in the guard and the MPU is still on when it starts; it writes only `MPU_CTRL`; it enters `_HardFault`, the entry point cortex-m-rt exports for row 6, in handler mode, where the stack pointer is the main stack the frame was pushed to | Comment above the block | Bridge, self-test, simulation |
 
 The host library contains none of these blocks: `stack.rs`, `sd_setup.rs`,
 `scanner.rs`, and `bonder.rs` are not compiled into it, and neither is
-`selftest.rs`. The simulation binary contains none either, because
-`src/ble/mod.rs` compiles `scanner` and `bonder` only with the `embedded`
-feature and `sim.rs` does not declare `stack` or `sd_setup`.
+`selftest.rs`; its `stack_logic.rs` computes the register values without
+touching a register. The simulation binary contains only the `stack.rs`
+blocks other than row 1: `src/ble/mod.rs` compiles `scanner` and `bonder`
+only with the `embedded` feature, `sim.rs` does not declare `sd_setup`, and
+the simulation never calls `high_water`, because it has no painted stack.
 
 ### Notes On Each Block
 
-- **Blocks 2 and 6.** The vendored `central::scan` gives the SoftDevice one
+- **Blocks 8 and 12.** The vendored `central::scan` gives the SoftDevice one
   static 256-byte buffer, calls the closure with the report, and restarts the
   scan with the same buffer when the closure returns `None`
   ([central.rs](../vendor/nrf-softdevice/src/ble/central.rs)). The bytes are
@@ -391,21 +404,33 @@ feature and `sim.rs` does not declare `stack` or `sd_setup`.
   `from_raw_parts` also requires a non-null pointer even when `len` is 0; the
   code relies on the SoftDevice always pointing `p_data` into the buffer that
   `central::scan` supplied. Both comments state the pointer and length
-  guarantee; block 2's also says the bytes are copied before the callback
+  guarantee; block 8's also says the bytes are copied before the callback
   returns.
-- **Blocks 3 and 4.** `Bonder` holds a `RefCell`, so it is `!Sync` and cannot
+- **Blocks 9 and 10.** `Bonder` holds a `RefCell`, so it is `!Sync` and cannot
   be a plain `static`. The function's doc comment explains why a
   `StaticCell` plus an `AtomicPtr` cache is used and why the spin fallback
   cannot be reached on the single-threaded cooperative executor. Sharing a
   `!Sync` value as `&'static` is sound only while every access happens on that
   one executor in thread mode; a change that touches the `Bonder` from an
   interrupt handler would break the invariant.
-- **Block 5.** The block wraps the whole function body, including the
+- **Block 11.** The block wraps the whole function body, including the
   comparisons, the warning log, and the early returns, rather than only the
   four SVC calls. Narrow it if the function changes.
 - **Block 1.** `_stack_end` and `_stack_start` are declared in an
   `extern "C"` block; taking their addresses with `core::ptr::addr_of!` needs
   no `unsafe` on the pinned toolchain, and their values are never read.
+- **Blocks 2 to 5.** `cortex_m::Peripherals::take()` would hand out the MPU
+  safely, but only once, and `guard_is_on` and the fault handler need it after
+  `main` has run. The register block is reached through `MPU::PTR` instead,
+  and the invariant that makes that sound is that `stack.rs` is the only code
+  that writes the MPU: the vendored crate, Embassy, and the SoftDevice do not
+  ([ADR 0026](adr/0026-mpu-stack-guard.md)), and the self-test's
+  `stack guard` stage fails if anything changed the registers after boot.
+- **Rows 6, 7, and 13.** They run after an overflow, on the guard's bytes with
+  the MPU off. The handler's frame must fit in the guard; if the stack pointer
+  went deeper than the guard can absorb, the frame lands in the statics below
+  it, after the fault was already taken. The Renode test "A Stack Overflow
+  Faults In The Guard And Is Reported" runs all three on every CI run.
 
 ### Vendored Unsafe
 
@@ -694,8 +719,9 @@ Coverage measures only the code that host tests compile:
 - the host library as built for tests: `src/hid/`, the BLE advertisement
   parser, bond table, connection-parameter bounds, coordinator, scan result
   list, reconnect table, long-read assembler, management logic, and PnP ID
-  parser, `src/power_logic.rs`, `src/diagnostics.rs`, and the UI display, input, and state-machine
-  logic
+  parser, `src/power_logic.rs`, `src/diagnostics.rs`, the stack guard's placement and
+  register values in `src/stack_logic.rs`, and the UI display, input, and
+  state-machine logic
 - `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
   `lib.rs` includes only under `cfg(test)`
 - the inline `#[cfg(test)] mod tests` blocks inside those files, which count
@@ -717,7 +743,7 @@ test file reaches the figure.
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
 workers, security handler, GATT HID and Device Information clients, scanner, storage shell,
-USB device, display driver, buttons, power shell, stack monitor, SoftDevice setup, and the
+USB device, display driver, buttons, power shell, stack monitor and MPU guard (`stack.rs`), SoftDevice setup, and the
 three entry points. `config.rs` is compiled into the host library but holds
 only constants, so it adds no lines to the report. The
 [host library composition](testing.md#host-library-composition) table lists
@@ -763,7 +789,7 @@ size would cross the floor. It is a ratchet:
   move hardware-coupled code out of the pure modules.
 
 **What the figure includes.** The total is the one `--summary-only` prints:
-the 32 source modules listed under [What Is Instrumented](#what-is-instrumented),
+the 33 source modules listed under [What Is Instrumented](#what-is-instrumented),
 with their inline test modules and without the separate test files. Inline test
 code is covered almost entirely by running, so files with large inline test
 modules read slightly higher than their production code alone would. Region
@@ -904,8 +930,14 @@ assert. The [hardware guide](hardware.md#memory-layout) and
 
 - **Stack depth.** The stack region runs from `_stack_end` up to the top of
   RAM, and every task and interrupt handler shares it. Nothing checks its
-  depth at build time, and there is no guard region: without `flip-link`, an
-  overflow runs into static data instead of faulting.
+  depth at build time. Without `flip-link`, a 4 KiB no-access MPU region at
+  its bottom makes an overflow fault and log `stack overflow: ...` before it
+  reaches static data ([ADR 0026](adr/0026-mpu-stack-guard.md)); a single
+  frame larger than the guard plus the stack left above it could still step
+  over it. Scanning the release disassembly for immediate stack adjustments on
+  2026-10-11 found the largest single frame at 2,668 bytes in the bridge (the
+  display task's poll) and 3,412 bytes in the self-test (its main task's
+  poll); no check keeps every frame under the guard's 4 KiB.
 - **SoftDevice RAM.** The 24 KiB reservation is not derived from a
   measurement. `Softdevice::enable` panics at boot if it is too small.
 - **Size growth.** No CI step records `mask size` or compares it with a
@@ -918,8 +950,9 @@ assert. The [hardware guide](hardware.md#memory-layout) and
 | Section sizes | `mask size` (`cargo size … --release --bin bt2usb -- -A`) | Size and address of each ELF section |
 | Largest functions | `mask bloat` (needs cargo-bloat) | The 30 largest functions in the release bridge |
 | SoftDevice RAM | The boot log line `softdevice RAM: N bytes`, printed by the vendored `Softdevice::enable` | What the SoftDevice needs for this configuration; must stay at or below 24576 |
-| Stack high-water | `stack high-water: X of Y bytes`, logged by `main.rs` whenever the measured depth grows, checked once a second; the self-test logs the same line once, before its stack stage | Deepest stack use since reset (X) against the stack region (Y) |
+| Stack high-water | `stack high-water: X of Y bytes`, logged by `main.rs` whenever the measured depth grows, checked once a second; the self-test logs the same line once, before its stack stage | Deepest stack use since reset (X) against the stack above the guard (Y) |
 | Self-test stack stage | `[PASS] stack: under half the stack region used` or `[FAIL] stack: over half the stack region used` | Whether the self-test image used less than half its stack; it says nothing about the bridge's worst case |
+| Stack guard | `stack guard: 4096 bytes at 0x<base>..0x<top>` at boot; the self-test's `[PASS] stack guard` | Where the MPU guard sits, and that nothing reprogrammed the MPU after the SoftDevice ran |
 
 `mask size` lists every section in the ELF. The release profile keeps
 `debug = 2`, so the file also carries DWARF sections, shown at address 0,
@@ -1003,7 +1036,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
 | The connection workers, security handler, GATT HID and Device Information clients, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
 | The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) for the parsers; the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
-| No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| No size, stack, or SoftDevice RAM budget is measured or enforced | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1). Since 2026-10-11 an overflow faults in the MPU guard instead of corrupting statics ([ADR 0026](adr/0026-mpu-stack-guard.md)); the guard's hardware evidence is the self-test's `stack guard` stage and optional deliberate overflow |
 | Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |

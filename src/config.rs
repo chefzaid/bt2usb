@@ -149,6 +149,16 @@ pub const UI_MANAGEMENT_TIMEOUT_SECS: u64 = 30;
 /// never logged.
 pub const DIAGNOSTICS_REPORT_INTERVAL_SECS: u64 = 60;
 
+// Memory
+
+/// Size of the no-access MPU region at the bottom of the stack (bytes): a
+/// power of two of at least 32, aligned to its size above the statics. The
+/// first push into it faults and the fault handler reports a stack
+/// overflow before any static is overwritten. A function whose frame is
+/// larger than the guard could step over it, so it is generous: with about
+/// 200 KiB of stack, the guard and its alignment gap cost at most 8 KiB.
+pub const STACK_GUARD_BYTES: u32 = 4096;
+
 // Paired-device storage
 
 /// Maximum number of paired devices tracked in storage.

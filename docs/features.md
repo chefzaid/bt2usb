@@ -61,6 +61,7 @@ are not translated.
 | Activity-driven display power, no System-OFF | Software-verified (policy) | [`power_logic.rs`](../src/power_logic.rs), [`power.rs`](../src/power.rs) | [Wake and display](#wake-and-display), [ADR 0012](adr/0012-bus-powered-no-system-off.md) |
 | Board self-test image | Implemented | [`selftest.rs`](../src/selftest.rs) | [Bring-Up And Diagnostics](#bring-up-and-diagnostics) |
 | Memory layout guards and stack high-water | Implemented | [`memory_sd.x`](../memory_sd.x), [`build.rs`](../build.rs), [`stack.rs`](../src/stack.rs) | [ADR 0010](adr/0010-static-memory-layout.md) |
+| MPU stack guard: an overflow faults and is logged | Software-verified (placement and register values host-tested; Renode faults in the guard and checks the report) | [`stack_logic.rs`](../src/stack_logic.rs), [`stack.rs`](../src/stack.rs) | [Bring-Up And Diagnostics](#bring-up-and-diagnostics), [ADR 0026](adr/0026-mpu-stack-guard.md) |
 | SoftDevice-free Renode simulation | Software-verified (runs the scenario) | [`sim.rs`](../src/sim.rs), [`renode/`](../renode/) | [ADR 0014](adr/0014-renode-gpio-models.md) |
 | CI, audit, and attested draft releases | Implemented (helper tests software-verified; check jobs pass on GitHub Actions; tag-only release jobs never run) | [`ci.yml`](../.github/workflows/ci.yml), [`release.py`](../scripts/release.py) | [Development And Release Tooling](#development-and-release-tooling), [ADR 0008](adr/0008-attested-draft-releases.md) |
 | Pinned toolchain, mask tasks, WSL tooling, devcontainer | Implemented | [`rust-toolchain.toml`](../rust-toolchain.toml), [`maskfile.md`](../maskfile.md), [`run-tool.sh`](../scripts/run-tool.sh), [`.devcontainer/`](../.devcontainer/) | [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md) |
@@ -896,9 +897,12 @@ that a scratch record can be written, read back, and removed in the pairing
 region without touching saved pairings, that the PC enumerates the device and
 accepts an idle mouse report, that the OLED acknowledges and draws the Home
 screen, that each button is released at rest and pressed when prompted, that
-the radio hears advertisements, and that less than half of the stack has been
-used. It ends with
-`==== self-test done: {} passed, {} failed, {} skipped ====`. Each stage's log
+the radio hears advertisements, that less than half of the stack has been
+used, and that the MPU stack guard is still programmed after the SoftDevice,
+USB, and BLE stages. It ends with
+`==== self-test done: {} passed, {} failed, {} skipped ====`, then offers a
+deliberate stack overflow: holding SELECT within 10 s recurses until the guard
+faults, so a tester can see the `stack overflow: ...` line on the board. Each stage's log
 lines, pass condition, and fix are in
 [first flash: self-test image](first-flash.md#2-self-test-image).
 
@@ -906,7 +910,8 @@ The bridge logs over `defmt` RTT. Development builds use the `debug` level from
 [`.cargo/config.toml`](../.cargo/config.toml); every CI build, including the
 release artifacts, sets `DEFMT_LOG` to `info`.
 Useful lines include `bt2usb firmware starting` with the build's version,
-commit, profile, and log filter, `reset reason`, `SoftDevice started`,
+commit, profile, and log filter, `stack guard: 4096 bytes at ...`,
+`reset reason`, `SoftDevice started`,
 `USB HID device started`, `BLE task started`,
 `UI and isolated OLED tasks started`, `USB configured by host: true`, and
 `stack high-water: {} of {} bytes`, printed whenever the painted-stack
@@ -931,10 +936,10 @@ symptoms to checks.
   host-LED forwarding), the BLE coordinator, the shared reconnect table, the
   connection parameter policy, long-read assembly, management primitives,
   advertisement parser, the paired-device store and its record codec, framing,
-  and validation, power policy,
-  and UI logic.
-- The source contains 415 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 404 unit tests, the 3
+  and validation, power policy, the stack guard's placement and register
+  values, and UI logic.
+- The source contains 421 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 410 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs),
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   and the 5 tests of the vendored SoftDevice crate's event portal in

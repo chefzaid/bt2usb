@@ -322,6 +322,7 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `SCREEN_AUTO_OFF_TIMEOUT_SECS` | 120 | OLED inactivity timeout |
 | `UI_MANAGEMENT_TIMEOUT_SECS` | 30 | How long the UI waits for a saved-device list, Forget, or reset reply before showing **No reply** |
 | `DIAGNOSTICS_REPORT_INTERVAL_SECS` | 60 | Shortest time between two `diagnostics:` log lines while the event counters keep changing; see [event counters](operations.md#event-counters) |
+| `STACK_GUARD_BYTES` | 4096 | Size of the no-access MPU region at the bottom of the stack, placed at the first multiple of its size above the statics; an overflow faults there and is logged as `stack overflow: ...`. A power of two of at least 32; see [ADR 0026](adr/0026-mpu-stack-guard.md) |
 
 The USB serial is generated from the two factory `FICR.DEVICEID` words as a
 16-character uppercase hexadecimal value in `usb/hid_device.rs`. It is stable
@@ -399,7 +400,14 @@ The memory decisions are recorded in
   task shares the single stack at the top of RAM. The stack is painted with
   `0xCCCCCCCC` at reset (`cortex-m-rt` `paint-stack`), and the bridge logs
   `"stack high-water: {} of {} bytes"` whenever the deepest use grows. The
-  self-test fails its stack stage if half or more of the region was used.
+  self-test fails its stack stage if half or more of the stack was used.
+- The bottom of the stack is a no-access MPU region of `STACK_GUARD_BYTES`
+  (4 KiB), at the first 4 KiB boundary at or above the end of the statics
+  (`_stack_end`), so an overflow faults before it overwrites `.bss`. In the
+  current release bridge the statics end at `0x2000CD8C`, the guard is
+  `0x2000D000–0x2000E000`, and the stack above it is 200 KiB; the 628 bytes
+  between are never used. The high-water line counts only the stack above the
+  guard ([ADR 0026](adr/0026-mpu-stack-guard.md)).
 
 The simulation build has no SoftDevice and owns the whole device:
 

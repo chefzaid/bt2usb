@@ -389,7 +389,7 @@ Without mask (for example in PowerShell), the equivalent Cargo commands are:
 
 ```sh
 cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb
-cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest
+cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest -- --no-catch-hardfault
 ```
 
 Local builds use `DEFMT_LOG=debug` from `.cargo/config.toml` unless the shell

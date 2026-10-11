@@ -64,7 +64,9 @@ measurement that supports each result in Notes.
 | `[PASS] button UP (P0.11)`, `DOWN (P0.12)`, `SELECT (P0.24)` | | |
 | `[PASS] ble scan` | | Advertisements / HID devices heard: |
 | `stack high-water: X of Y bytes` and `[PASS] stack` | | X = , Y = |
+| `stack guard: 4096 bytes at ...` and `[PASS] stack guard` | | Guard range: |
 | `==== self-test done: P passed, F failed, S skipped ====` shows 0 failed | | P = , F = , S = |
+| Optional deliberate overflow ends in `stack overflow: ... PC not stacked` | | Line: |
 
 ## [3. Real firmware](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md#3-real-firmware)
 
@@ -75,6 +77,7 @@ measurement that supports each result in Notes.
 | Boot log shows `SoftDevice started`, `USB HID device started`, `UI and isolated OLED tasks started`, `OLED initialized/recovered`, and no panic | | |
 | `USB configured by host: true`; the PC lists keyboard, mouse, and consumer-control interfaces | | |
 | OLED shows the Home screen | | |
+| `stack guard: 4096 bytes at ...` follows the boot line | | Guard range: |
 | `stack high-water: X of Y bytes` lines appear | | |
 
 ## [4. Pairing and daily use](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md#4-pairing-and-daily-use)

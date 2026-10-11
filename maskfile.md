@@ -71,8 +71,15 @@ radio on the connected board and prints one PASS/FAIL/SKIP line per stage.
 Needs the SoftDevice flashed once. Flash the real firmware afterwards with
 `mask run --release`.
 
+`--no-catch-hardfault` goes to `probe-rs run`: by default it halts the core
+on entry to every HardFault, before the firmware's handler can log, so the
+optional deliberate overflow would end in probe-rs's
+`Firmware exited unexpectedly: Exception` instead of the self-test's
+`stack overflow` line (docs/adr/0026-mpu-stack-guard.md). A panic still logs
+its message; the session then stays attached until Ctrl-C.
+
 ```bash
-./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest
+./scripts/run-tool.sh cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest -- --no-catch-hardfault
 ```
 
 ## test

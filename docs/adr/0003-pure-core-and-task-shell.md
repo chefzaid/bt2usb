@@ -38,7 +38,7 @@ The decision recorded here was implemented on 2026-06-22:
   whose "imperative shell" is the task code.
 - `e3bc620` removed the duplicate ("Unify HID classification on the real hid
   module (drop lib.rs duplicate + dead hid/tests.rs)"). `src/lib.rs` became a
-  list of `#[path]` includes of the firmware's own files and is now 176 lines.
+  list of `#[path]` includes of the firmware's own files and is now 179 lines.
 
 The 2026-09-28 hardening (`2479c79`) followed the same pattern for everything
 it added: input aggregation, endpoint delivery, wake policy, long reads,
@@ -65,6 +65,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [ui_logic.rs](../../src/ui/ui_logic.rs), [controller.rs](../../src/ui/controller.rs), [input_logic.rs](../../src/ui/input_logic.rs), [layout.rs](../../src/ui/layout.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions; the UI loop's decisions (the command each button sends, management request tracking and its deadline); list windowing; each screen's text and where it sits; display retry policy | UI loop in [main.rs](../../src/main.rs) and [sim.rs](../../src/sim.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
 | [diagnostics.rs](../../src/diagnostics.rs) | The build identity the boot line reports, which causes a `POWER.RESETREAS` value names, the event counters, and when the counts are logged | `main` in [main.rs](../../src/main.rs), which reads and clears the register and logs the counters; the shells that bump them; `selftest.rs` and `sim.rs`, which log the identity |
+| [stack_logic.rs](../../src/stack_logic.rs) | Where the stack guard goes, the MPU register values that make it a no-access region, whether a read-back matches them, and whether a stack pointer has overflowed ([ADR 0026](0026-mpu-stack-guard.md)) | [stack.rs](../../src/stack.rs), which writes and reads the MPU and handles the fault, called from `main.rs`, `selftest.rs`, and `sim.rs` |
 
 Rules for the core:
 
@@ -143,7 +144,8 @@ Negative:
   `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`,
   `device_info.rs`, `scanner.rs`,
   `usb/hid_device.rs`, `usb/host_requests.rs`, `ui/display.rs`, `power.rs`,
-  and the `storage.rs` shell (flash I/O, write retries, and the conversion to
+  `stack.rs` (whose fault path the Renode overflow case runs), and the
+  `storage.rs` shell (flash I/O, write retries, and the conversion to
   SoftDevice types). Since 2026-10-10 the store's load, merge, and eviction
   rules and its codec are in the host-tested `storage/devices.rs` and
   `storage/codec.rs`.
@@ -179,7 +181,7 @@ Follow-up obligations:
   `layout.rs`, `ui_logic.rs`) through `#[path]`, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
   under `#[cfg(test)]`, in an inline `storage` module. It declares `config`
-  and, since 2026-10-11, `diagnostics` as ordinary modules.
+  and, since 2026-10-11, `diagnostics` and `stack_logic` as ordinary modules.
 - The self-test includes `ble/adv_parser.rs` through `#[path]`, and the
   simulation compiles the same pure modules and the four `storage` files for
   the ARM target and runs the coordinator, management, the device store,
@@ -212,11 +214,11 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 415 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 404 unit tests, 3 integration tests,
+  finds 421 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 410 unit tests, 3 integration tests,
   3 glyph-table tests, and 5 vendored-portal tests, which passed on
   2026-10-11 (the
-  [counter review fixes record](../testing.md#validation-record--2026-10-11-counter-review-fixes);
+  [MPU stack guard record](../testing.md#validation-record--2026-10-11-mpu-stack-guard);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

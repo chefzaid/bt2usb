@@ -24,14 +24,14 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 52 | 0 | 0 |
+| [FIXME](#fixme) | 52 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
 | [UI, Display And Power](#ui-display-and-power) | 9 | 2 | 1 |
-| [Platform, Memory And Recovery](#platform-memory-and-recovery) | 8 | 4 | 3 |
+| [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 13 | 3 | 0 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **140** | **70** | **21** |
+| **Total** | **141** | **70** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -812,6 +812,21 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   *(hardware evidence pending)* mark. Fixed: each statement now matches the
   code, the graph has `ble::device_info` and `diagnostics` with their edges,
   and the security table has a row for the PnP ID read.
+- [ ] **P2** **A stack overflow during a log call is not reported.** Found
+  while documenting the MPU stack guard (ADR 0026). The HardFault handler
+  logs the overflow with `defmt::error!`. If the overflow happens while a
+  `defmt` line is being written, as it may when a log call is the frame that
+  crosses into the guard, defmt-rtt 1.3 finds its logger already taken and
+  panics ("defmt logger taken reentrantly"); panic-probe's `udf` then faults
+  inside the HardFault handler, the core locks up, and the nRF52840 resets
+  with `reset reason: CPU lock-up` and no `stack overflow` line. The statics
+  are still protected, but the report is lost. The self-test's deliberate
+  overflow logs nothing while it recurses, so it does not show this. Closes
+  when the handler first stores the stack pointer, guard, and PC in
+  `.uninit` RAM, which a lock-up or pin reset does not clear, before it
+  tries to log, and the next boot logs and clears that record, with the
+  record's encoding host-tested. The simulation writes its report straight
+  to UART0 without `defmt`, so Renode cannot show the lost line.
 
 ## Needs Your Input
 
@@ -1364,12 +1379,26 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   flash size and storage wear assumptions. Accept when reviewed margins are
   recorded and `memory_sd.x` matches the measured requirement; do not reduce
   its current 24 KiB reservation based only on estimates.
-- [ ] **P1** **Stack overflow detection.** Without flip-link a stack overflow
+- [x] **P1** **Stack overflow detection.** Without flip-link a stack overflow
   grows into `.bss` and corrupts statics silently; no MPU guard region is
   configured, and the painted-stack high-water mark is evidence after the fact.
   Evaluate a guard compatible with the SoftDevice RAM layout. Accept when a
   deliberate overflow in a test build faults with a diagnosable message instead
   of corrupting memory ([ADR 0010](docs/adr/0010-static-memory-layout.md)).
+  Done (2026-10-11): every image makes the 4 KiB at the first 4 KiB boundary
+  above the statics a no-access, execute-never MPU region at boot and logs
+  `stack guard: 4096 bytes at ...`; the SoftDevice uses the MWU, not the MPU,
+  so the RAM layout is unchanged. An overflow escalates to HardFault, whose
+  handler runs with the MPU off and logs
+  `stack overflow: stack pointer ..., guard ..., PC not stacked`, then stops
+  the core ([ADR 0026](docs/adr/0026-mpu-stack-guard.md)). The placement and
+  register values are pure and host-tested (six tests), a Renode case moves
+  the stack pointer into the guard and expects the report and a stopped core,
+  and the self-test checks the MPU still holds the region after the
+  SoftDevice, USB, and BLE stages and offers a deliberate overflow on SELECT,
+  with `mask selftest` turning off probe-rs's HardFault catch so the line
+  prints ([stack overflow incident](docs/operations.md#the-stack-overflows)).
+  *(hardware evidence pending)*
 - [x] **P1** **Diagnostics without sensitive input.** Add firmware/build
   identification, reset reasons, bounded counters for reconnect/queue/write
   failures, and a documented collection method. Log each peripheral's Device

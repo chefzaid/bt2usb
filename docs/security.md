@@ -561,17 +561,28 @@ pinning is recorded in
 
 ## Unsafe Code
 
-Application `unsafe` is limited to six blocks, each reviewed in
+Application `unsafe` is limited to eleven blocks, the HardFault handler that
+cortex-m-rt requires to be an `unsafe fn`, and one `global_asm!` exception
+handler, each reviewed in
 [code quality](code-quality.md#unsafe-code-policy): building the
 advertisement slice from SoftDevice-provided pointer and length
 ([scanner.rs](../src/ble/scanner.rs), [selftest.rs](../src/selftest.rs)),
 dereferencing the `StaticCell`-backed `Bonder` pointer
 ([bonder.rs](../src/ble/bonder.rs)), SoftDevice power SVCs
-([sd_setup.rs](../src/sd_setup.rs)), and the volatile stack-paint read
-([stack.rs](../src/stack.rs)). The vendored SoftDevice crate wraps the
-SoftDevice C API with `unsafe` FFI. No separate audit record exists; rules for
-adding or reviewing `unsafe` are in the same
+([sd_setup.rs](../src/sd_setup.rs)), and, in [stack.rs](../src/stack.rs), the
+volatile stack-paint read, the MPU and fault-status register accesses of the
+stack guard, and its two fault handlers. The vendored SoftDevice crate wraps
+the SoftDevice C API with `unsafe` FFI. No separate audit record exists; rules
+for adding or reviewing `unsafe` are in the same
 [code quality](code-quality.md#unsafe-code-policy) section.
+
+Since 2026-10-11 a stack overflow, whatever drives it, faults in the MPU guard
+at the bottom of the stack before it can overwrite the statics below, which
+hold every task's state, the bonds and saved devices among it; the bridge logs the
+overflow and stops ([ADR 0026](adr/0026-mpu-stack-guard.md)). A frame larger
+than the guard plus the stack left above it can still skip over it; every
+firmware frame is under the 4 KiB guard (the largest, the self-test's main
+task, is 3,412 bytes; the bridge's is 2,668), and no parser recurses.
 
 ## Security Testing
 

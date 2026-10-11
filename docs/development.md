@@ -26,7 +26,8 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── sd_setup.rs        SoftDevice configuration shared by bridge and self-test
 │   ├── power.rs           activity and USB-suspend tracking (task side)
 │   ├── power_logic.rs     pure power and display policy
-│   ├── stack.rs           painted-stack high-water measurement
+│   ├── stack.rs           stack high-water scan, MPU stack guard, fault handler
+│   ├── stack_logic.rs     pure stack guard placement and MPU register values
 │   ├── ble/               scanning, connection workers, coordinator, GATT HID client
 │   ├── hid/               report types, descriptors, aggregation, delivery, wake
 │   ├── usb/               composite USB HID device
@@ -326,7 +327,7 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | `mask run --release` | Same with `--release` | The normal way to flash and watch the bridge |
 | `mask flash` | Same command as `mask run --release` | Also stays attached for logs |
 | `mask flash-debug` | Same command as `mask run` | Every profile has RTT logging; this only selects the dev profile |
-| `mask selftest` | `cargo run --locked --features embedded --target <arm> --release --bin bt2usb-selftest` | Needs S140; prints one `[PASS]`, `[FAIL]`, or `[SKIP]` line per stage. Flash the bridge afterwards |
+| `mask selftest` | `cargo run --locked --features embedded --target <arm> --release --bin bt2usb-selftest -- --no-catch-hardfault` | Needs S140; prints one `[PASS]`, `[FAIL]`, or `[SKIP]` line per stage. `--no-catch-hardfault` lets the firmware's fault handler log the optional deliberate overflow instead of probe-rs halting at the fault ([ADR 0026](adr/0026-mpu-stack-guard.md)). Flash the bridge afterwards |
 | `mask softdevice` | Downloads `s140_nrf52_7.3.0.zip` from Nordic with `curl` only when `s140_nrf52_7.3.0_softdevice.hex` is missing, extracts the hex, then always runs `probe-rs download s140_nrf52_7.3.0_softdevice.hex --chip nRF52840_xxAA --format hex` | Stops on download or extraction failure. Checks no digest, of a download or of an existing hex. The hex stays in the repository root, excluded by `.gitignore`; do not commit it ([SoftDevice installation](deployment.md#softdevice-installation)) |
 | `mask rtt` | `probe-rs attach --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/bt2usb` | Attaches to a running board without flashing. The ELF must be the release bridge that is on the board |
 | `mask probe-list` | `probe-rs list` | First check for any probe problem |
@@ -407,13 +408,15 @@ Cargo command in the repository:
 | Setting | Value | Effect |
 | --- | --- | --- |
 | `build.target` | Not set | Host tests build for the native platform; firmware tasks pass `--target` |
-| `runner` for `cfg(all(target_arch = "arm", target_os = "none"))` | `probe-rs run --chip nRF52840_xxAA` | `cargo run` on any ARM bare-metal binary flashes it and streams RTT |
+| `runner` for `cfg(all(target_arch = "arm", target_os = "none"))` | `probe-rs run --chip nRF52840_xxAA` | `cargo run` on any ARM bare-metal binary flashes it and streams RTT. probe-rs also halts the core on entry to a HardFault and prints a backtrace, before the firmware's handler runs; `mask selftest` turns that off with `--no-catch-hardfault` ([ADR 0026](adr/0026-mpu-stack-guard.md)) |
 | `rustflags` for the same cfg | `-C link-arg=-Tlink.x`, `-C link-arg=-Tdefmt.x`, `-C link-arg=--nmagic` | cortex-m-rt linker script, defmt section script, no page alignment |
 | `[env] DEFMT_LOG` | `debug` | Default defmt log filter for local builds |
 
 There is no flip-link. nrf-softdevice reports `__sdata` to the SoftDevice as
 the application RAM base, and flip-link would move `.data` above the stack, so
-`memory_sd.x` asserts the layout instead. Cargo also merges configuration from
+`memory_sd.x` asserts the layout instead, and an MPU region at the bottom of the
+stack gives back the overflow fault flip-link would have provided
+([ADR 0026](adr/0026-mpu-stack-guard.md)). Cargo also merges configuration from
 parent directories and `$CARGO_HOME/config.toml`; a personal linker or
 `rustflags` setting for ARM targets applies to this repository too.
 

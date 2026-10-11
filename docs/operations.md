@@ -107,8 +107,10 @@ The self-test image ([selftest.rs](../src/selftest.rs)) logs
 `[FAIL] {stage}: {detail}`, or `[SKIP] {stage}: {detail}` line per stage, and
 finally `==== self-test done: {} passed, {} failed, {} skipped ====`. Stages are
 `softdevice`, `flash`, `usb enumeration`, `usb hid report`, `oled i2c`,
-`oled render`, one per button, `ble scan`, and `stack`. It replaces the bridge
-firmware, so flash the bridge again afterwards. The
+`oled render`, one per button, `ble scan`, `stack`, and `stack guard`. After
+the summary it offers an optional deliberate stack overflow: holding SELECT
+within 10 s ends the run with a `stack overflow: ...` line. It replaces the
+bridge firmware, so flash the bridge again afterwards. The
 [first-flash checklist](first-flash.md#2-self-test-image) explains each result.
 
 ## What Healthy Looks Like
@@ -125,6 +127,7 @@ NFC-pin setting ([dependency logs](security.md#dependency-logs)); a local
 
 ```text
 bt2usb firmware starting: version <version>, commit <commit>, <profile> build, DEFMT_LOG=<filter>
+stack guard: 4096 bytes at 0x<base>..0x<top>
 reset reason: <causes>
 softdevice RAM: N bytes
 You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to X
@@ -143,6 +146,12 @@ UI and isolated OLED tasks started
   filter the build was compiled with. A release package's `BUILD-INFO.json`
   names the same commit, and staging refuses an image that reports another
   one ([deployment](deployment.md#version-and-build-policy)).
+- `stack guard` gives the no-access MPU region at the bottom of the stack,
+  turned on before anything else runs, so an overflow faults there instead of
+  overwriting the statics ([ADR 0026](adr/0026-mpu-stack-guard.md)). The
+  addresses move with the size of the statics (`0x2000d000..0x2000e000` in the
+  current release build). `stack guard off: <reason>` in its place means the
+  bridge runs without one; report it.
 - `reset reason` decodes the nRF52840's `POWER.RESETREAS` register, which
   `main` reads and clears before the SoftDevice takes the POWER peripheral, so
   it names only the resets since the previous boot; see
@@ -275,6 +284,9 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | Level | Message | Meaning | Action |
 | --- | --- | --- | --- |
 | info | `bt2usb firmware starting: version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}` | `main` started; names the build | Quote the line in a report; twice in a row on the first boot after a UICR erase is expected ([boot sequence](#boot-sequence)) |
+| info | `stack guard: {=u32} bytes at {=u32:#010x}..{=u32:#010x}` | The MPU stack guard is on: its size and address range | None; see [memory checks](#stack-and-memory-checks) |
+| warn | `stack guard off: {}` (`BadSize`, `StackInUse`, or `NoMpu`) | The guard could not be turned on, so an overflow would corrupt statics silently | Report it with the boot lines; `BadSize` means `STACK_GUARD_BYTES` is not a power of two of at least 32 |
+| error | `stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The stack ran into the guard and the core stopped; nothing below the guard was overwritten | [Stack overflow incident](#the-stack-overflows) |
 | info | `reset reason: {}` | The causes of the last reset, joined with ` + `, and any undefined register bits | See [Reset Reasons](#reset-reasons) |
 | info | `softdevice RAM: {:?} bytes` (vendor) | RAM the SoftDevice configuration needs | Record it; must be at most 24576 |
 | warn | `You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to {:x}` (vendor) | The 24 KiB reservation exceeds the requirement | None required; see [memory checks](#stack-and-memory-checks) |
@@ -283,7 +295,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | panic | `sd_softdevice_enable err {:?}`, `sd_ble_enable err {:?}`, `sd_ble_cfg_set {:?} err {:?}` (vendor) | The SoftDevice rejected enable or configuration | Check the SoftDevice version and recent configuration changes |
 | panic | Starts with `Softdevice assertion failed:`, `Softdevice memory access violation.`, or `Softdevice unknown fault` (vendor) | SoftDevice fault handler | Report with the full message and PC value; see [panics](#firmware-panics-or-stops-responding) |
 | info | `SoftDevice started`, `USB HID device started`, `BLE task started`, `UI and isolated OLED tasks started` | Each group of tasks was spawned | None |
-| info | `stack high-water: {} of {} bytes` | Deepest stack use since reset, of the stack region size | Keep well under half; see [memory checks](#stack-and-memory-checks) |
+| info | `stack high-water: {} of {} bytes` | Deepest stack use since reset, of the stack above the guard | Keep well under half; see [memory checks](#stack-and-memory-checks) |
 | info | `diagnostics: {}` | Every event counter since boot, as `name N` pairs; logged when they change, at most once a minute | Quote the latest line in a report; see [Event Counters](#event-counters) |
 
 ### USB And Power
@@ -501,6 +513,46 @@ drops all held input and the bridge boots again. File a defect with the log.
 Watchdog recovery is open work in
 [TODO.md](../TODO.md#platform-memory-and-recovery); the
 [architecture](architecture.md#what-is-fatal) lists which failures are fatal.
+
+### The Stack Overflows
+
+**Symptoms:** as for a panic (input stops, the OLED freezes, a held key may
+repeat), and the log ends in
+`stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC not stacked`.
+Under `mask run`, the log instead ends in probe-rs's
+`Firmware exited unexpectedly: Exception` with no panic message before it:
+`probe-rs run` halts the core on entry to every HardFault by default, before
+the handler logs, and the backtrace it prints after that line starts from a
+frame the overflow could not stack, so its frames are not trustworthy. An
+overflow that hits while a log line is being written leaves no line at all:
+the board resets, and the next boot logs `reset reason: CPU lock-up`
+([ADR 0026](adr/0026-mpu-stack-guard.md)).
+
+**Likely causes:** the call chain of the tasks, the interrupt handlers, and the
+SoftDevice's handlers, which all share one stack, needed more than the stack
+above the guard. The stack pointer ran into the no-access MPU region at the
+bottom of the stack, the fault handler logged the line, and the core stopped
+([ADR 0026](adr/0026-mpu-stack-guard.md)). The statics below the guard were
+not overwritten. `PC not stacked` is normal for an overflow: the fault's
+frame could not be written into the guard, so the faulting instruction is
+unknown.
+
+**Confirm:** the latest `stack high-water` line before the fault shows how
+close the stack had come; compare it with the paths that ran just before, such
+as a scan with both slots reconnecting or a flash save. A stack pointer far
+below the guard's top means one large frame jumped into it. To see the
+firmware's own line for an `Exception` exit, reproduce with the HardFault catch
+off, as `mask selftest` already runs:
+`cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -- --no-catch-hardfault`.
+A panic in that session still logs its message, but probe-rs prints no
+backtrace and stays attached until Ctrl-C.
+
+**Fix:** reset or power-cycle the board. File a defect with the log from boot,
+including the `stack guard` and every `stack high-water` line: the fix is to
+shrink the deepest call chain or to give the stack more room, never to remove
+the guard. A deliberate overflow from the self-test (stage 8 in
+[first flash](first-flash.md#2-self-test-image)) prints the same line by
+design.
 
 ### USB Device Does Not Enumerate
 
@@ -1019,13 +1071,15 @@ matters and record the numbers with the artifact hash.
 | Flash and static RAM size | `mask size` (`cargo size -A` on the release `bt2usb`) | Code and read-only data within 804 KiB; static data within 232 KiB with room left for the stack |
 | Largest code contributors | `mask bloat` (needs `cargo-bloat`) | No unexpected growth between builds |
 | Self-test stack stage | `[PASS] stack: under half the stack region used` | Pass |
+| Stack guard | `stack guard: 4096 bytes at ...` at boot; self-test `[PASS] stack guard: MPU region still set after the SoftDevice, USB, and BLE stages` | Present, and the self-test stage passes |
 
 ### Reading The Stack High-Water Mark
 
 `cortex-m-rt`'s `paint-stack` feature fills the stack region with `0xCCCCCCCC`
-at reset. Once a second, [stack.rs](../src/stack.rs) scans up from the bottom
-for the first overwritten word: X is the deepest use since reset, and Y is the
-size of the stack region (`_stack_end` to `_stack_start`, the top of RAM).
+at reset. Once a second, [stack.rs](../src/stack.rs) scans up from the top of
+the stack guard for the first overwritten word: X is the deepest use since
+reset, and Y is the size of the stack above the guard (from the guard's top to
+`_stack_start`, the top of RAM).
 Every Embassy task and every application interrupt handler runs on this one
 stack. Nordic documents that the SoftDevice's own handlers also use the
 application's main stack; that is general Nordic guidance, not something this
@@ -1035,10 +1089,13 @@ movement, a user scan while a slot reconnects, OLED updates, and a flash save.
 A reset clears the measurement.
 
 The project does not use `flip-link`, because it would move `.data` away from
-the RAM origin that the SoftDevice uses as the application RAM boundary. A
-stack overflow therefore runs into static data instead of faulting, and can
-corrupt state silently. Treat a high-water mark above half of Y as a defect to
-investigate, not as headroom.
+the RAM origin that the SoftDevice uses as the application RAM boundary.
+Instead, a 4 KiB no-access MPU region sits at the bottom of the stack, so an
+overflow faults with `stack overflow: ...` before it reaches static data
+([The Stack Overflows](#the-stack-overflows),
+[ADR 0026](adr/0026-mpu-stack-guard.md)). A single frame larger than the guard
+plus the stack left above it could still step over it. Treat a high-water mark
+above half of Y as a defect to investigate, not as headroom.
 
 ### Changing The Memory Map
 

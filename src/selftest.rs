@@ -12,7 +12,9 @@
 //! 4. OLED ACK on I²C, then the Home screen
 //! 5. Buttons: idle level, then one press of each within a time limit
 //! 6. BLE radio: an 8 s scan, listing HID devices heard
-//! 7. Stack high-water mark
+//! 7. Stack high-water mark, and the MPU stack guard still set as at boot
+//! 8. Optional: holding SELECT within 10 s overflows the stack on purpose, so
+//!    the guard's fault report can be seen on the board; the board then stops
 //!
 //! Run it with `mask selftest`. It never types anything on the PC: the only
 //! HID report it sends is an all-zero mouse report.
@@ -30,6 +32,7 @@ mod power;
 mod power_logic;
 mod sd_setup;
 mod stack;
+mod stack_logic;
 mod ui;
 mod usb;
 
@@ -75,6 +78,8 @@ const USB_ENUM_TIMEOUT: Duration = Duration::from_secs(10);
 const BUTTON_TIMEOUT: Duration = Duration::from_secs(20);
 /// BLE scan window.
 const SCAN_TIME: Duration = Duration::from_secs(8);
+/// How long the optional deliberate overflow waits for SELECT.
+const OVERFLOW_OFFER: Duration = Duration::from_secs(10);
 
 #[derive(Default)]
 struct Tally {
@@ -124,6 +129,8 @@ async fn main(spawner: Spawner) {
         diagnostics::BUILD_PROFILE,
         diagnostics::LOG_FILTER
     );
+    // As the firmware does; stage 7 checks that nothing changed it since.
+    let guard = stack::enable_guard_logged();
 
     // Same interrupt priorities as the firmware: the SoftDevice reserves 0, 1, 4.
     let mut nrf_config = embassy_nrf::config::Config::default();
@@ -209,7 +216,13 @@ async fn main(spawner: Spawner) {
     // 5. Buttons.
     check_button("button UP (P0.11)", p.P0_11.into(), &mut tally).await;
     check_button("button DOWN (P0.12)", p.P0_12.into(), &mut tally).await;
-    check_button("button SELECT (P0.24)", p.P0_24.into(), &mut tally).await;
+    let mut select = p.P0_24;
+    check_button(
+        "button SELECT (P0.24)",
+        select.reborrow().into(),
+        &mut tally,
+    )
+    .await;
 
     // 6. BLE radio.
     check_ble_scan(sd, &mut tally).await;
@@ -222,11 +235,28 @@ async fn main(spawner: Spawner) {
     } else {
         tally.fail("stack", "over half the stack region used");
     }
+    match guard {
+        Some(guard) if stack::guard_is_on(&guard) => tally.pass(
+            "stack guard",
+            "MPU region still set after the SoftDevice, USB, and BLE stages",
+        ),
+        Some(_) => tally.fail(
+            "stack guard",
+            "MPU registers changed since boot: something else programs the MPU",
+        ),
+        None => tally.fail(
+            "stack guard",
+            "not enabled at boot (see 'stack guard off' above)",
+        ),
+    }
 
     info!(
         "==== self-test done: {} passed, {} failed, {} skipped ====",
         tally.passed, tally.failed, tally.skipped
     );
+
+    // 8. Optional deliberate overflow.
+    offer_overflow(select.reborrow().into()).await;
     loop {
         Timer::after(Duration::from_secs(3600)).await;
     }
@@ -286,7 +316,7 @@ async fn check_flash(sd: &Softdevice, tally: &mut Tally) {
 
 /// Buttons are active-low with the internal pull-up: at rest the pin must read
 /// high, then a press must pull it low.
-async fn check_button(name: &str, pin: Peri<'static, AnyPin>, tally: &mut Tally) {
+async fn check_button(name: &str, pin: Peri<'_, AnyPin>, tally: &mut Tally) {
     let mut btn = Input::new(pin, Pull::Up);
     // Let the pull-up settle before sampling.
     Timer::after(Duration::from_millis(5)).await;
@@ -304,6 +334,42 @@ async fn check_button(name: &str, pin: Peri<'static, AnyPin>, tally: &mut Tally)
         }
         Err(_) => tally.skip(name, "no press seen: check wiring to GND"),
     }
+}
+
+/// Overflow the stack on purpose if SELECT is held within [`OVERFLOW_OFFER`],
+/// so the board shows what the MPU stack guard reports: a
+/// `stack overflow: ...` line, after which the core stops until it is reset.
+async fn offer_overflow(pin: Peri<'_, AnyPin>) {
+    let mut select = Input::new(pin, Pull::Up);
+    Timer::after(Duration::from_millis(5)).await;
+    info!(
+        ">>> optional: hold SELECT within {} s to overflow the stack on purpose; the board then stops with a 'stack overflow' line until reset",
+        OVERFLOW_OFFER.as_secs()
+    );
+    if with_timeout(OVERFLOW_OFFER, select.wait_for_low())
+        .await
+        .is_err()
+    {
+        info!("no deliberate overflow");
+        return;
+    }
+    info!("overflowing the stack on purpose");
+    core::hint::black_box(overflow_stack(0));
+    warn!("the deliberate overflow returned without a fault: the stack guard is not working");
+}
+
+/// Recurse with a 256-byte array in each frame until the stack runs into the
+/// guard. A release build's frame takes about 0.5 KiB, so the stack holds a
+/// few hundred of them and the guard faults long before the bound;
+/// `black_box` keeps each frame's array in memory, and the addition after the
+/// call keeps the recursion from becoming a loop.
+#[inline(never)]
+fn overflow_stack(depth: u32) -> u32 {
+    let frame = core::hint::black_box([depth; 64]);
+    if depth >= 100_000 {
+        return depth;
+    }
+    overflow_stack(depth + 1).wrapping_add(frame.first().copied().unwrap_or(0))
 }
 
 /// Scan like the firmware does and report what the radio hears.

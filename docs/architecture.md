@@ -66,7 +66,8 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [sd_setup.rs](../src/sd_setup.rs) | Board shell | Shared SoftDevice setup and USB power events |
 | [power.rs](../src/power.rs) | Board shell | Activity tracking and power state over `embassy-time` |
 | [power_logic.rs](../src/power_logic.rs) | Pure core | Pure power/display policy |
-| [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement |
+| [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement, the MPU stack guard (programming and read-back), and the HardFault and MemManage handlers that report a stack overflow |
+| [stack_logic.rs](../src/stack_logic.rs) | Pure core | Where the stack guard goes (`StackGuard::place`) and the MPU register values for it ([ADR 0026](adr/0026-mpu-stack-guard.md)) |
 | [ble/mod.rs](../src/ble/mod.rs) | Board shell | `BleCommand`, `BleEvent`, and `DiscoveredDevice` over the SoftDevice `Address`, and the GAP procedure lock |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
 | [ble/bond_table.rs](../src/ble/bond_table.rs) | Pure core | The bonding keys held in RAM, each saved or not: a new pairing never displaces a saved device's keys, and one that is not saved is discarded |
@@ -116,7 +117,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, management, messages, pnp_id}`, `diagnostics`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, device_info, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -149,19 +150,22 @@ flowchart TD
         PWR["power"]
         DSP["ui::display"]
         BTN["ui::buttons"]
-        SDS["sd_setup and stack"]
+        SDS["sd_setup"]
+        STK["stack"]
     end
     subgraph core [Pure core exported by lib.rs]
         BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, adv_parser, pnp_id"]
         DG["diagnostics"]
+        SL["stack_logic"]
         HID["hid modules"]
         UIL["ui::controller, ui_logic, input_logic, display_logic"]
         PL["power_logic"]
         SF["storage::devices, codec, framing, record"]
     end
-    MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & UIL & HID & DG
-    SELF --> USB & DSP & SDS & BC & HID & DG
-    SIM --> BC & UIL & BTN & SF & DG
+    MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & STK & UIL & HID & DG
+    SELF --> USB & DSP & SDS & STK & BC & HID & DG
+    SIM --> BC & UIL & BTN & SF & STK & DG
+    STK --> SL
     MC --> BND & SC & ST & BC
     SW --> MC & BND & HC & SC & USB & BC & HID & DG
     BND --> ST & BC
@@ -269,7 +273,9 @@ appear in the code and reach the host through RTT; see
 
 1. Logs `"bt2usb firmware starting: ..."` with the build identity from
    [diagnostics.rs](../src/diagnostics.rs) (version, source commit, profile,
-   `DEFMT_LOG` filter, which `build.rs` supplies), reads and clears
+   `DEFMT_LOG` filter, which `build.rs` supplies), turns on the MPU stack guard
+   and logs `"stack guard: {} bytes at {}..{}"` (or `"stack guard off: {}"`;
+   [ADR 0026](adr/0026-mpu-stack-guard.md)), reads and clears
    `POWER.RESETREAS` and logs the decoded `"reset reason: {}"` while the POWER
    peripheral is still the application's, then calls `embassy_nrf::init` with
    the GPIOTE and time-driver interrupt priorities set to P2.
@@ -1142,7 +1148,9 @@ cooperative: a task runs until it awaits, and every task shares the one stack,
 whose deepest use is painted and measured by [stack.rs](../src/stack.rs) and
 logged from the 1-second tick, whenever it grows, as
 `"stack high-water: {} of {} bytes"`
-([ADR 0010](adr/0010-static-memory-layout.md)). The same tick logs the event
+([ADR 0010](adr/0010-static-memory-layout.md)). A no-access MPU region at the
+bottom of that stack makes an overflow fault before it reaches the statics
+([ADR 0026](adr/0026-mpu-stack-guard.md)). The same tick logs the event
 counters as `"diagnostics: {}"` when they change, at most once per
 `DIAGNOSTICS_REPORT_INTERVAL_SECS` (60 s)
 ([event counters](operations.md#event-counters)). There is no heap; buffers are
@@ -1309,11 +1317,22 @@ peer's address again.
 All three firmware binaries use `panic-probe` with its `print-defmt` feature
 (`use panic_probe as _`). A panic prints its message through `defmt` over RTT
 and then halts the core; this is panic-probe's documented behavior, not
-checked against the crate source here. The firmware defines no
-`#[exception]` handler, watchdog, or reset-on-panic path, so the device stays
-stopped until it is reset or power-cycled. In the
+checked against the crate source here. The firmware defines no watchdog or
+reset-on-panic path, so the device stays stopped until it is reset or
+power-cycled. In the
 simulation the message goes to the RTT buffer, not UART0. Host tests use the
 standard test harness.
+
+A stack overflow is fatal too. It faults in the MPU guard at the bottom of the
+stack, and the HardFault handler in [stack.rs](../src/stack.rs), the only
+`#[exception]` handler the firmware defines, logs
+`"stack overflow: stack pointer {}, guard {}..{}, PC not stacked"` (on UART0
+in the simulation) and spins. Every other HardFault spins there without a
+line, as cortex-m-rt's default handler did
+([ADR 0026](adr/0026-mpu-stack-guard.md)). A `probe-rs run` session, which is
+what `mask run` starts, halts the core on entry to the handler before it logs
+and prints `Firmware exited unexpectedly: Exception` instead; `mask selftest`
+turns that catch off ([the runbook](operations.md#the-stack-overflows)).
 
 Data from a BLE peer, the USB host, or flash must not be able to reach a
 panic. Since 2026-10-10 Clippy rejects indexing, slicing, `unwrap`, `expect`,
@@ -1491,6 +1510,7 @@ change.
 - [ADR 0023: Hold Host Line Coverage At A Floor As A Regression Guard](adr/0023-host-coverage-floor.md)
 - [ADR 0024: Model The TWIM And SSD1306 In Renode And Read The Panel's Text Back](adr/0024-renode-oled-models.md)
 - [ADR 0025: Deny Panic-Prone Constructs With Clippy And List The Ones It Cannot See](adr/0025-panic-lints-and-inventory.md)
+- [ADR 0026: Guard The Bottom Of The Stack With An MPU Region](adr/0026-mpu-stack-guard.md)
 
 ## Proposed ADRs
 

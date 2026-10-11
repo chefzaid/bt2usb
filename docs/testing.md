@@ -67,7 +67,7 @@ PowerShell, use the direct command.
 | Workflow lint | — | `actionlint` |
 | Python and shell lint | `mask lint-scripts` | `python scripts/lint_scripts.py` (Ruff and ShellCheck), and its tests with `python -m unittest discover -s scripts -p "lint_scripts_test.py" -v` |
 | Dependency audit | — | `cargo audit` |
-| Board self-test | `mask selftest` | `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest` |
+| Board self-test | `mask selftest` | `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest -- --no-catch-hardfault` |
 | Local software gate | `mask ci` | See [what `mask ci` covers](#local-and-ci-coverage-compared) |
 
 `mask sim-setup` installs Renode and the `renode-test` dependencies, and
@@ -114,7 +114,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `messages.rs`, `pnp_id.rs`, `src/power_logic.rs`, `src/diagnostics.rs` (with `diagnostics_tests.rs`), `src/ui/controller.rs` (with `controller_tests.rs`), `display_logic.rs`, `input_logic.rs`, `layout.rs` (with `layout_tests.rs`), `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `device_info.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `messages.rs`, `pnp_id.rs`, `src/power_logic.rs`, `src/diagnostics.rs` (with `diagnostics_tests.rs`), `src/stack_logic.rs`, `src/ui/controller.rs` (with `controller_tests.rs`), `display_logic.rs`, `input_logic.rs`, `layout.rs` (with `layout_tests.rs`), `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `device_info.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that fixes the event-counter review findings. The
-tree holds 415 `#[test]` functions: 404 in
+2026-10-11, in the commit that adds the MPU stack guard. The
+tree holds 421 `#[test]` functions: 410 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -228,6 +228,7 @@ protect.
 | [ui/layout_tests.rs](../src/ui/layout_tests.rs), for [layout.rs](../src/ui/layout.rs) | 12 | Every screen's lines and baselines: Home's title and hints, the scan's dots cycling, the one-line waiting screens, a device list that marks the selection with `> ` and scrolls to keep it among four rows, an empty list, the saved list ending with Factory reset and its footer, the Forget confirmation naming the device (or "Device unavailable") with Cancel as the default, the reset confirmation, and the name or message under each status title. Every fixed label fits the 21 columns of the panel, lines stay on the panel and never overlap, and a name wider than the panel is kept whole for the panel to cut. |
 | [diagnostics_tests.rs](../src/diagnostics_tests.rs), for [diagnostics.rs](../src/diagnostics.rs) | 14 | The build identity `build.rs` supplies: the crate version, a 40-digit commit with an optional `-dirty` or `unknown`, a `debug` or `release` profile, and a log filter. `POWER.RESETREAS` decoding: no defined bit reads as power-on or brown-out, each defined bit maps to its cause, accumulated causes list in bit order, undefined bits are kept for the report, the defined mask equals the cause bits, and every cause has a distinct name. Event counters: each counter has its own slot in log order and a distinct name, counts start at zero and stop at `u32::MAX`, and `CounterReport` never logs unchanged counts, logs the first change at once, then waits out `DIAGNOSTICS_REPORT_INTERVAL_SECS` and logs the latest counts, without its clock wrapping. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
+| [stack_logic.rs](../src/stack_logic.rs) | 6 | The MPU stack guard ([ADR 0026](adr/0026-mpu-stack-guard.md)): it starts at the first multiple of its size at or above `_stack_end`, so no static is inside it, and an aligned `_stack_end` is used as is; only powers of two of at least 32 bytes make a region, and a region that would pass the end of the address space is refused; a stack pointer above the guard's top has stack left, and one at the top, inside the guard, or below it (a frame larger than the stack left can skip past the guard) has overflowed; `RBAR` is the base, with the region number left to `RNR`, `RASR` is no access, execute-never, normal write-back memory, the size field, and ENABLE (`0x1003_0017` for 4 KiB, `0x1003_0009` for 32 bytes), and `MPU_CTRL` is `0b101`; the read-back accepts only the exact `CTRL` and `RASR` and the address bits of `RBAR`, whose low five bits are not address bits, so an MPU turned off, an MPU left on in HardFault, a moved region, or a disabled region fails it. |
 
 ### Integration Tests
 
@@ -264,7 +265,8 @@ exercises.
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
 | `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` mirrors the order in which `ble/multi_conn.rs` calls the pure modules, but nothing checks that the two stay in step |
 | `ui/display.rs` | Embedded and simulation builds and Clippy; the screen layout (`ui::layout`) and the recovery policy are host-tested; the Renode scenario runs the display task on modelled TWIM and SSD1306 peripherals and reads every screen it draws back ([OLED checks](#oled-checks)); self-test OLED stages |
-| `stack.rs`, `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice and stack stages |
+| `stack.rs` | Embedded and simulation builds and Clippy; the guard's placement and register values (`stack_logic.rs`) are host-tested; the Renode case `A Stack Overflow Faults In The Guard And Is Reported` programs the MPU, takes a fault in the guard, and checks the report ([Robot test case](#robot-test-case)); self-test `stack` and `stack guard` stages and the optional deliberate overflow; the high-water scan runs only on the board |
+| `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice stage |
 | `power.rs` | Embedded build and Clippy; its policy (`power_logic.rs`) is host-tested; hardware acceptance (sleep and wake) |
 
 ## Renode Simulation
@@ -358,13 +360,16 @@ section that the SoftDevice provides in firmware builds.
 | Coordinator | `plan_start_scan`, `plan_connect`, `plan_disconnect`, `on_slot_connected`, `on_slot_disconnected`, `on_slot_link_lost`, `link_state`, and the `ConnManager` | `SimBle` in `sim_ble.rs` executes their `Action`s in the order `multi_conn::execute_action` does; a connection worker connects or disconnects as soon as it is told |
 | Scan | `merge_advertisement` and `adv_parser` | Three fixed advertisements: `Keyboard` (address `0xA1`, RSSI −42, HID UUID), `Phone` (`0xC3`, −30, no HID UUID), `Mouse` (`0xB2`, −55, HID UUID) |
 | Forget and Factory reset | `forget_targets`, `Quiescence`, `commit`, then the link status and `ManagementResult`, as `multi_conn::manage_devices` orders them | Targeted workers acknowledge the barrier at once |
+| Stack guard | `stack::enable_guard`, the `HardFault` handler, the assembly `MemoryManagement` handler, and `report_overflow`, which writes its line through `uart_write_blocking` | Renode's MPU model, which takes the guard's fault as MemManage even though it is disabled ([ADR 0026](adr/0026-mpu-stack-guard.md)). The simulation has no painted stack, so it never runs `high_water` |
 | Pairing store | `DeviceList::{add, find, without, reset, pending_item, mark_saved, load, iter_recent}` with the record codec and framing | The item is written to RAM; each save is read back with `DeviceList::load` and compared with the list. Addresses are random static addresses whose low four bytes are the `u32` stand-in; peers never pair, so no record has a bond |
 
 UART0 output is written by the `slog!` macro through `Console` in `sim.rs`
 (TX P0.06, RX P0.08 in the code; Renode's UART model emits the bytes
 regardless of pin routing). `defmt` messages from shared modules, such as the
 button driver's `Button: …` line, go to the defmt RTT logger and do not appear
-on UART0.
+on UART0. The fault handler's `stack overflow` line cannot use `Console`,
+whose task never runs again, so `uart_write_blocking` in `sim.rs` copies it
+into a RAM buffer and drives UARTE0's registers until the transfer ends.
 
 The platform script loads Renode's stock `platforms/cpus/nrf52840.repl`,
 unregisters its `gpiote`, `gpio0`, and `gpio1`, and loads
@@ -490,8 +495,9 @@ host tests cover both.
 ### Robot Test Case
 
 [bt2usb-sim.robot](../renode/bt2usb-sim.robot) compiles the GPIO, TWIM, and
-SSD1306 models once, in its suite setup, and has two test cases: the model
-checks in [OLED checks](#oled-checks), and the scenario,
+SSD1306 models once, in its suite setup, and has three test cases: the model
+checks in [OLED checks](#oled-checks), the stack overflow case described at
+the end of this section, and the scenario,
 `Sim Runs The UI Controller, Display, Coordinator, Management, And Store`,
 described here. The scenario creates the machine, swaps the GPIO
 peripherals and `twi0`, loads the glyph table and the ELF, attaches a terminal
@@ -506,7 +512,7 @@ interrupted by a scenario step.
 
 | Order | Stimulus | Expected UART text (abridged) | What it proves |
 | --- | --- | --- | --- |
-| 1 | Boot | `bt2usb-sim starting`, `version 0.1.0, commit <40 hex digits, or unknown>, debug build` (matched as a pattern), `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, the build identity from `build.rs` in a target build, three button tasks, UI loop |
+| 1 | Boot | `bt2usb-sim starting`, `version 0.1.0, commit <40 hex digits, or unknown>, debug build` (matched as a pattern), `stack guard: 4096 bytes at 0x<8 hex digits>..0x<8 hex digits>` (a pattern), `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, the build identity from `build.rs` in a target build, the MPU stack guard turned on, three button tasks, UI loop |
 | 2 | Timer (step 0, pauses emulation) | `connect device 0 (Keyboard)`, `ConnectSlot slot=0 addr=0xa1`, `PersistDevice addr=0xa1`, `holds 1 device(s); reload matches`, `active_count=1 occupied_count=1`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | RTC time driver, `plan_connect` and `on_slot_connected`, the store's encode and load on the target, the controller's link update |
 | 3 | SELECT | `button Select -> screen Scanning (selected 0)`, `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, `ScanStarted`, `DeviceFound 'Keyboard' addr=0xa1 rssi=-42`, `DeviceFound 'Mouse' addr=0xb2 rssi=-55`, `event: ScanComplete -> screen DeviceList (selected 0)` | GPIO edge to `UiController::button`; scan merging drops the non-HID phone; scan events build the list |
 | 4 | DOWN, UP, DOWN | `button Down -> screen DeviceList (selected 1)`, then `selected 0`, then `selected 1` | List navigation both ways |
@@ -525,7 +531,27 @@ Between these steps it reads the OLED as listed in
 The test does not exercise the power manager's panel blanking, a full command
 channel, a management timeout, a storage failure, bonds or IRK resolution, a
 bus held low (the TWIM model has no stuck-bus fault), or anything about real
-radio timing. Override inputs with `--variable ELF:/abs/path` or
+radio timing.
+
+The stack overflow case, `A Stack Overflow Faults In The Guard And Is
+Reported`, boots the same machine, reads the guard's bounds from the
+`stack guard` line, and waits for `entering sim UI loop (screen=Home)` with
+the emulation paused. It then runs one more second, so the core sleeps in the
+executor with the next scenario step still about a second away, and sets the
+stack pointer 256 bytes below the guard's top, where a function whose frame
+no longer fits would leave it; the firmware has no path that overflows on its
+own. The next interrupt's exception frame lands in the no-access region. The
+case expects
+`stack overflow: stack pointer 0x<sp>, guard <base>..<top>, PC <pc or not stacked>`
+with the bounds from the boot line, then no `scenario:` line for 5 s, which
+shows the core stopped in the handler. Renode 1.16.1 takes the fault as
+MemManage, so the case runs the assembly `MemoryManagement` handler on its way
+to the report; on the nRF52840 the fault escalates to HardFault instead
+([ADR 0026](adr/0026-mpu-stack-guard.md)). With `MPU_CTRL` written as 0 the
+case fails: no fault is taken and the simulation crashes on the corrupted
+stack.
+
+Override inputs with `--variable ELF:/abs/path` or
 `--variable PLATFORM:@/abs/nrf52840.repl`; the interactive script takes
 `renode -e "$bin=@/abs/path" renode/bt2usb-sim.resc`.
 
@@ -775,11 +801,11 @@ Not yet first-class:
 Specific to the current workflow and test tree:
 
 - No CI job flashes a board; the self-test and first-flash layers are manual.
-- The coverage floor is one line-coverage total over the 32 host-library source
+- The coverage floor is one line-coverage total over the 33 host-library source
   modules; a single module can lose coverage while the total stays above 97%,
   and region and function coverage have no floor.
-- The Renode job runs one scripted scenario on Linux, plus register-level
-  checks of its TWIM and SSD1306 models. The scenario covers the UI
+- The Renode job runs one scripted scenario on Linux, plus a stack overflow
+  case and register-level checks of its TWIM and SSD1306 models. The scenario covers the UI
   controller, link loss, saved-device management, and the OLED task with its
   recovery after an address NACK, but its connection workers, radio, and
   flash are stand-ins that answer at once
@@ -896,6 +922,41 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, MPU Stack Guard
+
+This record covers the commit that completes P1 "Stack overflow detection" in
+[TODO.md](../TODO.md#platform-memory-and-recovery)
+([ADR 0026](adr/0026-mpu-stack-guard.md)). The new pure
+`src/stack_logic.rs` places a 4 KiB guard at the first 4 KiB boundary at or
+above `_stack_end` and computes the MPU register values;
+`src/stack.rs` programs region 0 with them at boot in all three images,
+scans the high-water mark from the guard's top, and adds the HardFault
+handler and an assembly MemManage handler that report an overflow. The
+self-test checks the MPU after its SoftDevice, USB, and BLE stages and offers
+a deliberate overflow on SELECT, and `mask selftest` now passes
+`--no-catch-hardfault` to `probe-rs run`, whose default HardFault catch would
+halt the core before the handler logs. Writing the docs found one limitation,
+listed as an open P2 entry in the [TODO.md FIXME section](../TODO.md#fixme):
+an overflow during a `defmt` call loses its report. The checks ran locally on
+Linux in a container, on the working tree just before that commit; nothing
+ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 410 unit tests (6 new in `stack_logic.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.90% of lines (from 98.87%), 98.90% of regions, 99.15% of functions over 33 files; `stack_logic.rs` 100% of lines, regions, and functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge `.text` 124,720 bytes with `DEFMT_LOG=debug` and 123,708 with `DEFMT_LOG=info` (+520 each since `19ba629`); `.rodata` 12,380, `.data` 1,640, `.bss` 25,380, and `.uninit` 1,024 unchanged. `_stack_end` is `0x2000CD8C` (`llvm-nm`), so the guard is `0x2000D000`–`0x2000E000` and 200 KiB of stack remain above it |
+| Largest frames | `llvm-objdump -d` of the release images, every `sub sp` immediate form, functions named from DWARF | Bridge 2,668 bytes (the display task's poll), self-test 3,412 (its main task's poll), both under the 4 KiB guard; no frame subtracts a register; `overflow_stack` takes 512 bytes |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 46 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 17.47 s, the new stack overflow case in 7.63 s, and the model checks in 0.63 s, with the local platform copy without `ApplySVD` described in an earlier record. With `MPU_CTRL` written as 0, the overflow case failed: no fault was taken and the simulation crashed on the corrupted stack |
+| probe-rs HardFault catch | Review of probe-rs-tools 0.32.0 (`cmd/run.rs`, `rpc/utils/run_loop.rs`, `util/cli.rs`) | `probe-rs run` enables the HardFault vector catch unless `--no-catch-hardfault` is given and then exits with `Firmware exited unexpectedly: ...` and a backtrace; not run against a board |
+| Hosted CI | GitHub Actions | Push run 38112472769 (`35f1f11`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the self-test's `stack guard` stage and deliberate overflow are unrun |
 
 ## Validation Record — 2026-10-11, PnP ID Review Fixes
 

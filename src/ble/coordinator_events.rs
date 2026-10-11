@@ -2,16 +2,18 @@
 //! lost, or failed, and a slot reported free. Each ignores an event whose
 //! attempt number is not the slot's current one (see [`ConnManager`]).
 //!
-//! An attempt that ends before its link was reported up also discards the keys
-//! of any pairing it made, which the store never saved
-//! ([`Action::DiscardUnsavedBond`]). The coordinator handles a worker's events
-//! in order, so a `Connected`, whose `PersistDevice` saves the keys, is always
-//! handled before a later report from the same slot.
+//! An attempt that ends while its slot has no link up also discards the keys
+//! of any unsaved pairing it made ([`Action::DiscardUnsavedBond`]): one that
+//! ended before its link was reported up, whose keys the store never saved.
+//! A retry after a lost link returns the action too, and it leaves the saved
+//! keys alone. The coordinator handles a worker's events in order, so a
+//! `Connected`, whose `PersistDevice` saves the keys, is always handled before
+//! a later report from the same slot.
 
 use super::*;
 
-/// The device of a slot whose attempt ended before its link was reported up,
-/// so any pairing made on it was never saved.
+/// The device of a slot that has no link up, so any pairing made on it since
+/// its link was last reported up was never saved.
 fn unsaved_pairing<A: Clone>(manager: &ConnManager<A>, slot: usize) -> Option<A> {
     manager
         .slots

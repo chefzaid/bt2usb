@@ -896,6 +896,31 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-11, Bond And Portal Doc Corrections
+
+This record covers the commit that closes the FIXME "Docs the bond-table and
+portal commits left wrong" in [TODO.md](../TODO.md#fixme). It rewrites the
+first-flash "Unsaved pairing evicts nothing" and "Fifth device" checks so a
+tester can run them and expects what the code does, and corrects
+[features](features.md#connection-and-security), ADR 0017, ADR 0007, the
+vendored README, the `Bond table full` row in
+[operations](operations.md#ble-scan-and-connection), the
+`DiscardUnsavedBond` wording in the data model, architecture, security, and
+two coordinator comments, and the coverage row of the
+[Bond Identity Refusal record](#validation-record--2026-10-10-bond-identity-refusal),
+which a rerun of that commit's tree measured at 98.89% of lines and 98.88%
+of regions. No code changed. The checks ran locally on Linux in a container,
+on the working tree just before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit tests | `cargo test --locked --lib` | Passed; only comments changed in code |
+| Rustdoc with private items, warnings denied | Host library | Passed, with the reworded intra-doc links in `coordinator_events.rs` |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed |
+| Scan listing for the new check | Review of `merge_advertisement` in [scan_list.rs](../src/ble/scan_list.rs) | A device enters the list only when its advertisement carries `0x1812`; the check now makes the phone advertise it. That a given phone app can advertise the UUID and accept bonding is not verified here |
+| Hosted CI | GitHub Actions | Push run 38109817253 (`78471e8`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-11, Event Counters
 
 This record covers the commit that adds the bounded counters of P1
@@ -1158,7 +1183,7 @@ before that commit; nothing ran on a board.
 | Check | Environment | Result |
 | --- | --- | --- |
 | Host unit/integration tests | Rust 1.95.0, Linux | Passed: 364 unit tests, 3 integration tests, and 3 glyph-table tests |
-| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.88% of lines, 99.00% of functions; `storage/devices.rs` 100% of lines, 99.66% of regions |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.89% of lines, 98.88% of regions, 99.00% of functions; `storage/devices.rs` 100% of lines, 99.66% of regions |
 | Mutation checks | Host tests | Without the identity filter in `DeviceList::add`, two of the new tests fail; without it in `codec::decode_bond`, the per-type format test fails |
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation, each after `cargo clean -p bt2usb` | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |

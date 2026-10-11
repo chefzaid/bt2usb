@@ -470,7 +470,9 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   the peer whose identity address or identity key matches, never another
   peer's, because the encryption master ID is not a peer identity. Keys are
   looked up by peer identity, and a lookup by master ID must also match the
-  peer identity. When four bonds are held, a new bond replaces the oldest.
+  peer identity. A new pairing is held beside the saved devices' keys until
+  its device is saved, and is discarded if its attempt ends first; only
+  saving a fifth device evicts the oldest record and its keys.
 - If a new command reaches a slot while its link is being secured or
   discovered, the worker disconnects the link and waits for the SoftDevice to
   report the disconnection before acting on the command.

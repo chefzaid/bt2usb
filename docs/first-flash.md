@@ -344,14 +344,23 @@ list ends with a "Factory reset" entry, and UP on the first entry goes back.
       powered and reconnecting, pair a fifth. The log shows
       `Paired device store full - evicting oldest entry`; the oldest device
       leaves the "Saved devices" list, and when its link next drops or the
-      board resets it no longer reconnects (`slot N has no keys to
-      reconnect` if its slot was retrying). The other three still reconnect
-      after a reset.
-- [ ] **Unsaved pairing evicts nothing:** with four test devices saved, start
-      pairing a BLE device that is not a keyboard or mouse (a phone or a
-      heart-rate strap that bonds), so that it ends in `No HID service` or
-      `Connect failed`. All four saved devices still reconnect, including
-      after a link loss, and the list still shows them.
+      board resets it no longer reconnects (`slot N link lost; no keys to
+      reconnect` if its link was up, `slot N has no keys to reconnect` if
+      its slot was retrying). After a reset the two most recently added
+      saved devices reconnect, since power-up gives a slot only to those
+      ([reconnecting saved peripherals](operations.md#reconnecting-saved-peripherals)),
+      and the other two connect when selected from a scan.
+- [ ] **Unsaved pairing evicts nothing:** with four test devices saved, make
+      a pairing that bonds and then fails before input flows. The scan lists
+      only devices that advertise the HID service UUID `0x1812`, so a phone
+      or a heart-rate strap does not appear on its own. One way: an Android
+      phone running nRF Connect for Mobile, advertising `0x1812` from its
+      advertiser while its GATT server hosts no HID service. Select it, and
+      accept the phone's pairing prompt: the log shows `BLE security mode
+      updated`, then `HID discovery failed`, and the OLED shows
+      `No HID service`. All four saved devices still reconnect, including
+      after a link loss, and the list still shows them. Record the device
+      and app used.
 - [ ] **Failure reporting:** inject a flash write failure in a controlled test.
       The UI retains a storage error and does not report deletion/enrollment
       success. Record cached/persistent state and behavior after reboot. No

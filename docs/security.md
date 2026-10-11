@@ -204,7 +204,8 @@ Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
   link (`BOND_SLOTS`, 6), so a new pairing never displaces a saved device's
   keys. A saved device's keys go when the store evicts or forgets its record
   (`Bonder::forget_identity`, `Bonder::forget`); an unsaved pairing's keys go
-  when its attempt ends before the link was reported up
+  when its attempt ends while no link is up, as for an attempt that ended
+  before its link was reported up
   (`Action::DiscardUnsavedBond`, `Bonder::discard_unsaved`).
 - The identity address and IRK are asserted by the peer during pairing. A newly
   paired device that claims an existing peer's identity address replaces that

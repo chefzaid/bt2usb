@@ -46,7 +46,12 @@ match arm or function):
   bonded pairing on any link. `on_bonded` (`bonder.rs`) replaces a bond
   whose identity address equals the new one or whose IRK resolves the
   connection address, else appends and evicts the oldest at
-  `MAX_PAIRED_DEVICES` (4). The stored flags byte
+  `MAX_PAIRED_DEVICES` (4). Since 2026-10-11 it appends the new bond
+  unsaved to a table that holds the saved devices' keys plus one unsaved
+  pairing per link (`BondTable`, `BOND_SLOTS` = 6), never evicting a saved
+  device's keys: those go only when the store evicts or forgets the record,
+  and an unsaved pairing's keys go when its slot reports its attempt over
+  while no link is up (`Action::DiscardUnsavedBond`). The stored flags byte
   ([codec.rs](../../src/storage/codec.rs), `encode_bond` and `decode_bond`),
   which the [data model](../data-model.md#bond) says the application does
   not interpret, is the SoftDevice's `ble_gap_enc_info_t` bitfield: `lesc`

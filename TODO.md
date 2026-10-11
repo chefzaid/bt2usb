@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 49 | 0 | 0 |
+| [FIXME](#fixme) | 50 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **136** | **71** | **21** |
+| **Total** | **137** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -750,6 +750,26 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   refuted: that eviction predates the fix and is the documented outcome
   ([security](docs/security.md#pairing-and-authentication),
   [first flash](docs/first-flash.md#6-device-management-and-degraded-display)).
+- [x] **P2** **Docs the bond-table and portal commits left wrong.** Found by
+  the same independent review, each finding confirmed by a second check.
+  Two first-flash checks could not pass as written: "Unsaved pairing evicts
+  nothing" told the tester to pair a phone or a heart-rate strap, which the
+  scan never lists because neither advertises the HID service UUID, so no
+  unsaved pairing happened and the check passed without testing anything;
+  "Fifth device" expected three devices to reconnect after a reset, though
+  power-up gives a slot only to the two most recently added. Features still
+  said a fifth bond replaces the oldest, and ADR 0017's context still
+  described that eviction. The `Bond table full` log row assumed four saved
+  devices; the `DiscardUnsavedBond` docs and comments said "never
+  connected" where the code checks "no link up now"; ADR 0007 called the
+  portal the only vendored module that builds without the SoftDevice; the
+  vendored README counted three further changes where five follow; and the
+  "Bond Identity Refusal" coverage row still gave the region figure as the
+  line figure. Fixed: the unsaved-pairing check now uses a phone advertising
+  `0x1812` without an HID service and names the log lines to expect, the
+  fifth-device check expects the two newest to reconnect and names both
+  no-keys log lines, and every other statement now matches the code
+  ([first flash](docs/first-flash.md#6-device-management-and-degraded-display)).
 
 ## Needs Your Input
 

@@ -313,9 +313,10 @@ which then erases pages 240–243 before writing an empty frame. Ordinary saves 
   marks the bond saved and, when the store evicted a record to make room
   (`AddOutcome::AddedAfterEviction` names the evicted identity, and
   `DeviceStore::add` returns it), drops that record's keys
-  (`Bonder::forget_identity`). An attempt that ends before its link was
-  reported up returns `Action::DiscardUnsavedBond`, which drops its pairing's
-  unsaved keys (`Bonder::discard_unsaved`).
+  (`Bonder::forget_identity`). An attempt that ends while its slot has no link
+  up, such as one that ended before its link was reported up, returns
+  `Action::DiscardUnsavedBond`, which drops its pairing's unsaved keys
+  (`Bonder::discard_unsaved`) and leaves saved keys alone.
 - A new pairing whose bond names an identity that is not a public or random
   static address stores nothing. The bond is refused because a reload would
   refuse it and with it the whole store; the device is refused too, because
@@ -632,9 +633,9 @@ current one: it comes from an attempt since replaced or ended.
 | Variant | Fields | Meaning | Coordinator action |
 | --- | --- | --- | --- |
 | `Connected` | `slot`, `attempt`, `device` | Link encrypted, HID discovered and subscribed; sent again under the new number when a takeover finds the link up | Mark slot connected, persist the device and its bond, emit `Connected` |
-| `Disconnected` | `slot`, `attempt` | The attempt is over: a command ended it (the slot is free unless that command was a takeover `Connect`, whose new number makes the coordinator ignore this report), the link dropped without keys to reconnect, or a retry found the keys gone | Return `DiscardUnsavedBond` first when the slot never connected, clear slot, emit link status |
+| `Disconnected` | `slot`, `attempt` | The attempt is over: a command ended it (the slot is free unless that command was a takeover `Connect`, whose new number makes the coordinator ignore this report), the link dropped without keys to reconnect, or a retry found the keys gone | Return `DiscardUnsavedBond` first when the slot has no link up (an attempt that ended before its link was reported up, or a retry after a lost link, whose keys are already saved and stay), clear slot, emit link status |
 | `LinkLost` | `slot`, `attempt`, `device` | An established link to a device `Bonder` holds keys for dropped; the worker is retrying. Without keys the worker sends `Disconnected` instead | Keep the slot reserved under the same number, emit link status |
-| `Error` | `slot`, `attempt`, `tag`, `retrying` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed`. `retrying` when the failed connection took over a background retry, which the worker resumed because `Bonder` still holds the device's keys | Return `DiscardUnsavedBond` first when the slot never connected, emit `Error(tag)` and link status; clear the slot, or with `retrying` keep it reserved and retrying under the same number |
+| `Error` | `slot`, `attempt`, `tag`, `retrying` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed`. `retrying` when the failed connection took over a background retry, which the worker resumed because `Bonder` still holds the device's keys | Return `DiscardUnsavedBond` first when the slot has no link up (an attempt that ended before its link was reported up, or a retry after a lost link, whose keys are already saved and stay), emit `Error(tag)` and link status; clear the slot, or with `retrying` keep it reserved and retrying under the same number |
 | `Quiesced` | `slot`, `token` | Reply to `Quiesce` | Counted only by the management barrier |
 
 ### HidEvent And HidReport

@@ -180,7 +180,8 @@ Negative:
 - bt2usb carries a copy of an upstream crate. It keeps upstream formatting and
   is outside `cargo fmt --package bt2usb` (the portal test pulls its two
   modules in under `#[rustfmt::skip]`). Only the event portal has host tests,
-  because it is the one module that builds without the SoftDevice.
+  because it is the only patched module that builds without the SoftDevice
+  (with `util/on_drop.rs`, which the test compiles alongside it).
 - The vendored crate depends on `heapless` 0.9 and `embassy-sync` 0.8, while
   bt2usb itself uses 0.8 and 0.7. `embassy-usb` pulls in the same newer
   versions, so `Cargo.lock` carries two versions of each either way; the patch

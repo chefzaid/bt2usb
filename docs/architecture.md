@@ -441,10 +441,11 @@ which can be too late for a firmware setup key.
    link, waiting until the SoftDevice reports the connection gone, and is
    processed next. A `Connect` for the same device is the exception: it takes
    over a background attempt, which carries on under the new attempt number.
-   When an attempt ends before step 10, its `SlotEvent::Error` or
-   `SlotEvent::Disconnected` makes the coordinator return
-   `Action::DiscardUnsavedBond` for the device first, which drops the keys of
-   a pairing it made (`Bonder::discard_unsaved`); a saved device's keys stay.
+   When an attempt ends with no link up, such as before step 10, its
+   `SlotEvent::Error` or `SlotEvent::Disconnected` makes the coordinator
+   return `Action::DiscardUnsavedBond` for the device first, which drops the
+   keys of an unsaved pairing it made (`Bonder::discard_unsaved`); a saved
+   device's keys stay, including when a retry after a lost link ends.
 10. On success the worker sends `SlotEvent::Connected` with the attempt
     number. `on_slot_connected` ignores the event when the number is not the
     slot's current one; otherwise it

@@ -294,8 +294,8 @@ pub enum Action<A> {
     /// Persist a newly connected device (+ its bond) to flash.
     PersistDevice(DeviceInfo<A>),
     /// Drop the keys of any pairing made with the device at this address that
-    /// the store has not saved: its attempt ended before the link was
-    /// reported up, so nothing will save them.
+    /// the store has not saved: its attempt ended with no link up, so nothing
+    /// will save them. Saved keys stay.
     DiscardUnsavedBond(A),
     /// Emit a UI event.
     Emit(UiEvent),

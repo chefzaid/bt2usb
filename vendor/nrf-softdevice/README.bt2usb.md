@@ -4,14 +4,15 @@ This crate is copied from embassy-rs/nrf-softdevice commit
 `47d6121c6e823120e8b883a7ac75f44ce7daa3aa` under its original MIT / Apache-2.0
 licenses. Sibling crates remain git dependencies at the same commit.
 
-The GATT client changes are all in `src/ble/gatt_client.rs`. Three further
-changes are described at the end: a connection-parameter hook in
+The GATT client changes are all in `src/ble/gatt_client.rs`, followed by the
+GATT server events bt2usb answers without the GATT server feature. Five
+further changes are described at the end: a connection-parameter hook in
 `src/ble/security.rs` and `src/ble/gap.rs`, a `log-sensitive-data` feature
 that keeps peer addresses, passkeys, and notification bytes out of the logs by
-default, and fixes for panics a peer could reach in `src/ble/gap.rs` and
-`src/ble/connection.rs`. The connection-parameter hook and the panic fixes
-are marked `bt2usb patch:` in the source, as is the event portal fix in
-`src/util/portal.rs` described last. The first GATT change adds
+default, fixes for panics a peer could reach in `src/ble/gap.rs` and
+`src/ble/connection.rs`, security handler calls moved outside the connection
+state, and the event portal fix in `src/util/portal.rs`. All but the log
+feature are marked `bt2usb patch:` in the source. The first GATT change adds
 `gatt_client::read_by_offset` and makes `read`
 delegate to it with offset zero. It exposes the SoftDevice's ATT Read Blob
 support through the existing response portal; the response handle and offset

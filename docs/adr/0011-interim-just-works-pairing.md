@@ -195,7 +195,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Concern | Where |
 | --- | --- |
 | Security handler and bond cache | `Bonder` and its `SecurityHandler` implementation in [bonder.rs](../../src/ble/bonder.rs) |
-| Encryption gate | `wait_for_secure_link` and the `prepare` step of `connect_and_run_secure` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
+| Encryption gate | `wait_for_secure_link` and `secure_and_discover`, which `connect_and_run_secure` races against commands, in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | Pairing permission | `ConnectionRequest { allow_pairing: !silent }` in `connection_slot_task`; `silent` is true for `SlotCommand::Reconnect` |
 | Identity resolution on reconnect | `SavedPeer` and the shared reconnect table in [reconnect.rs](../../src/ble/reconnect.rs) ([ADR 0015](0015-shared-reconnect-scan.md)); `find_saved_peer` and the `IdentityKey::is_match` resolver in [scanner.rs](../../src/ble/scanner.rs) |
 | Persistence and eviction | `Action::PersistDevice` in `execute_action` ([multi_conn.rs](../../src/ble/multi_conn.rs)); `DeviceStore::add` in [storage.rs](../../src/storage.rs) |

@@ -3,6 +3,9 @@
 
 use super::*;
 
+// Trivial stand-in for the embedded `Address` type.
+type Addr = u8;
+
 #[test]
 fn name_only_scan_response_updates_known_hid_even_when_list_is_full() {
     let mut found = heapless::Vec::<_, 1>::new();

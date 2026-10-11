@@ -6,7 +6,7 @@
 //! they can be unit-tested on the host with `cargo test` / `mask test`.
 //!
 //! The library compiles `hid`, `ble::{adv_parser, conn_params, coordinator,
-//! reconnect, long_read, management, messages}`, `ui::{controller, ui_logic,
+//! reconnect, scan_list, long_read, management, messages}`, `ui::{controller, ui_logic,
 //! input_logic, layout, display_logic}` and
 //! `power_logic`, plus `storage::{codec, devices, framing, record}` under `cfg(test)` only, and
 //! `config`, whose capacities the pure modules size their buffers from.
@@ -38,6 +38,9 @@ mod ble_coordinator_impl;
 
 #[path = "ble/reconnect.rs"]
 mod ble_reconnect_impl;
+
+#[path = "ble/scan_list.rs"]
+mod ble_scan_list_impl;
 
 #[path = "ble/long_read.rs"]
 mod ble_long_read_impl;
@@ -99,6 +102,10 @@ pub mod ble {
     /// Pure background-reconnect coordination (shared scan, sightings, duty).
     pub mod reconnect {
         pub use crate::ble_reconnect_impl::*;
+    }
+    /// The bounded device list a user scan builds.
+    pub mod scan_list {
+        pub use crate::ble_scan_list_impl::*;
     }
 }
 

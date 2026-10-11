@@ -31,6 +31,7 @@ pub mod long_read;
 pub mod management;
 pub mod messages;
 pub mod reconnect;
+pub mod scan_list;
 
 #[cfg(feature = "embedded")]
 pub mod bonder;

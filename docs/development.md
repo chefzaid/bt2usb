@@ -728,7 +728,9 @@ Files:
   at most 21 characters, which a host test checks.
 - [ble/multi_conn.rs](../src/ble/multi_conn.rs): handle the command in
   `ble_task`, and add `SlotCommand`/`SlotEvent` variants if a connection worker
-  must act. Scan and connection setup must hold `GAP_PROCEDURE`, because the
+  must act. A worker event carries the attempt number of the command it
+  reports on, and its reducer must ignore one that is not the slot's current
+  number ([attempt numbers](architecture.md#attempt-numbers-and-retry-takeover)). Scan and connection setup must hold `GAP_PROCEDURE`, because the
   SoftDevice runs one such procedure at a time.
 - [ble/slot_worker.rs](../src/ble/slot_worker.rs): handle a new `SlotCommand`
   in `connection_slot_task`, the per-slot worker, and send a new `SlotEvent`

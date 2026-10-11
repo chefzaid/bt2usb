@@ -112,7 +112,8 @@ while a stuck I2C bus survives it and is not needed to type, so ADR 0009
 already rejected that trade; a host that stops polling or a suspended bus is
 not a fault. A slow peer must never reset the bridge: a peer-paced phase that
 needs a bound gets an application deadline that fails the link, raced like the
-command against `prepare` in `connect_and_run_secure` (`slot_worker.rs`).
+command against `secure_and_discover` in `connect_and_run_secure`
+(`slot_worker.rs`).
 
 **Feeding rule.** `watchdog_task` in a new `src/watchdog.rs`, spawned first,
 snapshots the six slots every `WDT_SUPERVISOR_PERIOD_MS` (1,000 ms) and calls

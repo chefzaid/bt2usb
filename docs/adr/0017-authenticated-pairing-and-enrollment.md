@@ -25,7 +25,7 @@ match arm or function):
   capability, MITM clear, LESC never set. Every pairing is LE legacy Just
   Works.
 - **Who starts security.** `connect_and_run_secure`
-  ([slot_worker.rs](../../src/ble/slot_worker.rs), its `prepare` future)
+  ([slot_worker.rs](../../src/ble/slot_worker.rs), through `secure_and_discover`)
   calls `encrypt()` and, on `PeerKeysNotFound`, `request_pairing()` only when
   `allow_pairing` (`!silent` in `connection_slot_task`) is set, that is for
   `SlotCommand::Connect`. `wait_for_secure_link` polls 25 times at 200 ms
@@ -41,7 +41,7 @@ match arm or function):
   `sd_ble_gap_encrypt` for a procedure in progress, and
   `NRF_ERROR_INVALID_STATE` from `sd_ble_gap_authenticate` while an
   encryption is queued; the slot fails on any error (the `PeerKeysNotFound`
-  and `Err(_)` arms in `prepare`). This race is derived, not observed.
+  and `Err(_)` arms in `secure_and_discover`). This race is derived, not observed.
 - **Bonds.** The `AUTH_STATUS` arm calls `on_bonded` for any successful
   bonded pairing on any link. `on_bonded` (`bonder.rs`) replaces a bond
   whose identity address equals the new one or whose IRK resolves the

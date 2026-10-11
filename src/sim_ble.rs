@@ -7,8 +7,9 @@
 //! connection worker reports success as soon as it is told to connect or
 //! disconnect, a scan hears the fixed advertisements in [`AIRWAVES`], and the
 //! pairing item is written to RAM and read back. What runs is the firmware's
-//! decision code: `coordinator::{plan_*, on_slot_*, merge_advertisement,
-//! link_state}`, `management::{forget_targets, Quiescence, commit}`, and
+//! decision code: `coordinator::{plan_*, on_slot_*, link_state}`,
+//! `scan_list::merge_advertisement`,
+//! `management::{forget_targets, Quiescence, commit}`, and
 //! `storage::devices::DeviceList` with its record codec and framing, called in
 //! the order `ble::multi_conn` calls them.
 
@@ -18,6 +19,7 @@ use crate::ble::adv_parser::extract_device_name;
 use crate::ble::coordinator::{self, Action, ConnManager, DeviceInfo, ErrorTag, MAX_CONNECTIONS};
 use crate::ble::management::{self, Quiescence};
 use crate::ble::messages::{Command, Event};
+use crate::ble::scan_list;
 use crate::config::BLE_MAX_DISCOVERED;
 use crate::storage::devices::{
     AddressKind, DeviceList, PeerAddress, StoreError, StoredDevice, MAX_RECORD_SIZE,
@@ -255,7 +257,9 @@ impl SimBle {
                 });
                 match device {
                     Some(device) if self.manager.is_slot_occupied(0) => {
-                        for action in coordinator::on_slot_link_lost(&mut self.manager, 0, &device)
+                        let attempt = self.manager.slot_attempt(0);
+                        for action in
+                            coordinator::on_slot_link_lost(&mut self.manager, 0, attempt, &device)
                         {
                             self.execute(console, action, &mut events);
                         }
@@ -291,21 +295,29 @@ impl SimBle {
     /// with a connection worker that reports back at once.
     fn execute(&mut self, console: &mut Console, action: Action<SimAddr>, events: &mut Events) {
         match action {
-            Action::ConnectSlot { slot, device } => {
+            Action::ConnectSlot {
+                slot,
+                device,
+                attempt,
+            } => {
                 slog!(
                     console,
                     "  action: ConnectSlot slot={} addr={:#x}",
                     slot,
                     device.address
                 );
-                // The worker connects and finds the HID service at once.
-                for next in coordinator::on_slot_connected(&mut self.manager, slot, &device) {
+                // The worker connects and finds the HID service at once,
+                // reporting under the attempt's number.
+                for next in
+                    coordinator::on_slot_connected(&mut self.manager, slot, attempt, &device)
+                {
                     self.execute(console, next, events);
                 }
             }
             Action::DisconnectSlot(slot) => {
                 slog!(console, "  action: DisconnectSlot({})", slot);
-                for next in coordinator::on_slot_disconnected(&mut self.manager, slot) {
+                let attempt = self.manager.slot_attempt(slot);
+                for next in coordinator::on_slot_disconnected(&mut self.manager, slot, attempt) {
                     self.execute(console, next, events);
                 }
             }
@@ -334,7 +346,7 @@ impl SimBle {
         self.scan.clear();
         let _ = events.push(Event::ScanStarted);
         for advertiser in &AIRWAVES {
-            let listed = coordinator::merge_advertisement(
+            let listed = scan_list::merge_advertisement(
                 &mut self.scan,
                 advertiser.address,
                 advertiser.rssi,

@@ -38,7 +38,7 @@ The decision recorded here was implemented on 2026-06-22:
   whose "imperative shell" is the task code.
 - `e3bc620` removed the duplicate ("Unify HID classification on the real hid
   module (drop lib.rs duplicate + dead hid/tests.rs)"). `src/lib.rs` became a
-  list of `#[path]` includes of the firmware's own files and is now 128 lines.
+  list of `#[path]` includes of the firmware's own files and is now 159 lines.
 
 The 2026-09-28 hardening (`2479c79`) followed the same pattern for everything
 it added: input aggregation, endpoint delivery, wake policy, long reads,
@@ -51,7 +51,8 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | Core module (host-tested) | Decides | Shell (firmware only) |
 | --- | --- | --- |
 | [hid/](../../src/hid/): `report_protocol`, `keyboard`, `mouse`, `consumer`, `coalesce`, `aggregate`, `delivery`, `wake`, `host_leds` | Report Map parsing, report classification and serialization, per-source union, endpoint queue and replay policy, wake eligibility, host LED forwarding | [hid_client.rs](../../src/ble/hid_client.rs), [hid_device.rs](../../src/usb/hid_device.rs), [host_requests.rs](../../src/usb/host_requests.rs) |
-| [coordinator.rs](../../src/ble/coordinator.rs) | Slot reservation and the `Action`s for each command and slot event | `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
+| [coordinator.rs](../../src/ble/coordinator.rs) | Slot reservation, the attempt numbers that let the coordinator ignore a replaced attempt's events, and the `Action`s for each command and slot event | `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
+| [scan_list.rs](../../src/ble/scan_list.rs) | Which HID advertisers a user scan lists, and which listed device a newcomer replaces when the list is full | `scan` in [scanner.rs](../../src/ble/scanner.rs) |
 | [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, whether two saved-device records are the same device, how long a sighting stays usable, when a slot is due a wake, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` and `update` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
@@ -182,7 +183,7 @@ Follow-up obligations:
 - Test files: `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
   `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
   `src/hid_classify_tests.rs`, `src/ble/coordinator_tests.rs`,
-  `src/ble/coordinator_scan_tests.rs`,
+  `src/ble/coordinator_attempt_tests.rs`, `src/ble/scan_list_tests.rs`,
   `src/ble/reconnect_tests.rs`, `src/storage/devices_tests.rs`,
   `src/storage/devices_format_tests.rs`, `src/ui/ui_logic_tests.rs`,
   `src/ui/controller_tests.rs`, `src/ui/layout_tests.rs`,
@@ -202,10 +203,10 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 374 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 368 unit tests, 3 integration tests,
+  finds 379 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 373 unit tests, 3 integration tests,
   and 3 glyph-table tests, which passed on 2026-10-11 (the
-  [refused-pairing record](../testing.md#validation-record--2026-10-11-refused-pairing-not-stored);
+  [retry-takeover record](../testing.md#validation-record--2026-10-11-retry-takeover-races);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

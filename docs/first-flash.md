@@ -253,6 +253,15 @@ currently unauthenticated Just Works bonding; see
       each connection attempt and reconnect scan has a 6-second timeout
       (`BLE_CONNECT_TIMEOUT_SECS`), retries pause 500 ms between attempts, and
       contention between slots can add to the total wait.
+- [ ] **Select a reconnecting device:** with only the keyboard saved in a
+      slot and switched off (so the slot is retrying), switch it on, start a
+      scan at once, and select it from the list as soon as it appears. The
+      screen goes from Connecting to Connected and typing works, with one
+      `slot N connecting to NAME` line per attempt and no second slot used.
+      Then pair the keyboard with another computer, switch it off and on so
+      the slot retries again, and select it: the screen shows
+      `Connect failed`, and the log keeps showing reconnect attempts for that
+      slot afterwards.
 - [ ] **Stack:** after all of the above, the latest `stack high-water` line is
       well under half of the total. Recorded: ______ bytes.
 

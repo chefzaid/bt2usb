@@ -5,7 +5,15 @@
 //! the coordinator in [`multi_conn`](crate::ble::multi_conn), reports
 //! [`SlotEvent`]s back, and between commands keeps retrying a saved device
 //! whose link dropped or that has not been seen since power-up, through the
-//! shared reconnect scan in [`scanner`]. A silent retry never pairs.
+//! shared reconnect scan in [`scanner`]. A silent retry never pairs, so it
+//! runs only while the bonder holds the device's keys.
+//!
+//! Every event carries the number of the attempt it reports on (see
+//! [`ConnManager`](crate::ble::coordinator::ConnManager)). A `Connect` for the
+//! device a background retry is after takes the retry over: a link or an
+//! attempt already under way is kept and reported under the new number, and
+//! if the user's connection fails while the device's keys remain, the worker
+//! reports the error and goes back to the retry.
 
 use crate::ble::bonder::bonder;
 use crate::ble::multi_conn::{SlotCommand, SlotEvent};
@@ -13,6 +21,8 @@ use crate::ble::scanner::SavedPeer;
 use crate::ble::{hid_client, scanner, BleErrorTag, DiscoveredDevice};
 use crate::config;
 use crate::hid::delivery::HidEvent;
+use crate::hid::report_protocol::HidDescriptor;
+use core::pin::pin;
 use defmt::{info, warn};
 use embassy_futures::select::{select, select3, Either, Either3};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -28,6 +38,10 @@ enum SlotOutcome {
     Closed,
     /// The connection attempt failed before the link was usable.
     Failed(BleErrorTag),
+    /// A `Connect` for this attempt's device took over the attempt, which then
+    /// failed before the link was usable. The user's connection, already
+    /// numbered with the new attempt, is returned to be made next.
+    TakenOver(DiscoveredDevice),
     /// A new command arrived and superseded the active link, which has already
     /// been explicitly disconnected. The command is returned to be processed next.
     Superseded(SlotCommand),
@@ -36,6 +50,9 @@ enum SlotOutcome {
 struct ConnectionRequest<'a> {
     device: &'a DiscoveredDevice,
     allow_pairing: bool,
+    /// The number of the attempt being served, which a `Connect` that takes
+    /// the attempt over replaces.
+    attempt: &'a mut u32,
 }
 
 pub async fn connection_slot_task(
@@ -50,6 +67,12 @@ pub async fn connection_slot_task(
     // drops (keyboards/mice disconnect when they sleep and advertise again on
     // the next key press) or when a boot-time reconnect hasn't found it yet.
     let mut retry: Option<DiscoveredDevice> = None;
+    // The retry target the command handled next replaces, resumed should that
+    // command be a user connection that fails while the device's keys remain.
+    // Taken on every pass, so it never outlives that command.
+    let mut replaced: Option<DiscoveredDevice> = None;
+    // The number of the attempt this slot serves, carried on every event.
+    let mut attempt = 0;
     // One host-LED receiver per slot (taken once; reused across reconnects). The
     // slot that holds the keyboard writes LED state through; others ignore it.
     let mut led_rx = crate::usb::host_requests::keyboard_led_receiver();
@@ -65,23 +88,43 @@ pub async fn connection_slot_task(
             (None, Some(device)) => {
                 let backoff = Timer::after(Duration::from_millis(config::BLE_RECONNECT_BACKOFF_MS));
                 match select3(cmd_rx.receive(), backoff, scanner::reconnect_sighted(slot)).await {
-                    Either3::First(cmd) => cmd,
-                    Either3::Second(()) | Either3::Third(()) => SlotCommand::Reconnect(device),
+                    Either3::First(cmd) => {
+                        replaced = Some(device);
+                        cmd
+                    }
+                    Either3::Second(()) | Either3::Third(()) => {
+                        SlotCommand::Reconnect { device, attempt }
+                    }
                 }
             }
         };
+        let replaced_retry = replaced.take();
         // Only a background retry keeps this slot's reconnect target.
-        if !matches!(cmd, SlotCommand::Reconnect(_)) {
+        if !matches!(cmd, SlotCommand::Reconnect { .. }) {
             scanner::clear_reconnect(slot);
         }
 
         let (mut device, silent) = match cmd {
-            SlotCommand::Connect(device) => (device, false),
-            SlotCommand::Reconnect(device) => (device, true),
+            SlotCommand::Connect {
+                device,
+                attempt: next,
+            } => {
+                attempt = next;
+                (device, false)
+            }
+            SlotCommand::Reconnect {
+                device,
+                attempt: next,
+            } => {
+                attempt = next;
+                (device, true)
+            }
             SlotCommand::Disconnect => {
                 // Also ends a retry between attempts: the coordinator still
                 // counts this slot as reserved, so tell it the slot is free.
-                slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                slot_event_tx
+                    .send(SlotEvent::Disconnected { slot, attempt })
+                    .await;
                 continue;
             }
             SlotCommand::Quiesce(token) => {
@@ -93,23 +136,40 @@ pub async fn connection_slot_task(
         };
 
         if silent {
+            // A background reconnect never pairs, so without the device's
+            // keys (a newer pairing evicted them, or it was saved without
+            // any) it could never secure the link: free the slot instead of
+            // holding it for good.
+            let Some(identity) = bonder()
+                .bond_for_address(device.address)
+                .map(|bond| bond.peer_id)
+            else {
+                info!("slot {} has no keys to reconnect", slot);
+                scanner::clear_reconnect(slot);
+                slot_event_tx
+                    .send(SlotEvent::Disconnected { slot, attempt })
+                    .await;
+                continue;
+            };
             // RPA rotation can happen at any time, not just at boot. A
             // whitelist retry against the previous address never recovers, so
-            // find the device's live address first. A record saved without a
-            // bond is matched by its stored address.
+            // find the device's live address first.
             scanner::register_reconnect(
                 slot,
                 SavedPeer {
                     address: device.address,
-                    identity: bonder()
-                        .bond_for_address(device.address)
-                        .map(|bond| bond.peer_id),
+                    identity: Some(identity),
                 },
             );
             match select(cmd_rx.receive(), scanner::find_saved_peer(sd, slot)).await {
                 Either::First(next) => {
                     scanner::clear_reconnect(slot);
-                    pending_cmd = superseded(slot, next, slot_event_tx).await;
+                    // Only the `Connect` handled next can resume the retry;
+                    // anything left here would reach a later, unrelated one.
+                    if matches!(next, SlotCommand::Connect { .. }) {
+                        replaced = Some(device);
+                    }
+                    pending_cmd = superseded(slot, attempt, next, slot_event_tx).await;
                     continue;
                 }
                 Either::Second(Some(address)) => device.address = address,
@@ -125,6 +185,7 @@ pub async fn connection_slot_task(
             ConnectionRequest {
                 device: &device,
                 allow_pairing: !silent,
+                attempt: &mut attempt,
             },
             report_tx,
             slot_event_tx,
@@ -134,12 +195,15 @@ pub async fn connection_slot_task(
         )
         .await
         {
-            // Without keys for the device (its pairing was refused, or a newer
-            // pairing evicted them), a background reconnect, which never
-            // pairs, could never secure the link: free the slot instead.
+            // Without keys for the device (its pairing was refused, the
+            // peripheral paired without bonding, or a newer pairing evicted
+            // them), a background reconnect, which never pairs, could never
+            // secure the link: free the slot instead.
             SlotOutcome::Closed if bonder().bond_for_address(device.address).is_none() => {
                 info!("slot {} link lost; no keys to reconnect", slot);
-                slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+                slot_event_tx
+                    .send(SlotEvent::Disconnected { slot, attempt })
+                    .await;
             }
             SlotOutcome::Closed => {
                 // The peer dropped a working link: keep the slot for it and
@@ -148,10 +212,21 @@ pub async fn connection_slot_task(
                 slot_event_tx
                     .send(SlotEvent::LinkLost {
                         slot,
+                        attempt,
                         device: device.clone(),
                     })
                     .await;
                 retry = Some(device);
+            }
+            // The user's connection took over this background attempt, which
+            // then failed: make that connection now, with pairing allowed,
+            // and come back to this retry if it fails too.
+            SlotOutcome::TakenOver(next) => {
+                replaced = Some(device);
+                pending_cmd = Some(SlotCommand::Connect {
+                    device: next,
+                    attempt,
+                });
             }
             // Not found in this attempt's window (or the link couldn't be
             // secured): nothing new to report, try again. Meanwhile the other
@@ -161,11 +236,24 @@ pub async fn connection_slot_task(
                 scanner::reconnect_attempt_failed(slot);
                 retry = Some(device);
             }
+            // A failed user connection that took over a background retry
+            // hands the slot back to that retry while the device's keys
+            // remain, so it still reconnects when it next advertises.
             SlotOutcome::Failed(tag) => {
-                slot_event_tx.send(SlotEvent::Error { slot, tag }).await;
+                let resume = replaced_retry
+                    .filter(|target| bonder().bond_for_address(target.address).is_some());
+                slot_event_tx
+                    .send(SlotEvent::Error {
+                        slot,
+                        attempt,
+                        tag,
+                        retrying: resume.is_some(),
+                    })
+                    .await;
+                retry = resume;
             }
             SlotOutcome::Superseded(next_cmd) => {
-                pending_cmd = superseded(slot, next_cmd, slot_event_tx).await;
+                pending_cmd = superseded(slot, attempt, next_cmd, slot_event_tx).await;
             }
         }
         if retry.is_none() {
@@ -175,20 +263,38 @@ pub async fn connection_slot_task(
 }
 
 /// A command ended this slot's attempt or background retry; returns the
-/// command still to handle. The slot is reported free unless the command is a
-/// `Connect`: the coordinator sends one only to a slot it has just reserved
-/// for it (taking over a background retry), and a `Disconnected` would release
-/// that reservation and move the UI off Connecting. A `Disconnect` needs
-/// nothing more, since the attempt is already torn down.
+/// command still to handle. The attempt is reported over. When the command is
+/// a `Connect` that took over the retry, the coordinator has already given it
+/// a new attempt number and ignores the report. A `Disconnect` needs nothing
+/// more, since the attempt is already torn down.
 async fn superseded(
     slot: usize,
+    attempt: u32,
     next: SlotCommand,
     slot_event_tx: &Sender<'_, CriticalSectionRawMutex, SlotEvent, 8>,
 ) -> Option<SlotCommand> {
-    if !matches!(next, SlotCommand::Connect(_)) {
-        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-    }
+    slot_event_tx
+        .send(SlotEvent::Disconnected { slot, attempt })
+        .await;
     (!matches!(next, SlotCommand::Disconnect)).then_some(next)
+}
+
+/// Sort a command that arrived during an attempt to `device`: a `Connect`
+/// for the same peer (the same address, or one the same bonded peer's identity
+/// key resolves) takes the attempt over and is returned as its device and
+/// attempt number; any other command supersedes the attempt and is returned
+/// as the error.
+fn take_over(
+    next: SlotCommand,
+    device: &DiscoveredDevice,
+) -> Result<(DiscoveredDevice, u32), SlotCommand> {
+    match next {
+        SlotCommand::Connect {
+            device: next,
+            attempt,
+        } if bonder().same_peer(next.address, device.address) => Ok((next, attempt)),
+        other => Err(other),
+    }
 }
 
 /// Await the GAP disconnect event before publishing quiescence. Merely queuing
@@ -215,6 +321,32 @@ async fn wait_for_secure_link(conn: &Connection) -> bool {
     false
 }
 
+/// Secure a new link and discover its HID reports. A background reconnect
+/// (`allow_pairing` false) never initiates a replacement pairing; fresh
+/// pairing is restricted to an explicit user connection.
+async fn secure_and_discover(
+    conn: &Connection,
+    allow_pairing: bool,
+    slot: usize,
+) -> Result<(hid_client::HidServiceClient, Option<HidDescriptor>), BleErrorTag> {
+    let secure_ok = match conn.encrypt() {
+        Ok(()) => wait_for_secure_link(conn).await,
+        Err(EncryptError::PeerKeysNotFound) if allow_pairing => {
+            if conn.request_pairing().is_ok() {
+                wait_for_secure_link(conn).await
+            } else {
+                false
+            }
+        }
+        Err(_) => false,
+    };
+    if !secure_ok {
+        warn!("slot {} failed to secure BLE link", slot);
+        return Err(BleErrorTag::ConnectFailed);
+    }
+    hid_client::discover_and_subscribe(conn).await
+}
+
 async fn connect_and_run_secure(
     sd: &'static Softdevice,
     request: ConnectionRequest<'_>,
@@ -224,7 +356,11 @@ async fn connect_and_run_secure(
     cmd_rx: &Receiver<'_, CriticalSectionRawMutex, SlotCommand, 2>,
     led_rx: Option<&mut crate::usb::host_requests::LedReceiver>,
 ) -> SlotOutcome {
-    let device = request.device;
+    let ConnectionRequest {
+        device,
+        allow_pairing,
+        attempt,
+    } = request;
     info!("slot {} connecting to {}", slot, device.name.as_str());
 
     let whitelist = [&device.address];
@@ -262,38 +398,35 @@ async fn connect_and_run_secure(
         }
     };
 
-    let prepare = async {
-        let secure_ok = match conn.encrypt() {
-            Ok(()) => wait_for_secure_link(&conn).await,
-            // A background reconnect must never initiate a replacement pairing.
-            // Fresh pairing is restricted to an explicit user connection.
-            Err(EncryptError::PeerKeysNotFound) if request.allow_pairing => {
-                if conn.request_pairing().is_ok() {
-                    wait_for_secure_link(&conn).await
-                } else {
-                    false
-                }
-            }
-            Err(_) => false,
-        };
-        if !secure_ok {
-            warn!("slot {} failed to secure BLE link", slot);
-            return Err(BleErrorTag::ConnectFailed);
-        }
-        hid_client::discover_and_subscribe(&conn).await
-    };
-
     // Once a link is owned, disconnect promptly when the user cancels during
     // security or GATT discovery, not only after notifications start flowing.
-    let (client, descriptor) = match select(cmd_rx.receive(), prepare).await {
-        Either::First(next_cmd) => {
-            close_connection(&conn).await;
-            return SlotOutcome::Superseded(next_cmd);
+    // The user selecting this device while a background attempt is under way
+    // takes the attempt over instead: it carries on under the new number.
+    let mut prepare = pin!(secure_and_discover(&conn, allow_pairing, slot));
+    let mut takeover = None;
+    let prepared = loop {
+        match select(cmd_rx.receive(), prepare.as_mut()).await {
+            Either::First(next_cmd) => match take_over(next_cmd, device) {
+                Ok((next, next_attempt)) => {
+                    *attempt = next_attempt;
+                    takeover = Some(next);
+                }
+                Err(next_cmd) => {
+                    close_connection(&conn).await;
+                    return SlotOutcome::Superseded(next_cmd);
+                }
+            },
+            Either::Second(result) => break result,
         }
-        Either::Second(Ok(value)) => value,
-        Either::Second(Err(tag)) => {
+    };
+    let (client, descriptor) = match prepared {
+        Ok(value) => value,
+        Err(tag) => {
             close_connection(&conn).await;
-            return SlotOutcome::Failed(tag);
+            return match takeover {
+                Some(next) => SlotOutcome::TakenOver(next),
+                None => SlotOutcome::Failed(tag),
+            };
         }
     };
 
@@ -303,6 +436,7 @@ async fn connect_and_run_secure(
     slot_event_tx
         .send(SlotEvent::Connected {
             slot,
+            attempt: *attempt,
             device: device.clone(),
         })
         .await;
@@ -311,14 +445,31 @@ async fn connect_and_run_secure(
     // against incoming commands. If a command supersedes us, explicitly tear
     // the link down (dropping the future alone does NOT disconnect the radio
     // link in the SoftDevice, which would leak a central connection slot).
-    let run_fut =
-        hid_client::run_notification_loop(&conn, &client, descriptor, report_tx, led_rx, slot);
-    let outcome = match select(cmd_rx.receive(), run_fut).await {
-        Either::First(next_cmd) => {
-            close_connection(&conn).await;
-            SlotOutcome::Superseded(next_cmd)
+    // A takeover keeps the link: the user selected this device before the
+    // coordinator handled its Connected, so confirm it under the new number.
+    let mut run = pin!(hid_client::run_notification_loop(
+        &conn, &client, descriptor, report_tx, led_rx, slot
+    ));
+    let outcome = loop {
+        match select(cmd_rx.receive(), run.as_mut()).await {
+            Either::First(next_cmd) => match take_over(next_cmd, device) {
+                Ok((_, next_attempt)) => {
+                    *attempt = next_attempt;
+                    slot_event_tx
+                        .send(SlotEvent::Connected {
+                            slot,
+                            attempt: next_attempt,
+                            device: device.clone(),
+                        })
+                        .await;
+                }
+                Err(next_cmd) => {
+                    close_connection(&conn).await;
+                    break SlotOutcome::Superseded(next_cmd);
+                }
+            },
+            Either::Second(()) => break SlotOutcome::Closed,
         }
-        Either::Second(()) => SlotOutcome::Closed,
     };
 
     // Whatever this link was holding down on the host (a key, a mouse button)

@@ -72,7 +72,7 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
 | USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs), [usb/host_requests.rs](../src/usb/host_requests.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
-| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/messages.rs](../src/ble/messages.rs) | 34 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_scan_tests.rs](../src/ble/coordinator_scan_tests.rs), and 3 in `messages.rs`; Renode scenario | None recorded |
+| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/scan_list.rs](../src/ble/scan_list.rs), [ble/messages.rs](../src/ble/messages.rs) | 31 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs), 8 in [scan_list_tests.rs](../src/ble/scan_list_tests.rs), and 3 in `messages.rs`; Renode scenario | None recorded |
 | UI state model and request tracking | [ui/ui_logic.rs](../src/ui/ui_logic.rs), [ui/controller.rs](../src/ui/controller.rs) | 30 host tests in [ui_logic_tests.rs](../src/ui/ui_logic_tests.rs) and 16 in [controller_tests.rs](../src/ui/controller_tests.rs); Renode scenario | None recorded |
 
 [Testing](testing.md#known-verification-gaps) lists the missing fuzzing, fault
@@ -596,12 +596,15 @@ converts into it with `From`.
 ### SlotCommand
 
 Coordinator to one connection worker, defined in
-[ble/multi_conn.rs](../src/ble/multi_conn.rs).
+[ble/multi_conn.rs](../src/ble/multi_conn.rs). `attempt` is the number
+`ConnManager` gave the slot's reservation; the worker puts it on every event it
+reports for the command
+([attempt numbers](architecture.md#attempt-numbers-and-retry-takeover)).
 
 | Variant | Meaning |
 | --- | --- |
-| `Connect(DiscoveredDevice)` | User-selected connection; pairing may be initiated; a failure is reported. Sent to an empty slot, or to the slot retrying the same device in the background, which drops the retry without reporting `Disconnected` |
-| `Reconnect(DiscoveredDevice)` | Silent retry of a stored peer; never initiates pairing; for a bonded peer, resolves its current address before each attempt; waits `BLE_RECONNECT_BACKOFF_MS` between attempts until it connects or another command arrives |
+| `Connect { device, attempt }` | User-selected connection; pairing may be initiated; a failure is reported. Sent to an empty slot, or to the slot retrying the same device in the background, which it takes over: a link or attempt under way is kept, and a failure while the device's keys remain hands the slot back to the retry |
+| `Reconnect { device, attempt }` | Silent retry of a bonded peer, sent at power-up; never initiates pairing; checks that `Bonder` still holds the device's keys and resolves its current address before each attempt; waits `BLE_RECONNECT_BACKOFF_MS` between attempts until it connects, the keys are gone, or another command arrives |
 | `Disconnect` | Close the link or stop retrying, then report `Disconnected` once |
 | `Quiesce(u32)` | Close the link, drop any retry target, then acknowledge with the same token |
 
@@ -610,12 +613,16 @@ Coordinator to one connection worker, defined in
 Connection worker to coordinator, defined in
 [ble/multi_conn.rs](../src/ble/multi_conn.rs).
 
+Every variant but `Quiesced` carries the `attempt` of the command it reports
+on, and the coordinator ignores one whose number is not the occupied slot's
+current one: it comes from an attempt since replaced or ended.
+
 | Variant | Fields | Meaning | Coordinator action |
 | --- | --- | --- | --- |
-| `Connected` | `slot`, `device` | Link encrypted, HID discovered and subscribed | Mark slot connected, persist the device and its bond, emit `Connected` |
-| `Disconnected` | `slot` | The slot is free | Clear slot, emit link status |
-| `LinkLost` | `slot`, `device` | An established link to a device `Bonder` holds keys for dropped; the worker is retrying. Without keys the worker sends `Disconnected` instead | Keep the slot reserved, emit link status |
-| `Error` | `slot`, `tag` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed` | Clear slot, emit `Error(tag)` and link status |
+| `Connected` | `slot`, `attempt`, `device` | Link encrypted, HID discovered and subscribed; sent again under the new number when a takeover finds the link up | Mark slot connected, persist the device and its bond, emit `Connected` |
+| `Disconnected` | `slot`, `attempt` | The attempt is over and the slot free: a command ended it, the link dropped without keys to reconnect, or a retry found the keys gone | Clear slot, emit link status |
+| `LinkLost` | `slot`, `attempt`, `device` | An established link to a device `Bonder` holds keys for dropped; the worker is retrying. Without keys the worker sends `Disconnected` instead | Keep the slot reserved under the same number, emit link status |
+| `Error` | `slot`, `attempt`, `tag`, `retrying` | A user connection failed, or a silent attempt failed for a reason other than `ConnectFailed`. `retrying` when the failed connection took over a background retry, which the worker resumed because `Bonder` still holds the device's keys | Emit `Error(tag)` and link status; clear the slot, or with `retrying` keep it reserved and retrying under the same number |
 | `Quiesced` | `slot`, `token` | Reply to `Quiesce` | Counted only by the management barrier |
 
 ### HidEvent And HidReport

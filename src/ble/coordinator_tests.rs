@@ -1,11 +1,12 @@
 //! Host tests for the pure connection coordinator: the slot manager, the
-//! scan, connect, and disconnect plans, and the slot event reducers. The scan
-//! result tests are in `coordinator_scan_tests.rs`.
+//! scan, connect, and disconnect plans, and the slot event reducers. The
+//! attempt-number and retry-takeover tests are in
+//! `coordinator_attempt_tests.rs`.
 
 use super::*;
 
-#[path = "coordinator_scan_tests.rs"]
-mod scan;
+#[path = "coordinator_attempt_tests.rs"]
+mod attempt;
 
 // Trivial stand-in for the embedded `Address` type.
 type Addr = u8;
@@ -144,9 +145,14 @@ fn plan_connect_success_reserves_and_emits_connect() {
     let acts = plan_connect(&mut m, &devices, 1, PartialEq::eq);
     assert_eq!(acts.len(), 1);
     match &acts[0] {
-        Action::ConnectSlot { slot, device } => {
+        Action::ConnectSlot {
+            slot,
+            device,
+            attempt,
+        } => {
             assert_eq!(*slot, 0);
             assert_eq!(device.address, 2);
+            assert_eq!(*attempt, m.slot_attempt(0));
         }
         other => panic!("expected ConnectSlot, got {other:?}"),
     }
@@ -180,67 +186,6 @@ fn plan_connect_already_connecting_waits_for_real_result() {
     assert_eq!(m.occupied_count(), 1);
 }
 
-/// A stand-in for identity resolution: 0x1N and 0x2N are two addresses of
-/// the same bonded peer N.
-fn same_bonded_peer(a: &Addr, b: &Addr) -> bool {
-    a == b || (a & 0x0F == b & 0x0F && a & 0xF0 != 0 && b & 0xF0 != 0)
-}
-
-#[test]
-fn selecting_a_device_takes_over_its_background_retry() {
-    for retry in [
-        |m: &mut ConnManager<Addr>, kb: &DeviceInfo<Addr>| m.reserve_retry(0, kb),
-        |m: &mut ConnManager<Addr>, kb: &DeviceInfo<Addr>| {
-            m.connect_slot(0, kb);
-            on_slot_link_lost(m, 0, kb);
-        },
-    ] {
-        let mut m = mgr();
-        let devices = [dev(7, "kb")];
-        retry(&mut m, &devices[0]);
-        let acts = plan_connect(&mut m, &devices, 0, PartialEq::eq);
-        // The same slot connects again, now allowed to pair; no second slot.
-        assert_eq!(
-            acts.as_slice(),
-            &[Action::ConnectSlot {
-                slot: 0,
-                device: dev(7, "kb"),
-            }]
-        );
-        assert_eq!(m.occupied_count(), 1);
-        assert_eq!(m.find_empty_slot(), Some(1));
-        // The slot is now the user's connection: selecting again waits for it.
-        assert!(plan_connect(&mut m, &devices, 0, PartialEq::eq).is_empty());
-    }
-}
-
-#[test]
-fn a_bonded_peer_at_a_new_address_uses_the_slot_that_holds_it() {
-    let mut m = mgr();
-    m.reserve_retry(0, &dev(0x13, "kb"));
-    let devices = [dev(0x23, "kb")];
-    let acts = plan_connect(&mut m, &devices, 0, same_bonded_peer);
-    assert_eq!(
-        acts.as_slice(),
-        &[Action::ConnectSlot {
-            slot: 0,
-            device: dev(0x23, "kb"),
-        }]
-    );
-    assert_eq!(m.slot_address(0), Some(&0x23));
-    assert_eq!(m.occupied_count(), 1);
-
-    // Connected under its old address, it is acknowledged, not connected twice.
-    let mut m = mgr();
-    m.connect_slot(1, &dev(0x13, "kb"));
-    let acts = plan_connect(&mut m, &devices, 0, same_bonded_peer);
-    assert_eq!(
-        acts.as_slice(),
-        &[Action::Emit(UiEvent::Connected(dev(0x13, "kb").name))]
-    );
-    assert_eq!(m.occupied_count(), 1);
-}
-
 #[test]
 fn plan_connect_no_free_slot_errors() {
     let mut m = mgr();
@@ -267,7 +212,8 @@ fn plan_disconnect_targets_occupied_slots() {
 fn on_slot_connected_persists_and_emits_summary() {
     let mut m = mgr();
     let kb = dev(1, "Keyboard");
-    let acts = on_slot_connected(&mut m, 0, &kb);
+    let attempt = m.reserve_slot(0, &kb);
+    let acts = on_slot_connected(&mut m, 0, attempt, &kb);
     assert_eq!(acts.len(), 2);
     assert!(matches!(acts[0], Action::PersistDevice(_)));
     assert_eq!(
@@ -284,17 +230,17 @@ fn on_slot_connected_persists_and_emits_summary() {
 #[test]
 fn on_slot_disconnected_last_link_emits_disconnected() {
     let mut m = mgr();
-    m.connect_slot(0, &dev(1, "kb"));
-    let acts = on_slot_disconnected(&mut m, 0);
+    let attempt = m.connect_slot(0, &dev(1, "kb"));
+    let acts = on_slot_disconnected(&mut m, 0, attempt);
     assert_eq!(acts[0], Action::Emit(UiEvent::Disconnected));
 }
 
 #[test]
 fn on_slot_disconnected_with_other_link_emits_summary() {
     let mut m = mgr();
-    m.connect_slot(0, &dev(1, "kb"));
+    let attempt = m.connect_slot(0, &dev(1, "kb"));
     m.connect_slot(1, &dev(2, "Mouse"));
-    let acts = on_slot_disconnected(&mut m, 0);
+    let acts = on_slot_disconnected(&mut m, 0, attempt);
     // Slot 0 gone, slot 1 ("Mouse") remains.
     assert_eq!(
         acts[0],
@@ -309,8 +255,8 @@ fn on_slot_disconnected_with_other_link_emits_summary() {
 #[test]
 fn on_slot_error_emits_error_then_status() {
     let mut m = mgr();
-    m.connect_slot(0, &dev(1, "kb"));
-    let acts = on_slot_error(&mut m, 0, ErrorTag::NotifyFailed);
+    let attempt = m.connect_slot(0, &dev(1, "kb"));
+    let acts = on_slot_error(&mut m, 0, attempt, ErrorTag::NotifyFailed, false);
     assert_eq!(acts.len(), 2);
     assert_eq!(
         acts[0],
@@ -322,9 +268,9 @@ fn on_slot_error_emits_error_then_status() {
 #[test]
 fn on_slot_error_with_surviving_link_reports_summary() {
     let mut m = mgr();
-    m.connect_slot(0, &dev(1, "kb"));
+    let attempt = m.connect_slot(0, &dev(1, "kb"));
     m.connect_slot(1, &dev(2, "mouse"));
-    let acts = on_slot_error(&mut m, 0, ErrorTag::ConnectFailed);
+    let acts = on_slot_error(&mut m, 0, attempt, ErrorTag::ConnectFailed, false);
     assert_eq!(
         acts[0],
         Action::Emit(UiEvent::Error(ErrorTag::ConnectFailed))
@@ -337,15 +283,18 @@ fn on_slot_error_with_surviving_link_reports_summary() {
 fn on_slot_link_lost_keeps_slot_reserved_for_reconnect() {
     let mut m = mgr();
     let kb = dev(1, "kb");
-    m.connect_slot(0, &kb);
-    let acts = on_slot_link_lost(&mut m, 0, &kb);
+    let attempt = m.connect_slot(0, &kb);
+    let acts = on_slot_link_lost(&mut m, 0, attempt, &kb);
     assert_eq!(acts.len(), 1);
     assert_eq!(acts[0], Action::Emit(UiEvent::Disconnected));
-    // Not active any more, but still held for the same device so a new
-    // connect request can't take the slot out from under the reconnect.
+    // Not active any more, but still held for the same device under the same
+    // number, so a connect request for another device can't take the slot
+    // out from under the reconnect (selecting the same device turns the
+    // retry into a user connection).
     assert_eq!(m.active_count(), 0);
     assert!(m.is_slot_occupied(0));
     assert_eq!(m.slot_address(0), Some(&1));
+    assert_eq!(m.slot_attempt(0), attempt);
     assert_eq!(m.find_empty_slot(), Some(1));
 }
 
@@ -353,9 +302,9 @@ fn on_slot_link_lost_keeps_slot_reserved_for_reconnect() {
 fn on_slot_link_lost_with_other_link_reports_summary() {
     let mut m = mgr();
     let kb = dev(1, "kb");
-    m.connect_slot(0, &kb);
+    let attempt = m.connect_slot(0, &kb);
     m.connect_slot(1, &dev(2, "Mouse"));
-    let acts = on_slot_link_lost(&mut m, 0, &kb);
+    let acts = on_slot_link_lost(&mut m, 0, attempt, &kb);
     assert_eq!(
         acts[0],
         Action::Emit(UiEvent::Connected({
@@ -371,9 +320,9 @@ fn on_slot_link_lost_with_other_link_reports_summary() {
 fn link_lost_then_reconnected_is_active_again() {
     let mut m = mgr();
     let kb = dev(1, "kb");
-    m.connect_slot(0, &kb);
-    on_slot_link_lost(&mut m, 0, &kb);
-    let acts = on_slot_connected(&mut m, 0, &kb);
+    let attempt = m.connect_slot(0, &kb);
+    on_slot_link_lost(&mut m, 0, attempt, &kb);
+    let acts = on_slot_connected(&mut m, 0, attempt, &kb);
     assert_eq!(m.active_count(), 1);
     assert!(matches!(acts[1], Action::Emit(UiEvent::Connected(_))));
 }
@@ -384,8 +333,8 @@ fn disconnect_while_reconnecting_targets_the_slot() {
     // the worker stops retrying.
     let mut m = mgr();
     let kb = dev(1, "kb");
-    m.connect_slot(0, &kb);
-    on_slot_link_lost(&mut m, 0, &kb);
+    let attempt = m.connect_slot(0, &kb);
+    on_slot_link_lost(&mut m, 0, attempt, &kb);
     let acts = plan_disconnect(&m);
     assert_eq!(acts.as_slice(), &[Action::DisconnectSlot(0)]);
 }

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 43 | 0 | 0 |
+| [FIXME](#fixme) | 44 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **130** | **71** | **21** |
+| **Total** | **131** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -566,9 +566,9 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   report. A background retry that cannot succeed, such as one for a
   peripheral that lost its keys after pairing with another computer, or for a
   legacy record without keys, never reports, so `Connecting...`, which
-  ignores every button, stayed on screen until the device was forgotten from
-  Saved devices or the bridge was reset; after a reset the boot reconnect
-  started the same retry again. A bonded peer selected at a new private
+  ignores every button, stayed on screen until the bridge was reset, or until
+  an event from the other slot (a link change or an error) moved the UI off
+  it; after a reset the boot reconnect started the same retry again. A bonded peer selected at a new private
   address was not recognized as the device its slot was retrying at all, so
   a second slot connected it, or `Connect failed` showed when none was free.
   Raised from P2 because the trap needs no hostile peer: a keyboard paired
@@ -586,12 +586,63 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   instead of twice (`superseded` in `src/ble/slot_worker.rs`). A peripheral
   that lost its own keys now ends in `Connect failed`, from which the user
   forgets and pairs it again. Two coordinator host tests cover the takeover
-  at power-up and after a link loss, and a bonded peer at a new address
-  (`src/ble/coordinator_tests.rs`, from which the scan tests moved to
-  `coordinator_scan_tests.rs` to stay under 500 lines;
+  at power-up and after a link loss, and a bonded peer at a new address (now
+  in `src/ble/coordinator_attempt_tests.rs`; the scan tests that moved out of
+  `src/ble/coordinator_tests.rs` to keep it under 500 lines are now in
+  `src/ble/scan_list_tests.rs`;
   [architecture](docs/architecture.md#user-scan-connect-pairing-and-hid-discovery)).
   The worker and `Bonder::same_peer` are checked by the embedded builds and
-  Clippy.
+  Clippy. The next entry replaced the worker's rule for a superseding
+  `Connect` with attempt numbers.
+- [x] **P2** **The retry takeover raced the slot's own events.** The takeover
+  in the previous entry trusted the coordinator's view of the slot, but
+  `ble_task` handles UI commands before queued slot events, so a selection
+  could act on a retry whose report was already on its way. An independent
+  review of the previous two entries found five defects. A retry that had
+  just connected, with its `Connected` still queued, was torn down by the
+  takeover and connected again, and ended in `Connect failed` if the device
+  did not advertise again within 6 seconds. A failed takeover, for example
+  when the device had stopped advertising by the time it was selected, freed
+  the slot and ended the background reconnect of a device whose keys were
+  still good, so it no longer came back when it woke. A retry that failed
+  with an HID error while the selection was handled freed the user's new
+  reservation and left that error on screen over a connection that then
+  succeeded. A takeover during the retry's security or HID discovery closed
+  the nearly finished link and started over. And a retry whose keys a newer
+  pairing evicted kept retrying forever, since the keys were checked only on
+  link loss. Fixed: every reservation gets an attempt number
+  (`ConnManager::reserve_slot`, `reserve_retry`), commands and events carry
+  it, and the `on_slot_*` reducers ignore an event from an attempt the
+  coordinator has since replaced or ended. The worker treats a `Connect` for
+  the peer it is retrying (`Bonder::same_peer`) as a takeover: a link already
+  up is kept and reported `Connected` under the new number, an attempt
+  securing the link or discovering HID carries on under it, and when the
+  user's connection fails while `Bonder` still holds the device's keys, the
+  worker reports `Error` with `retrying` and resumes the retry, which
+  `on_slot_error` keeps reserved. Before each silent attempt the worker
+  checks the keys and, without them, frees the slot
+  (`slot {} has no keys to reconnect`); power-up reserves slots only for
+  saved devices with a bond. A background reconnect therefore never targets a
+  device it could not secure, which also narrows the open P0 "Refuse
+  peer-initiated pairing on background reconnects" to keys evicted during an
+  attempt. `merge_advertisement` moved to `src/ble/scan_list.rs` with its
+  tests to keep `src/ble/coordinator.rs` under 500 lines. Seven host tests in
+  `src/ble/coordinator_attempt_tests.rs` cover the numbers and the takeover
+  ([architecture](docs/architecture.md#attempt-numbers-and-retry-takeover));
+  the worker is checked by the embedded builds and Clippy.
+- [ ] **P2** **A background reconnect that loses its link during HID
+  discovery stops retrying.** Found while fixing "The retry takeover raced the
+  slot's own events". A silent attempt that connects and secures the link but
+  then fails HID discovery reports the error (`No HID service`,
+  `HID map read failed`, or `Notify failed`) and frees the slot
+  (`SlotOutcome::Failed` in `connection_slot_task`, `src/ble/slot_worker.rs`).
+  For a saved device that worked before, a likely cause is the link dropping
+  during discovery, for example a keyboard going back to sleep right after a
+  key press woke it. The error then ends the device's background reconnect:
+  it no longer comes back when it wakes until it is selected from a scan or
+  the bridge restarts. Accept when a silent attempt whose link dropped during
+  discovery is retried like a connection failure, a discovery failure on an
+  intact link is still reported, and the documents say which is which.
 
 ## Needs Your Input
 
@@ -642,7 +693,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [x] Keep connection-slot, scan-merge, and command/event decisions in a pure
   coordinator reducer that returns actions for the async shell to execute,
   with host tests (`src/ble/coordinator.rs`, `src/ble/coordinator_tests.rs`,
-  `src/ble/coordinator_scan_tests.rs`, `src/ble/multi_conn.rs`; [ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)).
+  `src/ble/coordinator_attempt_tests.rs`, `src/ble/scan_list.rs`,
+  `src/ble/scan_list_tests.rs`, `src/ble/multi_conn.rs`; [ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)).
 - [x] Serialize SoftDevice scan and connection setup with one shared GAP
   procedure lock, and bound each connection attempt by
   `BLE_CONNECT_TIMEOUT_SECS` (6 s) so a user scan does not wait indefinitely
@@ -751,8 +803,11 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   connection, but the vendored crate answers a peer's Security Request by
   requesting pairing when no keys are found
   (`BLE_GAP_EVTS_BLE_GAP_EVT_SEC_REQUEST` in
-  `vendor/nrf-softdevice/src/ble/gap.rs`). Background reconnects also target
-  stored peers without a bond, so such a peer can start pairing. Accept when a
+  `vendor/nrf-softdevice/src/ble/gap.rs`). Since 2026-10-11 a background
+  reconnect starts an attempt only while `Bonder` holds the device's keys, so
+  the crate answers such a request by encrypting with them; a pairing can
+  still start when a pairing on the other slot evicts the keys during an
+  attempt. Accept when a
   Security Request on a link whose request does not allow pairing cannot create
   or replace a bond, shown by a test or by recorded on-air evidence
   ([security](docs/security.md#threat-model)).
@@ -773,11 +828,11 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   ends with the eight strongest HID advertisers and a peripheral held next to
   the bridge is always listed. Ties keep the listed device, an unavailable RSSI
   (127) ranks last, and a replaced device can return only through an
-  advertisement that carries the HID UUID. Six host tests in
-  `src/ble/coordinator_scan_tests.rs` cover it, including a keyboard at -40 dBm
+  advertisement that carries the HID UUID. Six host tests, now in
+  `src/ble/scan_list_tests.rs`, cover it, including a keyboard at -40 dBm
   heard after twenty advertisers at -70 to -89 dBm. Advertisers that reach the
   bridge more strongly than the intended device can still crowd it out
-  ([security](docs/security.md#threat-model); `src/ble/coordinator.rs`,
+  ([security](docs/security.md#threat-model); `src/ble/scan_list.rs`,
   `src/ble/scanner.rs`).
 - [ ] **P1** **Keyboard ready in time for firmware setup keys.** *(hardware)*
   A monitor that powers its hub together with the PC boots the bridge at the
@@ -1060,12 +1115,15 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   only the `Updated existing paired device` log line. A full store evicts its
   oldest peer with only the
   `Paired device store full - evicting oldest entry` log line. A background
-  reconnect whose link cannot be secured, because the peer lost its keys or
-  the store has none for it (a legacy record carries no bond), fails with
-  `ConnectFailed`, which a silent reconnect treats as "try again"
+  reconnect whose link cannot be secured because the peer lost its keys fails
+  with `ConnectFailed`, which a silent reconnect treats as "try again"
   (`connection_slot_task` in `src/ble/slot_worker.rs`); the slot retries after
   each `BLE_RECONNECT_BACKOFF_MS` pause, with no limit, and the UI shows
-  nothing. Accept when UI tests cover every state; the user is told, before or
+  nothing until the user selects the device, which ends in `Connect failed`.
+  A device the store holds no keys for is no longer retried: since
+  2026-10-11 its slot is freed and only the log says why
+  (`slot {} has no keys to reconnect`, `slot {} link lost; no keys to
+  reconnect`). Accept when UI tests cover every state; the user is told, before or
   when it happens, that a pairing replaced an existing peer's bond or evicted
   the oldest peer; a reconnect that fails for missing keys on either side ends
   in a visible state that tells the user to pair the device again instead of

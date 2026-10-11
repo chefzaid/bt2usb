@@ -31,18 +31,32 @@ pub type SlotSenders = [Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>
 /// [`crate::ble::coordinator`]; here it is just instantiated.
 type MultiConnectionManager = ConnManager<Address>;
 
+/// A coordinator command to one slot worker. `attempt` is the number the
+/// coordinator gave the slot's reservation (see [`ConnManager`]); the worker
+/// carries it on every event it reports for that command.
 #[derive(Clone)]
 pub enum SlotCommand {
-    /// Connect to a device the user just picked; a failure is reported.
-    Connect(DiscoveredDevice),
+    /// Connect to a device the user just picked; a failure is reported. Sent
+    /// to a free slot, or to the slot retrying the same device in the
+    /// background, which it takes over.
+    Connect {
+        device: DiscoveredDevice,
+        attempt: u32,
+    },
     /// Keep silently retrying a paired device until it connects (boot-time
-    /// auto-reconnect). Ends only on success or a new command.
-    Reconnect(DiscoveredDevice),
+    /// auto-reconnect). Ends only on success, on losing the device's keys, or
+    /// on a new command.
+    Reconnect {
+        device: DiscoveredDevice,
+        attempt: u32,
+    },
     Disconnect,
     /// Acknowledge only after the link and automatic retry target are gone.
     Quiesce(u32),
 }
 
+/// A slot worker's report. Every variant but `Quiesced` carries the number of
+/// the attempt it reports on, so the coordinator can ignore one it replaced.
 #[derive(Clone)]
 pub enum SlotEvent {
     Quiesced {
@@ -51,19 +65,26 @@ pub enum SlotEvent {
     },
     Connected {
         slot: usize,
+        attempt: u32,
         device: DiscoveredDevice,
     },
     Disconnected {
         slot: usize,
+        attempt: u32,
     },
     /// An established link dropped; the slot is now silently reconnecting.
     LinkLost {
         slot: usize,
+        attempt: u32,
         device: DiscoveredDevice,
     },
+    /// The attempt failed. `retrying` when it was a user connection that
+    /// took over a background reconnect, which the worker has resumed.
     Error {
         slot: usize,
+        attempt: u32,
         tag: BleErrorTag,
+        retrying: bool,
     },
 }
 
@@ -102,6 +123,10 @@ pub async fn ble_task(
         let store = DEVICE_STORE.lock().await;
         store
             .iter_recent()
+            // A background reconnect never pairs, so a device saved without
+            // keys (it paired without bonding) can only connect by being
+            // selected again.
+            .filter(|paired| paired.bond.is_some())
             .take(MAX_CONNECTIONS)
             .map(|paired| DiscoveredDevice {
                 address: paired.address,
@@ -111,10 +136,10 @@ pub async fn ble_task(
             .collect()
     };
     for (slot, device) in peers.into_iter().enumerate() {
-        manager.reserve_retry(slot, &device);
+        let attempt = manager.reserve_retry(slot, &device);
         // A paired device that's asleep or off right now will advertise
         // once it wakes, so keep trying rather than failing once.
-        send_slot_cmd(slot, SlotCommand::Reconnect(device), slot_txs).await;
+        send_slot_cmd(slot, SlotCommand::Reconnect { device, attempt }, slot_txs).await;
     }
 
     // The coordinator below is a thin interpreter: it asks the pure
@@ -137,9 +162,8 @@ pub async fn ble_task(
                         Some(scan) => scan.devices.as_slice(),
                         None => &[],
                     };
-                    let same_peer = |held: &Address, seen: &Address| {
-                        held == seen || bonder().same_peer(*held, *seen)
-                    };
+                    let same_peer =
+                        |held: &Address, seen: &Address| bonder().same_peer(*held, *seen);
                     for action in coordinator::plan_connect(&mut manager, devices, index, same_peer)
                     {
                         execute_action(action, event_tx, slot_txs, &mut flash).await;
@@ -201,18 +225,29 @@ async fn handle_slot_event(
     flash: &mut nrf_softdevice::Flash,
 ) {
     let actions: Vec<Action<Address>, 2> = match event {
-        SlotEvent::Connected { slot, device } => {
-            coordinator::on_slot_connected(manager, slot, &device)
-        }
-        SlotEvent::Disconnected { slot } => coordinator::on_slot_disconnected(manager, slot)
-            .into_iter()
-            .collect(),
-        SlotEvent::LinkLost { slot, device } => {
-            coordinator::on_slot_link_lost(manager, slot, &device)
+        SlotEvent::Connected {
+            slot,
+            attempt,
+            device,
+        } => coordinator::on_slot_connected(manager, slot, attempt, &device),
+        SlotEvent::Disconnected { slot, attempt } => {
+            coordinator::on_slot_disconnected(manager, slot, attempt)
                 .into_iter()
                 .collect()
         }
-        SlotEvent::Error { slot, tag } => coordinator::on_slot_error(manager, slot, tag),
+        SlotEvent::LinkLost {
+            slot,
+            attempt,
+            device,
+        } => coordinator::on_slot_link_lost(manager, slot, attempt, &device)
+            .into_iter()
+            .collect(),
+        SlotEvent::Error {
+            slot,
+            attempt,
+            tag,
+            retrying,
+        } => coordinator::on_slot_error(manager, slot, attempt, tag, retrying),
         SlotEvent::Quiesced { .. } => return,
     };
     for action in actions {
@@ -285,7 +320,7 @@ async fn manage_devices(
                 continue;
             }
             SlotEvent::Connected { slot, .. }
-            | SlotEvent::Disconnected { slot }
+            | SlotEvent::Disconnected { slot, .. }
             | SlotEvent::LinkLost { slot, .. }
             | SlotEvent::Error { slot, .. } => *slot,
         };
@@ -325,8 +360,12 @@ async fn execute_action(
         Action::DisconnectSlot(slot) => {
             send_slot_cmd(slot, SlotCommand::Disconnect, slot_txs).await;
         }
-        Action::ConnectSlot { slot, device } => {
-            send_slot_cmd(slot, SlotCommand::Connect(device), slot_txs).await;
+        Action::ConnectSlot {
+            slot,
+            device,
+            attempt,
+        } => {
+            send_slot_cmd(slot, SlotCommand::Connect { device, attempt }, slot_txs).await;
         }
         // `Bonder::on_bonded` refused the pairing's bond and logged why. The
         // device is not stored either: without keys it would sit at the

@@ -201,9 +201,11 @@ Some details matter in daily use:
   records stay saved. With one slot in use, the existing link stays up.
 - If the chosen address already belongs to an established link, the screen
   returns to Connected without a new connection. If it belongs to a slot that is
-  still reconnecting in the background, Connecting stays on screen until that
-  attempt succeeds. If both slots are busy, the choice fails with
-  `Connect failed`; a new scan frees them.
+  still reconnecting to that device in the background, the slot connects to it
+  at once, keeping a link or attempt already under way, and the screen shows
+  Connected; if that connection fails, it shows the error while the slot goes
+  on reconnecting in the background. If both slots are busy, the choice fails
+  with `Connect failed`; a new scan frees them.
 - DOWN on Connected disconnects every link and stops their background
   reconnects. Pairing records stay saved; the devices come back when you
   connect them again or restart the bridge.
@@ -218,16 +220,18 @@ Some details matter in daily use:
 ### Boot And Reconnect
 
 At power-up the OLED shows Home, and the bridge at once assigns the two most
-recently added saved devices to connection slots 0 and 1, without scanning
-first. "Most recently added" means the order in which devices were first
+recently added saved devices it holds keys for to connection slots 0 and 1,
+without scanning first. A device saved without keys, because it paired
+without bonding, connects only when you select it from a scan: a background
+reconnect never pairs, so it could never secure that device's link. "Most recently added" means the order in which devices were first
 saved: reconnecting or renaming a saved device does not move it
 ([data model](data-model.md#in-memory-cache)).
 
-Each slot then keeps reconnecting in the background until it succeeds or the
-user gives it another command. An attempt listens for up to 6 seconds for the
-saved device, recognizing a bonded device by its identity key, so a rotating
-private address still matches, and any other saved device by its stored
-address. One slot's search also looks for the other slot's device and hands it
+Each slot then keeps reconnecting in the background until it succeeds, the
+user gives it another command, or the bridge no longer holds the device's
+keys. An attempt listens for up to 6 seconds for the saved device, recognizing
+it by its identity key, so a rotating private address still matches, or by
+the address it last used. One slot's search also looks for the other slot's device and hands it
 over when it hears it, so a mouse that is asleep never keeps the keyboard
 waiting: whichever device advertises first connects first. A device that
 advertises but fails to connect, for example a mouse paired again with a
@@ -263,7 +267,9 @@ Background retries also stop when:
 In these cases the record stays saved, and the device comes back when you
 connect it again from a scan, or after a restart if it is one of the two most
 recently added. Forget and Factory reset also stop the retries of the slots
-they target, and remove the record.
+they target, and remove the record. Saving a fifth device evicts the oldest
+record and its keys; a slot still retrying that device stops and is freed,
+and the log shows `slot N has no keys to reconnect`.
 
 The screen stays on Home until a saved device connects, then shows Connected.
 An error stays until acknowledged with DOWN. A scan you start yourself keeps its
@@ -275,14 +281,16 @@ slot stays reserved for the same device, and it reconnects silently once the
 device advertises again. The screen shows only the links that are actually up.
 The log shows `slot N link lost; reconnecting`, with the slot number. A
 device the bridge holds no keys for, such as one that showed
-`Pairing not saved`, could reconnect only by pairing, which a background
-reconnect never does, so its slot is freed instead and the log shows
-`slot N link lost; no keys to reconnect`; select the device from a scan to
-pair it again. Selecting a device from a scan while its slot is reconnecting
-in the background makes that slot connect to it at once, and pair it if the
-bridge holds no keys for it. A device that lost its own keys, for example by
-pairing with another computer, then shows `Connect failed`: forget it in
-saved devices and pair it again. A link that drops without a disconnect is detected by the supervision timeout, which
+`Pairing not saved` or one that paired without bonding, could reconnect only
+by pairing, which a background reconnect never does, so its slot is freed
+instead and the log shows `slot N link lost; no keys to reconnect`; select
+the device from a scan to pair it again. Selecting a device from a scan while
+its slot is reconnecting to it in the background makes that slot connect to
+it at once, keeping a link or attempt already under way. If that connection
+fails, the error shows and the slot goes back to reconnecting in the
+background. A device that lost its own keys, for example by pairing with
+another computer, shows `Connect failed` this way: forget it in saved devices
+and pair it again. A link that drops without a disconnect is detected by the supervision timeout, which
 is never longer than 4 seconds, whatever the peripheral asks for
 ([Connection And Security](#connection-and-security)).
 
@@ -442,10 +450,13 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   modes are refused because they do not encrypt notifications. The log shows
   `slot N failed to secure BLE link` when this fails.
 - The application requests a fresh pairing only for a connection the user
-  chose from a list. Background reconnects use existing keys and never request
-  a replacement pairing. The pinned nrf-softdevice event handler still answers
-  a peripheral's own security request by pairing when it holds no keys for
-  that peer ([`gap.rs`](../vendor/nrf-softdevice/src/ble/gap.rs)).
+  chose from a list. Background reconnects use existing keys, run only while
+  the bridge holds them, and never request a replacement pairing. The pinned
+  nrf-softdevice event handler still answers a peripheral's own security
+  request by pairing when it holds no keys for that peer
+  ([`gap.rs`](../vendor/nrf-softdevice/src/ble/gap.rs)), which a background
+  reconnect meets only when the keys are evicted while its attempt is under
+  way ([technical boundaries](#current-technical-boundaries)).
 - Bonds are scoped to the peer's identity. Re-pairing replaces only the keys of
   the peer whose identity address or identity key matches, never another
   peer's, because the encryption master ID is not a peer identity. Keys are
@@ -511,7 +522,16 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   once; no scan runs first.
 - A slot that loses an established link reports it, keeps the slot reserved
   for that device, releases the link's held input, and retries every 500 ms
-  after each attempt. A user command replaces the retry at any time.
+  after each attempt. A user command replaces the retry at any time; selecting
+  the same device takes the retry over, and a failed takeover hands the slot
+  back to the retry.
+- A retry runs only while the bridge holds the device's keys: power-up skips
+  a saved device without them, and a retry whose keys a newer pairing evicted
+  stops and frees its slot.
+- Every reservation of a slot is numbered, and a report from an attempt the
+  bridge has since replaced is ignored, so a late report from a retry cannot
+  end or complete the connection that took it over
+  ([architecture](architecture.md#attempt-numbers-and-retry-takeover)).
 - Retrying slots share one reconnect table
   ([`ble/reconnect.rs`](../src/ble/reconnect.rs)). Whichever slot holds the
   radio runs one passive scan for every slot's device, counting only
@@ -892,8 +912,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 374 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 368 unit tests, the 3
+- The source contains 379 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 373 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), and
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   all of which run with `mask test`.
@@ -1036,12 +1056,13 @@ implemented, so do not describe them as features.
   confirmation, or pairing window, so a device in radio range while you pair
   can intercept or impersonate the one you chose
   ([authenticated pairing](../TODO.md#ble-central-and-pairing)).
-- **A background reconnect can still pair.** The bridge never starts pairing
-  for a background reconnect, but if the device at the other end asks to pair
-  and the bridge holds no keys for it, the pairing goes ahead without you
-  choosing anything. This applies to a saved device stored without keys, for
-  example one saved by firmware older than the bonding store, and to any
-  device that copies its address
+- **A background reconnect can still pair in one narrow case.** The bridge
+  never starts pairing for a background reconnect, and since 2026-10-11 runs
+  one only while it holds the device's keys, so the device's own request to
+  pair is answered by encrypting with those keys (read from the code path;
+  not yet shown by a test or on air). If pairing another device evicts those
+  keys while an attempt is under way and the device at the other end then
+  asks to pair, the pairing still goes ahead without you choosing anything
   ([Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing)).
 - **The scan list holds eight devices.** Since 2026-10-10 it keeps the eight
   HID advertisers received most strongly, so a peripheral held next to the
@@ -1070,7 +1091,8 @@ implemented, so do not describe them as features.
   shortcuts for bridge actions, and keys cannot be remapped
   ([control from the bridge](../TODO.md#control-from-the-bridge)). At
   power-up the bridge always reconnects the two most recently added saved
-  devices, and another saved device connects only through a scan
+  devices it holds keys for, and another saved device connects only through a
+  scan
   ([hand-off between hosts](../TODO.md#hand-off-between-hosts-and-kvms)).
 - **The USB identity is a development one.** The bridge enumerates with the
   test VID/PID `0x1209`/`0x0001`, and `GET_REPORT` and `SET_IDLE` are left to

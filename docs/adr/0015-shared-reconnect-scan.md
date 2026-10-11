@@ -50,7 +50,10 @@ host-tested ([ADR 0003](0003-pure-core-and-task-shell.md)).
 
 **Start reconnecting at power-up.** `ble_task` reserves slot *i* for the *i*-th
 of the two most recently added saved devices and sends it
-`SlotCommand::Reconnect` at once, without scanning. Boot sends no scan events
+`SlotCommand::Reconnect` at once, without scanning. Since 2026-10-11 only
+devices with a bond are chosen: a background reconnect never pairs, so a
+device without keys could never connect this way
+([attempt numbers and retry takeover](../architecture.md#attempt-numbers-and-retry-takeover)). Boot sends no scan events
 to the UI, which stays on Home until a device connects.
 
 **Register every background target in one shared table.**
@@ -62,7 +65,10 @@ pure `reconnect::SavedPeer<Address, IdentityKey>` (the stored address and,
 for a bonded peer, its identity key from the `Bonder`), and `A = Address`. A worker registers its target before each silent attempt and
 clears it when it connects (just before `SlotEvent::Connected`), when any
 command other than `Reconnect` reaches it, and when an attempt ends in an error
-that stops retries.
+that stops retries. Since 2026-10-11 the worker first checks that the
+`Bonder` still holds the device's keys and, without them, clears the target
+and frees the slot, so every registered target carries an identity key; the
+table still handles a record without one.
 
 **Let one passive scan look for every slot's device.**
 `scanner::find_saved_peer(sd, slot)` takes the GAP lock and:

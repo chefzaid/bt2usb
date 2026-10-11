@@ -298,7 +298,8 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `peer asked for connection parameters {}; granting {}, outside its interval range` | The granted interval is outside the requested range: the peripheral's fastest requested interval is slower than 30 ms, or its whole range is below the Core's 7.5 ms minimum | If the peripheral then disconnects, record its name and this line for the compatibility baseline |
 | warn | `slot {} failed to secure BLE link` | Encryption or pairing failed, the link dropped, or security did not complete within 5 s | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
 | info | `slot {} link lost; reconnecting` | An established link dropped; held input was released | None; retries follow |
-| info | `slot {} link lost; no keys to reconnect` | An established link dropped, and the bridge holds no keys for that device (its pairing showed `Pairing not saved`, or a newer pairing evicted its keys); held input was released and the slot was freed | Select the device from a scan to pair it again |
+| info | `slot {} link lost; no keys to reconnect` | An established link dropped, and the bridge holds no keys for that device (its pairing showed `Pairing not saved`, the peripheral paired without bonding, or a newer pairing evicted its keys); held input was released and the slot was freed | Select the device from a scan to pair it again |
+| info | `slot {} has no keys to reconnect` | A background reconnect stopped before an attempt because the bridge no longer holds the device's keys, which saving a fifth device evicts; the slot was freed | Select the device from a scan to pair it again |
 | warn | `sd_ble_gap_connect err {:?}`, `sd_ble_gap_scan_start err {:?}`, `sd_ble_gap_authenticate err {:?}` (vendor) | A SoftDevice GAP call was rejected | Note the error; report if it repeats |
 | warn | `att mtu exchange refused: {:?}; keeping the default mtu` (vendor) | The peripheral answered the bridge's Exchange MTU Request with an ATT error, usually Request Not Supported. The link continues at the default 23-byte MTU, so the Report Map is read in 22-byte pieces | None; record the peripheral for the compatibility baseline |
 | warn | `sd_ble_gatts_exchange_mtu_reply err {:?}`, `sd_ble_gatts_sys_attr_set err {:?}` (vendor) | The SoftDevice rejected the bridge's answer to a peripheral's own MTU exchange or to its access of the bridge's Service Changed CCCD; the peripheral's request then times out after 30 s, and it may stop sending reports on that link | Record the peripheral and the error; if its input stops about 30 s after connecting, report it |
@@ -543,9 +544,9 @@ reboot or after it slept.
 
 - The peripheral is asleep, switched off, out of range, or connected to another
   host. Retries continue: each attempt first runs a reconnect scan of up to
-  6 seconds, shared by both slots, that matches a bonded peer by its identity
-  key and a record without a bond by its stored address, and only a device it
-  hears gets a 6-second connection attempt. Attempts are 500 ms apart; a slot
+  6 seconds, shared by both slots, that matches the peer by its identity key
+  or the address it last used, and only a device it hears gets a 6-second
+  connection attempt. Attempts are 500 ms apart; a slot
   whose device the other slot's scan heard connects without waiting. The scan
   listens at the fast duty cycle for the first 30 seconds after a slot starts
   reconnecting, then at the slower default
@@ -555,12 +556,19 @@ reboot or after it slept.
   `slot N failed to secure BLE link`. The application never starts pairing on
   a background reconnect ([security](security.md#pairing-and-authentication)),
   and the bridge still holds keys for this peer, so this does not resolve on
-  its own. (Separately, the vendored crate answers a peer's Security Request
-  by requesting pairing when it finds no keys, which can affect stored peers
-  without a bond; refusing that is open work in
+  its own. Selecting the device from a scan turns the retry into a user
+  connection, which shows `Connect failed` while the slot keeps retrying;
+  forget it and pair it again. (Separately, the vendored crate answers a
+  peer's Security Request by requesting pairing when it finds no keys, which
+  a background reconnect meets only when the keys are evicted while its
+  attempt is under way; refusing that is open work in
   [TODO.md](../TODO.md#ble-central-and-pairing).)
-- Only the two most recently added saved peers get a slot at boot. A third or
-  fourth stored peer is reconnected only when selected from a scan.
+- Only the two most recently added saved peers with a bond get a slot at
+  boot. A third or fourth stored peer, or one saved without a bond because it
+  paired without bonding, is connected only when selected from a scan.
+- The bridge no longer holds the peer's keys: saving a fifth device evicted
+  its record and keys, and a slot still retrying it stopped with
+  `slot N has no keys to reconnect`.
 - Retries were stopped: DOWN on the Connected screen disconnects every slot; a
   scan started while both slots were occupied disconnects both first; Forget or
   Factory reset stops the affected slots. A background reconnect retries only
@@ -597,9 +605,6 @@ and scans again. It is never found when:
 - the peripheral is not advertising (asleep, or connected elsewhere);
 - the peripheral replaced its IRK, for example after a reset or a new pairing
   elsewhere, so the stored key no longer matches;
-- the stored record has no bond (for example a legacy record), so the scan
-  matches only the stored address, which a private address never equals;
-  nothing is logged in this case either;
 - the peripheral advertises only non-connectable or scannable sets while it
   waits, which a connection could not use.
 

@@ -306,13 +306,15 @@ runs, then plans boot reconnects:
 3. If the store is not writable, sends `BleEvent::Error(StorageFailed)`; the UI
    shows "Storage failed". The store stays read-only
    ([ADR 0006](adr/0006-fail-closed-pairing-store.md)).
-4. Takes up to `MAX_CONNECTIONS` (2) records from `iter_recent()`, which
-   reverses insertion order and so yields the most recently added record
-   first. Updating a record does not move it, so "recent" means most recently
-   added, not most recently connected (see the
-   [in-memory cache](data-model.md#in-memory-cache)).
-5. Reserves slot *i* for record *i* and sends it `SlotCommand::Reconnect` at
-   once, without scanning first. Each worker then finds its device's current
+4. Takes up to `MAX_CONNECTIONS` (2) records with a bond from
+   `iter_recent()`, which reverses insertion order and so yields the most
+   recently added record first. Updating a record does not move it, so
+   "recent" means most recently added, not most recently connected (see the
+   [in-memory cache](data-model.md#in-memory-cache)). A record without a bond
+   is skipped: a background reconnect never pairs, so it could never secure
+   that device's link.
+5. Reserves slot *i* for record *i* under a new attempt number and sends it
+   `SlotCommand::Reconnect` at once, without scanning first. Each worker then finds its device's current
    address as described in [background reconnect](#background-reconnect):
    whichever slot holds the radio looks for both saved devices at the fast duty
    cycle, so a keyboard can connect as soon as it advertises, whether or not
@@ -336,8 +338,8 @@ sequenceDiagram
     C->>F: take flash, load_from_flash
     F-->>C: records, empty store, or fail-closed
     C->>C: load bonds into Bonder
-    opt at least one stored peer
-        C->>W: Reconnect per stored peer, no scan first
+    opt at least one stored peer with a bond
+        C->>W: Reconnect per bonded peer, no scan first
         W->>SD: shared reconnect scan, then connect, under GAP lock
     end
     C->>C: serve commands and slot events
@@ -362,7 +364,8 @@ which can be too late for a firmware setup key.
    background. It then calls `scanner::scan`, which sends `ScanStarted`
    *before* taking the GAP lock, then runs an active scan
    (`"BLE scan starting ({} s window)"`). Each advertisement goes through
-   `merge_advertisement`: a new entry needs the HID service UUID `0x1812`; a
+   `merge_advertisement` ([scan_list.rs](../src/ble/scan_list.rs)): a new
+   entry needs the HID service UUID `0x1812`; a
    later name-only scan response updates a known entry, and every response
    refreshes the entry's RSSI. The list holds at most `BLE_MAX_DISCOVERED` (8)
    devices. When it is full, a new HID advertiser replaces the entry with the
@@ -382,11 +385,14 @@ which can be too late for a firmware setup key.
    that resolves both the held and the selected address. A connected one
    re-emits `Connected`; a slot retrying it in the background (reserved at
    power-up or after a link loss) is reserved again for this connection and
-   sent `SlotCommand::Connect`, because a background reconnect never pairs and
-   might never report; a connection the user already asked for produces no
-   action. Otherwise the first empty slot is reserved and sent
-   `SlotCommand::Connect`, or, with no free slot, `ConnectFailed` is
-   reported.
+   sent `SlotCommand::Connect`, which takes the retry over
+   ([attempt numbers and retry takeover](#attempt-numbers-and-retry-takeover)),
+   because a background reconnect reports nothing until it succeeds, which it
+   never does for a peer that rejects its keys; a connection the user already
+   asked for produces no action. Otherwise the first empty slot is reserved
+   and sent `SlotCommand::Connect`, or, with no free slot, `ConnectFailed` is
+   reported. Each reservation gets a new attempt number, which the command
+   carries.
 6. The worker in [slot_worker.rs](../src/ble/slot_worker.rs) logs
    `"slot {} connecting to {}"`, takes the GAP lock, and calls
    `central::connect_with_security` with a whitelist of that one address, a
@@ -421,8 +427,11 @@ which can be too late for a firmware setup key.
    (`"Subscribed to {} of {} HID report characteristics"`).
 9. Steps 7 and 8 race the slot's command channel. A new command closes the
    link, waiting until the SoftDevice reports the connection gone, and is
-   processed next.
-10. On success the worker sends `SlotEvent::Connected`. `on_slot_connected`
+   processed next. A `Connect` for the same device is the exception: it takes
+   over a background attempt, which carries on under the new attempt number.
+10. On success the worker sends `SlotEvent::Connected` with the attempt
+    number. `on_slot_connected` ignores the event when the number is not the
+    slot's current one; otherwise it
     marks the slot connected and returns two actions in order: persist the
     device with its bond (`store.add`, then `save_to_flash`), then emit the
     connection summary. The UI shows Connected after the flash write finishes;
@@ -469,37 +478,52 @@ worker waiting to retry drops its target. Stored records and bonds are kept.
 A slot reconnects silently, without pairing, in three cases: `ble_task` sends
 it `Reconnect` at power-up; an established link closes (`"slot {} link lost;
 reconnecting"`), including one that the user connected, unless `Bonder` holds
-no keys for the device; or a silent attempt fails with `ConnectFailed`.
+no keys for the device; or a silent attempt fails with `ConnectFailed`. A
+silent attempt never pairs, so the retry runs only while `Bonder` holds the
+device's keys: power-up skips a saved device without a bond, and every
+attempt checks the keys first.
 
 ```mermaid
 flowchart TD
-    T[Target registered for the slot] --> B{During the 500 ms backoff}
+    P[Reconnect command at power-up] --> K
+    T[Retry target kept] --> B{During the 500 ms backoff}
     B -->|Disconnect| X[Drop target, report Disconnected]
-    B -->|Other command| N[Drop target, handle the command]
-    B -->|Pause ends, or the other slot saw the device| S{Fresh sighting for this slot}
+    B -->|Connect for the same device| N[Takeover: connect allowing pairing]
+    B -->|Other command| O[Drop target, handle the command]
+    B -->|Pause ends, or the other slot saw the device| K{Bonder holds the device's keys}
+    K -->|No: report Disconnected| F[Slot released, retries stop]
+    K -->|Yes| S{Fresh sighting for this slot}
     S -->|Yes| C[Whitelist connect to the seen address, up to 6 s]
     S -->|No| R[Shared reconnect scan under GAP lock, up to 6 s]
     R -->|This slot's device seen| C
     R -->|Other slot's device seen: record it, wake that slot| T
     R -->|Timeout or scan error| T
-    R -->|Command arrives, report Disconnected| N
+    R -->|Connect for the same device: report Disconnected under the old number| N
+    R -->|Other command: report Disconnected| O
     C -->|Secured and HID ready| L[Drop target, Connected event, notification loop]
     C -->|ConnectFailed: hide device from other slot's scans 6.5 s| T
     C -->|HID or Report Map error| E[Drop target, error event, slot released, retries stop]
     L -->|Peer closes link| D[HidEvent Disconnected]
     D -->|Bonder holds keys: LinkLost| T
-    D -->|No keys: Disconnected| F[Slot released, retries stop]
+    D -->|No keys: Disconnected| F
 ```
 
-- Each silent attempt registers the slot's target in `RECONNECTS`, the
+- Before each silent attempt the worker asks `Bonder::bond_for_address` for
+  the device's keys. Without them (a newer pairing evicted them from the four
+  held in RAM) it clears the target, sends `SlotEvent::Disconnected`, and logs
+  `"slot {} has no keys to reconnect"`; the attempt could never secure the
+  link and would hold the slot for good. Power-up reserves slots only for the
+  two most recently added saved devices that have a bond, so a record without
+  one (a device that paired without bonding, or one loaded from the legacy
+  format) connects only when selected from a scan.
+- Each silent attempt then registers the slot's target in `RECONNECTS`, the
   `reconnect::ReconnectTable` both slots share in
-  [scanner.rs](../src/ble/scanner.rs): the stored address and, for a bonded
-  peer, its identity key from the `Bonder`. A record saved without a bond is
-  matched by its stored address only. The target is dropped when the slot
-  connects (just before `SlotEvent::Connected`), when a command other than
-  `Reconnect` reaches the slot, and when an attempt ends in an error that
-  stops retries, so a connected or released slot never claims an
-  advertisement.
+  [scanner.rs](../src/ble/scanner.rs): the stored or last live address and
+  the bonded peer's identity key from the `Bonder`. The target is dropped when
+  the slot connects (just before `SlotEvent::Connected`), when a command other
+  than `Reconnect` reaches the slot, when an attempt ends in an error that
+  stops retries, and when the keys are gone, so a connected or released slot
+  never claims an advertisement.
 - `scanner::find_saved_peer` first takes a sighting that the other slot's scan
   recorded for this slot in the last 2 seconds (`BLE_RECONNECT_SIGHTING_TTL_MS`), and
   connects to it without scanning. Otherwise it runs one passive scan, bounded
@@ -553,32 +577,68 @@ flowchart TD
 - Background attempts never start pairing. A peer that has lost its keys fails
   encryption with `ConnectFailed`, which a silent attempt retries
   indefinitely; only the RTT log shows `"slot {} failed to secure BLE link"`.
-  A stored record without a bond (for example one loaded from the legacy
-  format) behaves the same way: `encrypt()` returns `PeerKeysNotFound`, pairing
-  is not allowed, and the attempt fails with `ConnectFailed`.
+  Selecting the device from a scan ends the wait on Connecting with
+  `Connect failed` (see the takeover below); forgetting it and pairing again
+  recovers it.
 - Any other error during a silent attempt (`HidNotFound`, `NotifyFailed`, or a
   Report Map error) is reported to the coordinator, which releases the slot and
   shows the error; that slot stops retrying.
 - On link loss the worker first sends `HidEvent::Disconnected` so the
   aggregator releases that source's held input, then `SlotEvent::LinkLost`.
-  `on_slot_link_lost` keeps the slot reserved in the connecting state, so a new
-  connect request cannot take it, and the UI shows only links that are up.
-  When `Bonder::bond_for_address` finds no keys for the device (its pairing
-  was refused, or a newer pairing evicted them from the four held in RAM),
-  the worker sends `SlotEvent::Disconnected` instead and logs
+  `on_slot_link_lost` keeps the slot reserved in the connecting state, under
+  the same attempt number, so a connect request for another device cannot
+  take it (selecting the same device turns the retry into a user connection,
+  [below](#attempt-numbers-and-retry-takeover)), and the UI shows only links
+  that are up. When `Bonder::bond_for_address` finds no keys for the device
+  (its pairing was refused, the peripheral paired without bonding, or a newer
+  pairing evicted them from the four held in RAM), the worker sends
+  `SlotEvent::Disconnected` instead and logs
   `"slot {} link lost; no keys to reconnect"`: a silent attempt never pairs,
   so it could never secure the link, and would hold the slot until the user
   disconnected.
-- Selecting the device from a scan while its slot retries replaces the retry
-  with a `SlotCommand::Connect` to the same slot, which may pair (step 5 of
-  [the user connect](#user-scan-connect-pairing-and-hid-discovery)). The worker drops the retry without
-  reporting `Disconnected`: the coordinator sends a `Connect` only to a slot
-  it has just reserved for it, so the report would free that reservation and
-  move the UI off Connecting. Any other superseding command still reports
-  `Disconnected` once.
 - A background reconnect that reaches Connected moves the UI from Home or
   Connecting to Connected. A scan the user started keeps its picker on screen;
   an error or notice also stays until acknowledged.
+
+### Attempt Numbers And Retry Takeover
+
+`ble_task` waits on UI commands and slot events with one `select` that polls
+commands first, so the coordinator can act on a selection while a worker's
+report on the attempt that selection replaces is still queued. Attempt
+numbers keep those late reports from undoing the newer decision.
+
+- `ConnManager` gives every reservation (`reserve_slot` for a user
+  connection, `reserve_retry` at power-up) the next number of a wrapping
+  counter that skips 0. Connecting and losing the link keep the number; a free
+  slot holds 0, which no attempt is given. `Action::ConnectSlot`,
+  `SlotCommand::Connect`, and `SlotCommand::Reconnect` carry the number.
+- The worker keeps the number of the command it serves and puts it on every
+  `SlotEvent` except `Quiesced`. `on_slot_connected`, `on_slot_disconnected`,
+  `on_slot_link_lost`, and `on_slot_error` return no actions for an event
+  whose number is not the occupied slot's current one: it reports on an
+  attempt the coordinator has since replaced or ended.
+- The coordinator sends `Connect` to an occupied slot only when it is
+  retrying the selected peer in the background (step 5 of
+  [the user connect](#user-scan-connect-pairing-and-hid-discovery)). The
+  worker treats a `Connect` for the same peer, by address or by one bonded
+  peer's identity key (`Bonder::same_peer`), as a takeover:
+
+| Where the worker is | What the takeover does |
+| --- | --- |
+| Pausing between attempts, or in the reconnect scan | Remembers the retry target and connects to the selected address with pairing allowed; the scan reports `Disconnected` under the old number, which the coordinator ignores |
+| In `connect_with_security` | The command waits in the channel. A failed connect returns to the pause, where the takeover proceeds as above; a link that comes up goes on to security as below |
+| Securing the link or discovering HID | The attempt carries on under the new number. Success reports `Connected` with it; failure closes the link and connects again with pairing allowed, without reporting the silent failure |
+| Running, with `Connected` sent under the old number but not yet handled | Keeps the link and reports `Connected` again under the new number |
+
+- When the takeover's connection fails and `Bonder` still holds the replaced
+  target's keys, the worker sends `SlotEvent::Error` with `retrying` set and
+  resumes the retry under the same number. `on_slot_error` then keeps the
+  slot reserved and retrying, emits the error (`Connect failed` for a peer
+  that rejects its keys), and a later selection can take the retry over
+  again. Without the keys the error frees the slot.
+- Any other command that arrives during an attempt supersedes it: the worker
+  closes the link, reports `Disconnected` under the old number, and handles
+  the command next (a `Disconnect` needs nothing more).
 
 ### Peripheral Connection Parameter Requests
 
@@ -989,10 +1049,11 @@ store disables writes instead of being silently replaced.
 
 Bonded records use stable peer identities. Background reconnects resolve a peer's
 current advertising address on each attempt, including when its private address
-rotates after boot. Up to two stored devices are selected at boot, the most
-recently added first ([in-memory cache](data-model.md#in-memory-cache)). New
-pairing is initiated for explicit user connections; background reconnects use
-existing keys. HID discovery waits for an encrypted link, and commands can cancel
+rotates after boot. Up to two stored devices with a bond are selected at
+boot, the most recently added first
+([in-memory cache](data-model.md#in-memory-cache)). New pairing is initiated
+for explicit user connections; background reconnects use existing keys and run
+only while the `Bonder` holds them. HID discovery waits for an encrypted link, and commands can cancel
 security/discovery once the connection is owned. Pairing is unauthenticated
 Just Works for now ([ADR 0011](adr/0011-interim-just-works-pairing.md)).
 
@@ -1166,7 +1227,7 @@ should do about each message is in
 | Path | Bound | On failure | Source |
 | --- | --- | --- | --- |
 | User scan | 8 s window, 10 s backstop | Results so far are used; a SoftDevice error shows "Scan failed" | [scanner.rs](../src/ble/scanner.rs) |
-| Connect attempt | 6 s whitelist scan | User connect: error. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs) |
+| Connect attempt | 6 s whitelist scan | User connect: error, and a connection that took over a background retry goes back to it while the device's keys remain. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs) |
 | Reconnect scan | 6 s; fast duty cycle for 30 s after power-up or a lost link | Retry after 500 ms, or at once when the other slot's scan sees the device | [scanner.rs](../src/ble/scanner.rs), [reconnect.rs](../src/ble/reconnect.rs) |
 | Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [slot_worker.rs](../src/ble/slot_worker.rs) |
 | GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |

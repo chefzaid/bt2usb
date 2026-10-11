@@ -8,8 +8,9 @@
 use core::cell::RefCell;
 
 use crate::ble::bonder::key_matches;
-use crate::ble::coordinator::{merge_advertisement, MAX_CONNECTIONS};
+use crate::ble::coordinator::MAX_CONNECTIONS;
 use crate::ble::reconnect::{self, owner_of, ReconnectTable, Recorded, ScanDuty};
+use crate::ble::scan_list::merge_advertisement;
 use crate::ble::{BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::{
     BLE_FAILED_RECONNECT_HOLDOFF_MS, BLE_FAST_RECONNECT_SECS, BLE_FAST_SCAN_INTERVAL,

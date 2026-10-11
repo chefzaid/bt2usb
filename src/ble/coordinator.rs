@@ -58,68 +58,6 @@ pub struct DeviceInfo<A> {
     pub rssi: i8,
 }
 
-/// The RSSI a controller reports when it has no measurement (Bluetooth Core
-/// Specification, Vol 4, Part E, 7.7.65.2).
-const RSSI_UNAVAILABLE: i8 = 127;
-
-/// Signal strength for comparing scan entries: higher is stronger, and an
-/// unavailable reading ranks below every measured one.
-fn signal_rank(rssi: i8) -> i16 {
-    if rssi == RSSI_UNAVAILABLE {
-        i16::MIN
-    } else {
-        i16::from(rssi)
-    }
-}
-
-/// Merge an advertisement or active-scan response into the bounded result
-/// list. A later name-only response may update an already identified HID peer,
-/// and every response from a listed peer refreshes its RSSI.
-///
-/// When the list is full, a new HID advertiser replaces the listed device with
-/// the weakest signal, but only if it is received more strongly. The list
-/// therefore ends a scan holding the `N` strongest HID advertisers instead of
-/// the first `N` heard, so distant devices, or a burst of fake advertisers
-/// weaker than the device in pairing mode next to the bridge, cannot hide it.
-/// Returns `true` only when a new device entered the list.
-pub fn merge_advertisement<A: PartialEq, const N: usize>(
-    found: &mut Vec<DeviceInfo<A>, N>,
-    address: A,
-    rssi: i8,
-    data: &[u8],
-) -> bool {
-    use crate::ble::adv_parser::{advertised_name, contains_hid_service_uuid, extract_device_name};
-
-    if let Some(existing) = found.iter_mut().find(|d| d.address == address) {
-        if let Some(name) = advertised_name(data) {
-            existing.name = name;
-        }
-        existing.rssi = rssi;
-        return false;
-    }
-    if !contains_hid_service_uuid(data) {
-        return false;
-    }
-    let device = DeviceInfo {
-        address,
-        name: extract_device_name(data),
-        rssi,
-    };
-    let Err(device) = found.push(device) else {
-        return true;
-    };
-    let weakest = found
-        .iter_mut()
-        .min_by_key(|listed| signal_rank(listed.rssi));
-    match weakest {
-        Some(listed) if signal_rank(device.rssi) > signal_rank(listed.rssi) => {
-            *listed = device;
-            true
-        }
-        _ => false,
-    }
-}
-
 /// One connection slot.
 #[derive(Clone)]
 pub struct Slot<A> {
@@ -129,6 +67,8 @@ pub struct Slot<A> {
     connecting: bool,
     /// The connecting slot is a background reconnect, which never pairs.
     retrying: bool,
+    /// The number of the attempt the slot's worker serves; 0 for a free slot.
+    attempt: u32,
 }
 
 impl<A> Slot<A> {
@@ -139,6 +79,7 @@ impl<A> Slot<A> {
             connected: false,
             connecting: false,
             retrying: false,
+            attempt: 0,
         }
     }
 
@@ -148,8 +89,17 @@ impl<A> Slot<A> {
 }
 
 /// The connection-slot state machine.
+///
+/// Each reservation gets an attempt number, which the slot's worker carries
+/// on every event it reports for it. An event whose number is not the slot's
+/// current one comes from an attempt the coordinator has since replaced or
+/// ended, and the reducers ignore it: the coordinator handles UI commands
+/// before queued worker events, so a selection can replace a background
+/// reconnect whose Connected, Error or link-loss report is already queued.
 pub struct ConnManager<A> {
     slots: [Slot<A>; MAX_CONNECTIONS],
+    /// The number given to the latest reservation.
+    last_attempt: u32,
 }
 
 impl<A: Clone + PartialEq> Default for ConnManager<A> {
@@ -162,7 +112,15 @@ impl<A: Clone + PartialEq> ConnManager<A> {
     pub const fn new() -> Self {
         Self {
             slots: [const { Slot::empty() }; MAX_CONNECTIONS],
+            last_attempt: 0,
         }
+    }
+
+    /// A new attempt number. Numbers wrap but skip 0, which no event
+    /// carries, so an event can never match a free slot.
+    fn next_attempt(&mut self) -> u32 {
+        self.last_attempt = self.last_attempt.wrapping_add(1).max(1);
+        self.last_attempt
     }
 
     /// First slot that is neither connected nor connecting.
@@ -190,24 +148,56 @@ impl<A: Clone + PartialEq> ConnManager<A> {
         self.slots.get(slot).and_then(|s| s.address.as_ref())
     }
 
+    /// The number of the attempt a slot serves; 0, which no event carries,
+    /// for a free or out-of-range slot.
+    pub fn slot_attempt(&self, slot: usize) -> u32 {
+        self.slots.get(slot).map_or(0, |s| s.attempt)
+    }
+
+    /// Whether an event numbered `attempt` comes from the attempt `slot`
+    /// currently serves, rather than from one since replaced or ended.
+    fn is_current(&self, slot: usize, attempt: u32) -> bool {
+        self.slots
+            .get(slot)
+            .is_some_and(|s| s.is_occupied() && s.attempt == attempt)
+    }
+
     /// Mark a slot as connecting (reserved) for the given device, on a
-    /// connection the user asked for.
-    pub fn reserve_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
-        self.set_slot(slot, device, false, false);
+    /// connection the user asked for. Returns the attempt's number.
+    pub fn reserve_slot(&mut self, slot: usize, device: &DeviceInfo<A>) -> u32 {
+        let attempt = self.next_attempt();
+        self.set_slot(slot, device, attempt, false, false);
+        attempt
     }
 
-    /// Mark a slot as reserved for a background reconnect to the given device:
-    /// at power-up, or after its link was lost.
-    pub fn reserve_retry(&mut self, slot: usize, device: &DeviceInfo<A>) {
-        self.set_slot(slot, device, false, true);
+    /// Mark a slot as reserved for a background reconnect to the given device
+    /// at power-up. Returns the attempt's number.
+    pub fn reserve_retry(&mut self, slot: usize, device: &DeviceInfo<A>) -> u32 {
+        let attempt = self.next_attempt();
+        self.set_slot(slot, device, attempt, false, true);
+        attempt
     }
 
-    /// Mark a slot as fully connected for the given device.
-    pub fn connect_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
-        self.set_slot(slot, device, true, false);
+    /// Mark a slot as fully connected for the given device, keeping the
+    /// number of the attempt that connected it; a slot connected without a
+    /// reservation gets a new one. Returns the number.
+    pub fn connect_slot(&mut self, slot: usize, device: &DeviceInfo<A>) -> u32 {
+        let attempt = match self.slot_attempt(slot) {
+            0 => self.next_attempt(),
+            attempt => attempt,
+        };
+        self.set_slot(slot, device, attempt, true, false);
+        attempt
     }
 
-    fn set_slot(&mut self, slot: usize, device: &DeviceInfo<A>, connected: bool, retrying: bool) {
+    fn set_slot(
+        &mut self,
+        slot: usize,
+        device: &DeviceInfo<A>,
+        attempt: u32,
+        connected: bool,
+        retrying: bool,
+    ) {
         if let Some(entry) = self.slots.get_mut(slot) {
             *entry = Slot {
                 address: Some(device.address.clone()),
@@ -215,6 +205,7 @@ impl<A: Clone + PartialEq> ConnManager<A> {
                 connected,
                 connecting: !connected,
                 retrying,
+                attempt,
             };
         }
     }
@@ -279,8 +270,13 @@ pub enum UiEvent {
 pub enum Action<A> {
     /// Tell a slot worker to disconnect.
     DisconnectSlot(usize),
-    /// Tell a slot worker to connect to a device.
-    ConnectSlot { slot: usize, device: DeviceInfo<A> },
+    /// Tell a slot worker to connect to a device, numbering its events with
+    /// `attempt`.
+    ConnectSlot {
+        slot: usize,
+        device: DeviceInfo<A>,
+        attempt: u32,
+    },
     /// Persist a newly connected device (+ its bond) to flash.
     PersistDevice(DeviceInfo<A>),
     /// Emit a UI event.
@@ -344,14 +340,19 @@ pub fn plan_connect<A: Clone + PartialEq>(
                 manager,
             ))));
         } else if held.retrying {
-            // A background reconnect never pairs, so it cannot recover a peer
-            // that lost its keys or a record saved without any, and would
-            // leave the UI on Connecting for good. The user's selection
-            // replaces it with a connection that may pair.
-            manager.reserve_slot(slot, device);
+            // A background reconnect reports nothing until it succeeds, which
+            // it never does for a peer that rejects the keys it holds, so
+            // waiting for it would leave the UI on Connecting for good. The
+            // selection becomes a connection the user asked for, which may
+            // pair and reports its failure. The worker keeps a link or an
+            // attempt already under way for the device, and goes back to the
+            // background reconnect if the connection fails while it still
+            // holds the device's keys.
+            let attempt = manager.reserve_slot(slot, device);
             let _ = actions.push(Action::ConnectSlot {
                 slot,
                 device: device.clone(),
+                attempt,
             });
         }
         // Otherwise a connection the user asked for still owns its slot and
@@ -365,10 +366,11 @@ pub fn plan_connect<A: Clone + PartialEq>(
         return actions;
     };
 
-    manager.reserve_slot(slot, device);
+    let attempt = manager.reserve_slot(slot, device);
     let _ = actions.push(Action::ConnectSlot {
         slot,
         device: device.clone(),
+        attempt,
     });
     actions
 }
@@ -390,9 +392,13 @@ pub fn plan_disconnect<A: Clone + PartialEq>(
 pub fn on_slot_connected<A: Clone + PartialEq>(
     manager: &mut ConnManager<A>,
     slot: usize,
+    attempt: u32,
     device: &DeviceInfo<A>,
 ) -> Vec<Action<A>, 2> {
     let mut actions = Vec::new();
+    if !manager.is_current(slot, attempt) {
+        return actions;
+    }
     manager.connect_slot(slot, device);
     let _ = actions.push(Action::PersistDevice(device.clone()));
     let _ = actions.push(Action::Emit(UiEvent::Connected(connection_summary(
@@ -401,12 +407,16 @@ pub fn on_slot_connected<A: Clone + PartialEq>(
     actions
 }
 
-/// A slot worker reported a disconnection.
+/// A slot worker reported its slot free.
 pub fn on_slot_disconnected<A: Clone + PartialEq>(
     manager: &mut ConnManager<A>,
     slot: usize,
+    attempt: u32,
 ) -> Vec<Action<A>, 1> {
     let mut actions = Vec::new();
+    if !manager.is_current(slot, attempt) {
+        return actions;
+    }
     manager.disconnect_slot(slot);
     let _ = actions.push(Action::Emit(link_state(manager)));
     actions
@@ -415,28 +425,48 @@ pub fn on_slot_disconnected<A: Clone + PartialEq>(
 /// A slot worker's established link dropped (peer asleep, out of range or
 /// powered off) and the worker is now silently trying to reconnect to it.
 ///
-/// The slot stays reserved for that device — it is still "connecting" — so a
-/// new connect request doesn't steal it, and the UI shows only the links that
-/// are actually up.
+/// The slot stays reserved for that device, under the same attempt number,
+/// so a connect request for another device cannot take it (selecting the same
+/// device turns the retry into a user connection, see [`plan_connect`]), and
+/// the UI shows only the links that are actually up.
 pub fn on_slot_link_lost<A: Clone + PartialEq>(
     manager: &mut ConnManager<A>,
     slot: usize,
+    attempt: u32,
     device: &DeviceInfo<A>,
 ) -> Vec<Action<A>, 1> {
     let mut actions = Vec::new();
-    manager.reserve_retry(slot, device);
+    if !manager.is_current(slot, attempt) {
+        return actions;
+    }
+    manager.set_slot(slot, device, attempt, false, true);
     let _ = actions.push(Action::Emit(link_state(manager)));
     actions
 }
 
-/// A slot worker reported an error.
+/// A slot worker reported an error. When `retrying`, the failed attempt was
+/// a user connection that took over a background reconnect, and the worker
+/// has gone back to that reconnect, so the slot stays reserved for the
+/// device under the same attempt number; otherwise the slot is free.
 pub fn on_slot_error<A: Clone + PartialEq>(
     manager: &mut ConnManager<A>,
     slot: usize,
+    attempt: u32,
     tag: ErrorTag,
+    retrying: bool,
 ) -> Vec<Action<A>, 2> {
     let mut actions = Vec::new();
-    manager.disconnect_slot(slot);
+    if !manager.is_current(slot, attempt) {
+        return actions;
+    }
+    match manager.slots.get_mut(slot) {
+        Some(entry) if retrying => {
+            entry.connected = false;
+            entry.connecting = true;
+            entry.retrying = true;
+        }
+        _ => manager.disconnect_slot(slot),
+    }
     let _ = actions.push(Action::Emit(UiEvent::Error(tag)));
     let _ = actions.push(Action::Emit(link_state(manager)));
     actions

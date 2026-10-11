@@ -8,7 +8,7 @@
 //! Forwarding only *changes* would leave it dark until the user next toggles a
 //! lock key, so the keyboard would show Caps Lock off while the host has it on.
 //! [`forward_host_leds`] therefore writes the host's current state as soon as
-//! a link starts, then every change after it.
+//! it starts on a link, then every change after it.
 
 use super::keyboard::KeyboardLeds;
 use core::future::Future;

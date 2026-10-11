@@ -258,7 +258,7 @@ exercises.
 
 | Module | What checks it today |
 | --- | --- |
-| `ble/multi_conn.rs`, `ble/slot_worker.rs`, `ble/slot_link.rs`, `ble/bonder.rs`, `ble/hid_client.rs`, `ble/scanner.rs` | Embedded build and Clippy; pure decisions they call are host-tested; hardware acceptance. The self-test scan stage checks the radio with its own scan loop and `ble/adv_parser.rs`; it does not run these modules |
+| `ble/multi_conn.rs`, `ble/slot_worker.rs`, `ble/slot_link.rs`, `ble/bonder.rs`, `ble/hid_client.rs`, `ble/device_info.rs`, `ble/scanner.rs` | Embedded build and Clippy; pure decisions they call are host-tested; hardware acceptance. The self-test scan stage checks the radio with its own scan loop and `ble/adv_parser.rs`; it does not run these modules |
 | `storage.rs` | Embedded build and Clippy; the decisions it calls (the device list, codec, framing, and record validation) are host-tested, but its conversions to and from SoftDevice types, IRK resolution through the SoftDevice, and flash writes with retries are not; the self-test flash stage exercises the same region and `sequential-storage` map, not this code; hardware acceptance |
 | `usb/hid_device.rs`, `usb/host_requests.rs` | Embedded build and Clippy; delivery, aggregation, wake policy, and host LED decoding and forwarding are host-tested; self-test USB stages; hardware acceptance |
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
@@ -775,7 +775,7 @@ Not yet first-class:
 Specific to the current workflow and test tree:
 
 - No CI job flashes a board; the self-test and first-flash layers are manual.
-- The coverage floor is one line-coverage total over the 22 host-library source
+- The coverage floor is one line-coverage total over the 32 host-library source
   modules; a single module can lose coverage while the total stays above 97%,
   and region and function coverage have no floor.
 - The Renode job runs one scripted scenario on Linux, plus register-level
@@ -797,8 +797,8 @@ Specific to the current workflow and test tree:
 - `cargo audit` ignores two unmaintained-crate advisories by ID, because no
   released dependency lets the graph drop them; any other warning fails the
   job ([auditing](code-quality.md#auditing)).
-- Connection workers, the security handler, the GATT HID client, the storage
-  shell, the USB device, and the display driver's I2C shell have no host tests
+- Connection workers, the security handler, the GATT HID and Device
+  Information clients, the storage shell, the USB device, and the display driver's I2C shell have no host tests
   ([details](#modules-without-host-tests)). For storage that leaves the
   conversion between SoftDevice and stored types, IRK resolution through the
   SoftDevice, and the flash retries, which only the embedded build and
@@ -896,6 +896,28 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, PnP ID Review Fixes
+
+This record covers the commit that fixes the findings an independent review
+of the PnP ID commit `2e81820` upheld, listed as a checked P3 entry in the
+[TODO.md FIXME section](../TODO.md#fixme). Only documentation and comments
+changed: the security guide's input-validation table gained a row for the
+Device Information discovery and PnP ID read, the architecture layer table
+and dependency graph gained `ble::pnp_id`, `ble::device_info`, and
+`diagnostics`, and every other flagged statement now matches the code. The
+checks ran locally on Linux in a container, on the working tree just before
+that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 404 unit tests, 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests; no test changed |
+| Clippy with warnings denied | Host tests, embedded | Passed; the code changes are comments only |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, `bt2usb` | Passed |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Hosted CI | GitHub Actions | Push run 38111305224 (`19ba629`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
 
 ## Validation Record — 2026-10-11, Counter Review Fixes
 

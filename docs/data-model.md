@@ -471,7 +471,8 @@ bytes become `0x01` (`ErrorRollOver`) while modifiers are still sent.
 
 `KeyboardLeds` masks the byte to `0x1F`. Each connection worker that found a
 keyboard LED output report on its peer writes the masked byte to that
-characteristic when the link starts, if the host has sent one, and then
+characteristic once the link's notification loop has read the peripheral's
+PnP ID, if the host has sent a state, and then
 whenever the host changes it (`forward_host_leds` in
 [host_leds.rs](../src/hid/host_leds.rs)).
 

@@ -38,7 +38,7 @@ The decision recorded here was implemented on 2026-06-22:
   whose "imperative shell" is the task code.
 - `e3bc620` removed the duplicate ("Unify HID classification on the real hid
   module (drop lib.rs duplicate + dead hid/tests.rs)"). `src/lib.rs` became a
-  list of `#[path]` includes of the firmware's own files and is now 166 lines.
+  list of `#[path]` includes of the firmware's own files and is now 176 lines.
 
 The 2026-09-28 hardening (`2479c79`) followed the same pattern for everything
 it added: input aggregation, endpoint delivery, wake policy, long reads,
@@ -140,7 +140,8 @@ Positive:
 Negative:
 
 - The shells are not host-tested. That includes `multi_conn.rs`,
-  `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`,
+  `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`,
+  `device_info.rs`, `scanner.rs`,
   `usb/hid_device.rs`, `usb/host_requests.rs`, `ui/display.rs`, `power.rs`,
   and the `storage.rs` shell (flash I/O, write retries, and the conversion to
   SoftDevice types). Since 2026-10-10 the store's load, merge, and eviction

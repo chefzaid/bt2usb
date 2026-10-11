@@ -194,7 +194,7 @@ different code:
 | Configuration | Targets checked | Code only this configuration sees |
 | --- | --- | --- |
 | Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs`, `tests/oled_font.rs`, and `tests/vendor_portal.rs` | `#[cfg(test)]` modules and test files; the vendored portal source, which `tests/vendor_portal.rs` compiles with Clippy's groups and rustc's unused lints allowed on the two modules, since it keeps upstream's code |
-| Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, and GATT HID client modules |
+| Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, GATT HID client, and Device Information client modules |
 | Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs`, `src/sim_ble.rs`, and their UART output path |
 | Embedded with the opt-in (`--features embedded,log-sensitive-data`) | Library; `bt2usb`; `bt2usb-selftest` | No bt2usb code. It compiles the opt-in branches of three log lines in the vendored `nrf-softdevice` ([dependency logs](security.md#dependency-logs)); Clippy does not lint that crate, which is a path dependency rather than a workspace member |
 
@@ -716,7 +716,7 @@ test file reaches the figure.
 
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
-workers, security handler, GATT HID client, scanner, storage shell,
+workers, security handler, GATT HID and Device Information clients, scanner, storage shell,
 USB device, display driver, buttons, power shell, stack monitor, SoftDevice setup, and the
 three entry points. `config.rs` is compiled into the host library but holds
 only constants, so it adds no lines to the report. The
@@ -763,7 +763,7 @@ size would cross the floor. It is a ratchet:
   move hardware-coupled code out of the pure modules.
 
 **What the figure includes.** The total is the one `--summary-only` prints:
-the 22 source modules listed under [What Is Instrumented](#what-is-instrumented),
+the 32 source modules listed under [What Is Instrumented](#what-is-instrumented),
 with their inline test modules and without the separate test files. Inline test
 code is covered almost entirely by running, so files with large inline test
 modules read slightly higher than their production code alone would. Region
@@ -1001,7 +1001,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | Gap | Where it is tracked |
 | --- | --- |
 | No fuzzing or property tests for descriptors, advertisements, reports, or storage framing | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) |
-| The connection workers, security handler, GATT HID client, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
+| The connection workers, security handler, GATT HID and Device Information clients, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
 | The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) for the parsers; the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced, and a stack overflow does not fault | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0) and [Stack overflow detection](../TODO.md#platform-memory-and-recovery) (P1); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |

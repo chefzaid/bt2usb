@@ -213,7 +213,7 @@ peer that wakes first connects first. When the peripheral asks for other
 connection parameters, `peer connection parameters granted: …` or
 `peer asked for connection parameters …; granting …` follows the connection
 lines. Once the host has sent its LED state, a keyboard link writes it as soon
-as its notification loop starts. The
+as its notification loop has read the peripheral's PnP ID. The
 lock is released before security and HID discovery, so the two slots'
 discovery lines can interleave.
 `Set HID protocol to Report mode` appears only when the peer has a Protocol Mode
@@ -347,9 +347,9 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `No HID report characteristics could be subscribed` | Nothing to listen to; the OLED shows `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
 | info | `Subscribed to {} of {} HID report characteristics` | Subscription result | None |
 | info | `HID notification loop started` / `HID notification loop ended (connection closed)` | Input flowing / link closed by the peer or radio | None |
-| info | `slot {} PnP ID: {}` | The peripheral's Device Information Service PnP ID, read once per link after input flows: who assigned the vendor ID (`Bluetooth SIG` or `USB-IF`), then the vendor ID, product ID, and product version in hexadecimal | Quote it in a report to name the peripheral's model and firmware release; see [PnP ID](#peripheral-pnp-id) |
+| info | `slot {} PnP ID: {}` | The peripheral's Device Information Service PnP ID, read once per link after input flows: who assigned the vendor ID (`Bluetooth SIG`, `USB-IF`, or `reserved source N` for any other value), then the vendor ID, product ID, and product version in hexadecimal | Quote it in a report to name the peripheral's model and firmware release; see [PnP ID](#peripheral-pnp-id) |
 | info | `slot {} PnP ID: no Device Information Service`, `slot {} PnP ID: not offered` | The peripheral has no Device Information Service, or one without a PnP ID | None; record the make and model by hand |
-| warn | `slot {} PnP ID: discovery failed: {:?}`, `slot {} PnP ID: read failed: {:?}`, `slot {} PnP ID: malformed, {} bytes` | Reading the PnP ID failed, or its value was not the 7 bytes the specification defines (`Truncated` for a longer one). Input is unaffected | Record the line with the peripheral's make and model |
+| warn | `slot {} PnP ID: discovery failed: {:?}`, `slot {} PnP ID: read failed: {:?}`, `slot {} PnP ID: malformed, {} bytes` | Reading the PnP ID failed, or its value was not the 7 bytes the specification defines: an 8-byte value logs as `malformed, 8 bytes`, and a longer one fails the read with `Truncated`. Input is unaffected | Record the line with the peripheral's make and model |
 | warn | `Failed to write LED state to BLE keyboard` | LED write rejected | Cosmetic |
 | warn | `Unknown HID report length: {}` | In the length-based fallback (no Report Map, or a map without report IDs and an unresolved report), a report of an unexpected length was dropped | Unsupported layout; report with the Report Map line |
 

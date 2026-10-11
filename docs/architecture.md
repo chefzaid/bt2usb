@@ -116,8 +116,8 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
-| Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, management, messages, pnp_id}`, `diagnostics`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, device_info, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
@@ -142,6 +142,7 @@ flowchart TD
         SW["ble::slot_worker and slot_link"]
         BND["ble::bonder"]
         HC["ble::hid_client"]
+        DI["ble::device_info"]
         SC["ble::scanner"]
         ST["storage shell"]
         USB["usb::hid_device and host_requests"]
@@ -151,22 +152,24 @@ flowchart TD
         SDS["sd_setup and stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, adv_parser"]
+        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, adv_parser, pnp_id"]
+        DG["diagnostics"]
         HID["hid modules"]
         UIL["ui::controller, ui_logic, input_logic, display_logic"]
         PL["power_logic"]
         SF["storage::devices, codec, framing, record"]
     end
-    MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & UIL & HID
-    SELF --> USB & DSP & SDS & BC & HID
-    SIM --> BC & UIL & BTN & SF
+    MAIN --> MC & SW & USB & DSP & BTN & PWR & SDS & UIL & HID & DG
+    SELF --> USB & DSP & SDS & BC & HID & DG
+    SIM --> BC & UIL & BTN & SF & DG
     MC --> BND & SC & ST & BC
-    SW --> MC & BND & HC & SC & USB & BC & HID
+    SW --> MC & BND & HC & SC & USB & BC & HID & DG
     BND --> ST & BC
-    HC --> HID & BC & USB
+    HC --> DI & HID & BC & USB & DG
+    DI --> BC
     SC --> BC
-    ST --> SF & BC
-    USB --> HID & PWR
+    ST --> SF & BC & DG
+    USB --> HID & PWR & DG
     PWR --> PL
     DSP --> UIL
     BTN --> UIL

@@ -75,8 +75,9 @@ pub async fn log_pnp_id(conn: &Connection, slot: usize) {
         info!("slot {} PnP ID: not offered", slot);
         return;
     };
-    // One byte more than a valid value, so a longer one is reported, as
-    // malformed or truncated, instead of being cut to a valid-looking seven.
+    // One byte more than a valid value, so an 8-byte value is logged as
+    // malformed with its length; the vendored read fails any value longer
+    // than the buffer with `ReadError::Truncated`.
     let mut value = [0u8; PnpId::LEN + 1];
     match gatt_client::read(conn, handle, &mut value).await {
         Ok(len) => match value.get(..len).and_then(PnpId::parse) {

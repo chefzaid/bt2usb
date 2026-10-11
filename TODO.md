@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 51 | 0 | 0 |
+| [FIXME](#fixme) | 52 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **139** | **70** | **21** |
+| **Total** | **140** | **70** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -795,6 +795,23 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   further finding, raised twice, that a background attempt taken over by
   the user's selection counts as an attempt but not a failure, was refuted:
   the user stepped in, so it is no longer a background failure.
+- [x] **P3** **The PnP ID commit left docs out of step.** Found by an
+  independent review of commit `2e81820`, each finding confirmed by a second
+  check. The security guide's input-validation table, which claims to list
+  every peer-parsed boundary, lacked the Device Information discovery and
+  PnP ID read; the architecture layer table and dependency graph, the
+  `lib.rs` crate doc, the lists of shells without host tests, and the coverage
+  module count (still 22, now 32) left out `pnp_id`, `device_info`, or both;
+  the runbook still said a keyboard's LED state is written as soon as its
+  notification loop starts, contradicting its own PnP ID section; the log
+  reference listed two of the three vendor ID sources and said a longer
+  value logs `Truncated`, though an 8-byte one logs as malformed; the
+  `device_info.rs` comment gave a wrong reason for the 8-byte buffer; the
+  first-flash result list omitted the PnP ID line; ADR 0003 still gave
+  `lib.rs` as 166 lines; and the Diagnostics item lacked its
+  *(hardware evidence pending)* mark. Fixed: each statement now matches the
+  code, the graph has `ble::device_info` and `diagnostics` with their edges,
+  and the security table has a row for the PnP ID read.
 
 ## Needs Your Input
 
@@ -1384,6 +1401,7 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   ([PnP ID](docs/operations.md#peripheral-pnp-id)). No line carries an
   address, key, or report content. The board evidence for all of it is the
   first-flash run ([pairing and daily use](docs/first-flash.md#4-pairing-and-daily-use)).
+  *(hardware evidence pending)*
 
 ## Device Security And Provisioning
 

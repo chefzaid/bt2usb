@@ -6,12 +6,12 @@
 //! they can be unit-tested on the host with `cargo test` / `mask test`.
 //!
 //! The library compiles `hid`, `ble::{adv_parser, bond_table, conn_params,
-//! coordinator, reconnect, scan_list, long_read, management, messages}`, `ui::{controller, ui_logic,
+//! coordinator, reconnect, scan_list, long_read, management, messages, pnp_id}`, `ui::{controller, ui_logic,
 //! input_logic, layout, display_logic}` and
 //! `power_logic`, `diagnostics`, plus `storage::{codec, devices, framing, record}` under
 //! `cfg(test)` only, and `config`, whose capacities the pure modules size their buffers from.
 //! The SoftDevice-coupled modules (`ble::{multi_conn, slot_worker, slot_link,
-//! bonder, hid_client, scanner}`,
+//! bonder, hid_client, device_info, scanner}`,
 //! the `storage` shell, `usb`, `power`, `sd_setup`, `stack`,
 //! `ui::{display, buttons}`) are *not* included here.
 

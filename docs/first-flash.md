@@ -454,7 +454,8 @@ labels the issue `hardware-evidence`, and has these parts:
   built with, ELF SHA-256 (and HEX SHA-256 for a release package), Rust
   version, SoftDevice version and archive SHA-256.
 - **Setup:** board and revision, pin changes, supply, debug probe; peripheral
-  make, model, and firmware; host OS and version, BIOS/UEFI, monitor and hub.
+  make, model, and firmware, with each one's `slot N PnP ID: ...` line; host
+  OS and version, BIOS/UEFI, monitor and hub.
 - **Measurements:** the `softdevice RAM` value, the stack high-water after
   section 4, the latest `diagnostics:` line after sections 4 and 5, and
   reconnect and release timings from sections 4 and 5.

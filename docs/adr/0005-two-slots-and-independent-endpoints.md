@@ -206,7 +206,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Endpoint policy | `EndpointDelivery` (`publish`, `replay`, `failed`, `succeeded`, epochs) and `run_endpoint` in `delivery.rs` |
 | USB side | `dispatch_reports`, `hid_writer_task` (one dispatcher and three workers joined), and `EndpointMailbox` in [hid_device.rs](../../src/usb/hid_device.rs); `UsbPowerHandler` calls `replay_endpoints` from its `reset`, `configured`, and `suspended` callbacks, and `BootRequestHandler::set_protocol` in [host_requests.rs](../../src/usb/host_requests.rs) replays the keyboard or mouse endpoint |
 | Wake policy | `new_press` in [wake.rs](../../src/hid/wake.rs); `REMOTE_WAKE` and `run_usb_device` in `hid_device.rs` |
-| Keyboard LEDs | A `Watch` with `LED_CONSUMERS` receivers (one per link) in `host_requests.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state; `forward_host_leds` in [host_leds.rs](../../src/hid/host_leds.rs) writes the current state when each link starts, then every change |
+| Keyboard LEDs | A `Watch` with `LED_CONSUMERS` receivers (one per link) in `host_requests.rs`, so whichever slot holds a keyboard with an LED output report forwards host LED state; `forward_host_leds` in [host_leds.rs](../../src/hid/host_leds.rs) writes the current state when it starts on a link, after that link's PnP ID read, then every change |
 
 ### Verification Status
 

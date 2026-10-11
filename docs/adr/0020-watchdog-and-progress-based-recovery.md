@@ -47,7 +47,7 @@ disconnect event, and termination completes on acknowledgement or when the
 supervision timer expires (Vol 6, Part B, section 5.1.6; general knowledge), at
 most 4 s here ([ADR 0016](0016-bounded-peer-connection-parameters.md)). The
 secure wait has an application bound of 25 polls 200 ms apart
-(`wait_for_secure_link` in `slot_worker.rs`); discovery, Report
+(`wait_for_secure_link` in `slot_link.rs`); discovery, Report
 Map reads and LED writes are paced by the peer, bounded only per ATT step.
 
 Platform facts:
@@ -113,7 +113,7 @@ already rejected that trade; a host that stops polling or a suspended bus is
 not a fault. A slow peer must never reset the bridge: a peer-paced phase that
 needs a bound gets an application deadline that fails the link, raced like the
 command against `secure_and_discover` in `connect_and_run_secure`
-(`slot_worker.rs`).
+(`slot_link.rs`).
 
 **Feeding rule.** `watchdog_task` in a new `src/watchdog.rs`, spawned first,
 snapshots the six slots every `WDT_SUPERVISOR_PERIOD_MS` (1,000 ms) and calls
@@ -271,7 +271,7 @@ bytes of statics plus a task future under 200 bytes, one wake-up per second.
 | Policy | New `src/watchdog_logic.rs`, in the host library through `#[path]`: `LeaseSlot`, `Checkpoint`, budgets, `Lease`, `LeaseGuard`, `Supervisor`, `ResetCause`, `ResetRecord`, `boot_decision` |
 | Constants | `WDT_TIMEOUT_SECS`, `WDT_SUPERVISOR_PERIOD_MS`, `WDT_STABLE_UPTIME_SECS`, `WDT_MAX_EARLY_RESETS`, `ATT_TRANSACTION_TIMEOUT_MS` in [config.rs](../../src/config.rs) |
 | Shell | New `src/watchdog.rs`: lease statics, `arm`, `start`, `watchdog_task`, reset reason, `.uninit` record; boot steps and `HardFault` in [main.rs](../../src/main.rs) |
-| Leases | [multi_conn.rs](../../src/ble/multi_conn.rs), [slot_worker.rs](../../src/ble/slot_worker.rs), `run_usb_device` in [hid_device.rs](../../src/usb/hid_device.rs), the `main` tick |
+| Leases | [multi_conn.rs](../../src/ble/multi_conn.rs), [slot_worker.rs](../../src/ble/slot_worker.rs), [slot_link.rs](../../src/ble/slot_link.rs), `run_usb_device` in [hid_device.rs](../../src/usb/hid_device.rs), the `main` tick |
 | UI and images | Notice in [ui_logic.rs](../../src/ui/ui_logic.rs) and [display.rs](../../src/ui/display.rs); [selftest.rs](../../src/selftest.rs); [sim.rs](../../src/sim.rs) and `renode/bt2usb-sim.robot` |
 
 Host tests ([ADR 0003](0003-pure-core-and-task-shell.md)) cover every

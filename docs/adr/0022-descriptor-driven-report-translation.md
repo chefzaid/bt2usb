@@ -58,7 +58,7 @@ byte layouts:
   `softdevice_task` (`on_evt` and `run` in
   `vendor/nrf-softdevice/src/ble/gatt_client.rs`), so it must not await. The parsed descriptor lives in the
   `connect_and_run_secure` future (its `descriptor` binding in
-  [slot_worker.rs](../../src/ble/slot_worker.rs)), inside `ble_slot_task`,
+  [slot_link.rs](../../src/ble/slot_link.rs)), inside `ble_slot_task`,
   which embassy-executor 0.10 keeps in a static pool of `MAX_CONNECTIONS` (2)
   tasks (`pool_size = MAX_CONNECTIONS` in main.rs); there is no heap
   ([ADR 0010](0010-static-memory-layout.md)). Report Maps are at most 512
@@ -175,7 +175,7 @@ uses extraction. With a map, length never selects a decoder.
 | Level | Example | Result | Log |
 | --- | --- | --- | --- |
 | Map | Truncated item, unbalanced collection, nesting over 16, Report ID 0, an input item before the first Report ID of a map that uses IDs | Connection fails with `ReportMapInvalid` (`Unsupported HID map`), as today | As today |
-| Map | No input report feeds any kind | Same tag; the slot worker reports it and stops retrying, as for every failure but a background reconnect's `ConnectFailed` (the `SlotOutcome::Failed` arms of `connection_slot_task` in slot_worker.rs) | `HID map has no translatable report` |
+| Map | No input report feeds any kind | Same tag; the slot worker reports it and stops retrying, as for every failure but a background reconnect's `ConnectFailed`, which also covers a link that dropped during discovery (the `SlotOutcome::Failed` arms of `connection_slot_task` in slot_worker.rs) | `HID map has no translatable report` |
 | Report | Over 61 bytes, table full, a field over 32 bits or spanning more than four bytes, Delimiter in its items (today Delimiter fails the whole map) | Not subscribed; other reports work | `HID report {} not translated: {}` |
 | Kind | Absolute X or Y, two X fields, unsigned relative axis, array over 16 elements | Kind dropped from that report; other kinds translate | Same line |
 | Element | Key above `0xFF`, consumer above `0x0FFF`, button 6, out-of-range array value | Ignored, as released | None |

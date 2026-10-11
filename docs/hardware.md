@@ -279,7 +279,7 @@ Radio parameters that are not in `config.rs` come from the vendored
 | Connection attempt | Whitelist scan for the target at 160 / 80, timeout 6 s (`BLE_CONNECT_TIMEOUT_SECS`) |
 | Reconnect scan | Up to 6 s for an address that either slot's stored IRK resolves or that equals its stored address; a device heard for the other slot is handed over |
 | Connection parameters | 7.5–15 ms interval, slave latency 0, 4 s supervision timeout; a peripheral's later request is answered within 7.5–15 ms (up to 30 ms for one that asks only for slower intervals), latency at most 20, and a 1–4 s supervision timeout |
-| Security | `IoCapabilities::None` (Just Works), bonding allowed; before HID discovery the worker polls up to 25 times, 200 ms apart (about 5 s), for an encrypted security mode (`wait_for_secure_link` in [slot_worker.rs](../src/ble/slot_worker.rs)) |
+| Security | `IoCapabilities::None` (Just Works), bonding allowed; before HID discovery the worker polls up to 25 times, 200 ms apart (about 5 s), for an encrypted security mode (`wait_for_secure_link` in [slot_link.rs](../src/ble/slot_link.rs)) |
 
 One GAP scan or connection setup runs at a time (`GAP_PROCEDURE` in
 [ble/mod.rs](../src/ble/mod.rs)), because the SoftDevice rejects a second one.

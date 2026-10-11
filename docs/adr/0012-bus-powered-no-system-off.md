@@ -167,7 +167,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Power manager, activity flag, idle timeout | `PowerManager`, `note_hid_activity`, and `IDLE_TIMEOUT_SECS` in [power.rs](../../src/power.rs) |
 | State and screen policy | `next_power_state` and `screen_should_be_on` in [power_logic.rs](../../src/power_logic.rs) |
 | Screen timeout settings | `SCREEN_AUTO_OFF_ENABLED` and `SCREEN_AUTO_OFF_TIMEOUT_SECS` in [config.rs](../../src/config.rs) |
-| Connection parameters | `BLE_CONN_INTERVAL_MIN`, `BLE_CONN_INTERVAL_MAX`, and `BLE_SLAVE_LATENCY` in `config.rs`, applied in `connect_and_run_secure` ([slot_worker.rs](../../src/ble/slot_worker.rs)) |
+| Connection parameters | `BLE_CONN_INTERVAL_MIN`, `BLE_CONN_INTERVAL_MAX`, and `BLE_SLAVE_LATENCY` in `config.rs`, applied in `connect_and_run_secure` ([slot_link.rs](../../src/ble/slot_link.rs)) |
 | UI loop wiring | Suspend signal, housekeeping tick, and first-press handling in [main.rs](../../src/main.rs) |
 | Wake rule | `new_press` in [wake.rs](../../src/hid/wake.rs), applied per source by `InputAggregator::apply` in [aggregate.rs](../../src/hid/aggregate.rs) |
 | Suspend tracking and wake request | `UsbPowerHandler::suspended`, `dispatch_reports`, and `run_usb_device` in [hid_device.rs](../../src/usb/hid_device.rs) |

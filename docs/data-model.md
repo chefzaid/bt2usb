@@ -72,7 +72,7 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
 | USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs), [usb/host_requests.rs](../src/usb/host_requests.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
-| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/scan_list.rs](../src/ble/scan_list.rs), [ble/messages.rs](../src/ble/messages.rs) | 32 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs), 8 in [scan_list_tests.rs](../src/ble/scan_list_tests.rs), and 3 in `messages.rs`; Renode scenario | None recorded |
+| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/scan_list.rs](../src/ble/scan_list.rs), [ble/messages.rs](../src/ble/messages.rs) | 33 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs), 8 in [scan_list_tests.rs](../src/ble/scan_list_tests.rs), and 3 in `messages.rs`; Renode scenario | None recorded |
 | UI state model and request tracking | [ui/ui_logic.rs](../src/ui/ui_logic.rs), [ui/controller.rs](../src/ui/controller.rs) | 30 host tests in [ui_logic_tests.rs](../src/ui/ui_logic_tests.rs) and 16 in [controller_tests.rs](../src/ui/controller_tests.rs); Renode scenario | None recorded |
 
 [Testing](testing.md#known-verification-gaps) lists the missing fuzzing, fault
@@ -606,7 +606,7 @@ reports for the command
 | Variant | Meaning |
 | --- | --- |
 | `Connect { device, attempt }` | User-selected connection; pairing may be initiated; a failure is reported. Sent to an empty slot, or to the slot retrying the same device in the background, which it takes over: a link or attempt under way is kept, and a failure while the device's keys remain hands the slot back to the retry |
-| `Reconnect { device, attempt }` | Silent retry of a bonded peer, sent at power-up; never initiates pairing; checks that `Bonder` still holds the device's keys and resolves its current address before each attempt; waits `BLE_RECONNECT_BACKOFF_MS` between attempts until it connects, the keys are gone, an attempt fails with an error other than `ConnectFailed` (reported as `Error`), or another command arrives |
+| `Reconnect { device, attempt }` | Silent retry of a bonded peer, sent at power-up; never initiates pairing; checks that `Bonder` still holds the device's keys and resolves its current address before each attempt; waits `BLE_RECONNECT_BACKOFF_MS` between attempts until it connects, the keys are gone, an attempt fails with an error other than `ConnectFailed` (reported as `Error`; a link that drops during HID discovery fails as `ConnectFailed` and is retried), or another command arrives |
 | `Disconnect` | Close the link or stop retrying, then report `Disconnected` once |
 | `Quiesce(u32)` | Close the link, drop any retry target, then acknowledge with the same token |
 

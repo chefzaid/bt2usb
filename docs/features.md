@@ -43,7 +43,7 @@ are not translated.
 | Capability | Status | Source | More detail |
 | --- | --- | --- | --- |
 | BLE scan with HID filtering and name merging | Software-verified (parsing, merging) | [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/adv_parser.rs`](../src/ble/adv_parser.rs), [`ble/scan_list.rs`](../src/ble/scan_list.rs) | [Scanning](#scanning) |
-| Just Works bonding with encrypted links required | Implemented | [`ble/bonder.rs`](../src/ble/bonder.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
+| Just Works bonding with encrypted links required | Implemented | [`ble/bonder.rs`](../src/ble/bonder.rs), [`ble/slot_link.rs`](../src/ble/slot_link.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
 | Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/bonder.rs`](../src/ble/bonder.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
 | Report Map long reads up to 512 bytes | Software-verified (fragment assembly) | [`ble/long_read.rs`](../src/ble/long_read.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
@@ -251,9 +251,10 @@ keystroke on the PC are not measured yet
 ([TODO.md](../TODO.md#ble-central-and-pairing)). The application does not request a new pairing
 for a background attempt (a peer's own Security Request is the exception; see
 [Connection And Security](#connection-and-security)), and a failure to find,
-connect, or secure the device is retried silently. Other failures, such as a
-peer without a usable HID service or an unreadable Report Map, are shown as
-errors and stop that slot's retries.
+connect, or secure the device is retried silently, as is a link that drops
+while the bridge discovers its HID service. Other failures, such as a peer
+without a usable HID service or an unreadable Report Map on a link that stays
+up, are shown as errors and stop that slot's retries.
 
 Background retries also stop when:
 
@@ -261,8 +262,8 @@ Background retries also stop when:
   that is still retrying;
 - you start a scan while both slots are in use, connected or retrying, which
   disconnects both first;
-- the device connects and is secured but its HID discovery then fails, as
-  above.
+- the device connects and is secured but its HID discovery then fails while
+  the link stays up, as above.
 
 In these cases the record stays saved, and the device comes back when you
 connect it again from a scan, or after a restart if it is one of the two most
@@ -404,7 +405,8 @@ the Nordic SoftDevice S140 in the central role
 decisions are pure reducers in [`ble/coordinator.rs`](../src/ble/coordinator.rs)
 covered by host tests; the tasks that perform them are in
 [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) (the coordinator task) and
-[`ble/slot_worker.rs`](../src/ble/slot_worker.rs) (the slot workers), and the
+[`ble/slot_worker.rs`](../src/ble/slot_worker.rs) and
+[`ble/slot_link.rs`](../src/ble/slot_link.rs) (the slot workers), and the
 security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
 ([ADR 0003](adr/0003-pure-core-and-task-shell.md)).
 
@@ -483,7 +485,9 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   per device, plus the Report Map (`0x2A4B`) and Protocol Mode (`0x2A4E`)
   characteristics. If Protocol Mode exists, the bridge writes Report Protocol.
   Discovery failures are logged with their cause as
-  `HID discovery failed: {:?}` and shown as `No HID service`.
+  `HID discovery failed: {:?}` and shown as `No HID service`. A failure
+  because the link dropped is shown as `Connect failed` instead, and a
+  background reconnect retries it.
 - The Report Map is read by offset across MTU boundaries into a 512-byte
   buffer. A short final fragment ends the read, as does an Invalid Offset
   response at an exact fragment boundary or an Attribute Not Long response
@@ -923,8 +927,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 380 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 374 unit tests, the 3
+- The source contains 381 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 375 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), and
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   all of which run with `mask test`.

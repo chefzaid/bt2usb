@@ -734,7 +734,9 @@ Files:
   SoftDevice runs one such procedure at a time.
 - [ble/slot_worker.rs](../src/ble/slot_worker.rs): handle a new `SlotCommand`
   in `connection_slot_task`, the per-slot worker, and send a new `SlotEvent`
-  from it.
+  from it. A command that should reach an attempt in progress is also handled
+  where [ble/slot_link.rs](../src/ble/slot_link.rs) races each phase against
+  the slot's commands (`take_over`).
 - [ble/management.rs](../src/ble/management.rs): targets, quiescence, and
   commit primitives for anything that changes stored peers.
 - [ui/controller.rs](../src/ui/controller.rs): apply a new event in

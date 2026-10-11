@@ -137,7 +137,7 @@ Positive:
 Negative:
 
 - The shells are not host-tested. That includes `multi_conn.rs`,
-  `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`,
+  `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`,
   `usb/hid_device.rs`, `usb/host_requests.rs`, `ui/display.rs`, `power.rs`,
   and the `storage.rs` shell (flash I/O, write retries, and the conversion to
   SoftDevice types). Since 2026-10-10 the store's load, merge, and eviction
@@ -203,10 +203,10 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 380 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 374 unit tests, 3 integration tests,
+  finds 381 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 375 unit tests, 3 integration tests,
   and 3 glyph-table tests, which passed on 2026-10-11 (the
-  [retry-takeover review fixes record](../testing.md#validation-record--2026-10-11-retry-takeover-review-fixes);
+  [discovery link-drop record](../testing.md#validation-record--2026-10-11-link-dropped-during-discovery);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

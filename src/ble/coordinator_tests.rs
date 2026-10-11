@@ -338,3 +338,25 @@ fn disconnect_while_reconnecting_targets_the_slot() {
     let acts = plan_disconnect(&m);
     assert_eq!(acts.as_slice(), &[Action::DisconnectSlot(0)]);
 }
+
+#[test]
+fn a_link_that_drops_during_setup_failed_to_connect() {
+    let tags = [
+        ErrorTag::ScanFailed,
+        ErrorTag::ConnectFailed,
+        ErrorTag::HidNotFound,
+        ErrorTag::NotifyFailed,
+        ErrorTag::StorageFailed,
+        ErrorTag::BondRefused,
+        ErrorTag::ManagementFailed,
+        ErrorTag::ReportMapReadFailed,
+        ErrorTag::ReportMapTooLarge,
+        ErrorTag::ReportMapInvalid,
+    ];
+    for tag in tags {
+        // A discovery failure on a link still up keeps its own error...
+        assert_eq!(tag.for_failed_setup(true), tag);
+        // ...while one whose link dropped is retried like a failed connect.
+        assert_eq!(tag.for_failed_setup(false), ErrorTag::ConnectFailed);
+    }
+}

@@ -42,6 +42,8 @@ pub mod multi_conn;
 #[cfg(feature = "embedded")]
 pub mod scanner;
 #[cfg(feature = "embedded")]
+pub mod slot_link;
+#[cfg(feature = "embedded")]
 pub mod slot_worker;
 
 #[cfg(feature = "embedded")]

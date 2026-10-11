@@ -75,7 +75,8 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives |
 | [ble/messages.rs](../src/ble/messages.rs) | Pure core | UI-to-coordinator commands and coordinator-to-UI events, generic over the address type |
 | [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator task, slot command and event types, user scans, saved-device management |
-| [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | Connection worker run once per slot: connect, secure, HID client, background reconnect |
+| [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | Connection worker run once per slot: serves the coordinator's commands, reports slot events, retries in the background |
+| [ble/slot_link.rs](../src/ble/slot_link.rs) | Board shell | One attempt of a slot worker: connect, secure, discover HID, and run the notification loop, racing each phase against the slot's commands |
 | [ble/bonder.rs](../src/ble/bonder.rs) | Board shell | SoftDevice security handler: bond storage and the answer to connection-parameter requests |
 | [ble/hid_client.rs](../src/ble/hid_client.rs) | Board shell | GATT discovery, subscriptions, HID classification, notification loop |
 | [ble/scanner.rs](../src/ble/scanner.rs) | Board shell | User scan with HID advertisement filtering, and the shared reconnect scan |
@@ -111,7 +112,7 @@ module that imports a hardware crate stops `cargo test` from building.
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
 | Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, scan_list, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
-| Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
+| Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
@@ -133,7 +134,7 @@ flowchart TD
     end
     subgraph shell [Board shell]
         MC["ble::multi_conn"]
-        SW["ble::slot_worker"]
+        SW["ble::slot_worker and slot_link"]
         BND["ble::bonder"]
         HC["ble::hid_client"]
         SC["ble::scanner"]
@@ -394,7 +395,8 @@ which can be too late for a firmware setup key.
    and sent `SlotCommand::Connect`, or, with no free slot, `ConnectFailed` is
    reported. Each reservation gets a new attempt number, which the command
    carries.
-6. The worker in [slot_worker.rs](../src/ble/slot_worker.rs) logs
+6. The worker in [slot_worker.rs](../src/ble/slot_worker.rs), through
+   `connect_and_run_secure` in [slot_link.rs](../src/ble/slot_link.rs), logs
    `"slot {} connecting to {}"`, takes the GAP lock, and calls
    `central::connect_with_security` with a whitelist of that one address, a
    6-second scan timeout (`BLE_CONNECT_TIMEOUT_SECS`) at the fast duty cycle
@@ -583,9 +585,18 @@ flowchart TD
   Selecting the device from a scan ends the wait on Connecting with
   `Connect failed` (see the takeover below); forgetting it and pairing again
   recovers it.
+- A link that drops while its HID service is discovered or subscribed, for
+  example a keyboard going back to sleep right after the key press that woke
+  it, fails as `ConnectFailed` (`"slot {} link dropped during HID
+  discovery"`), so a silent attempt retries it like a peer that never
+  connected. The vendored crate marks the link disconnected before it fails
+  the pending GATT procedure, so `connect_and_run_secure` reads the link's
+  handle after the failure (`ErrorTag::for_failed_setup`). A peer that fails
+  discovery on a link that stays up and then disconnects at once can be
+  taken for a dropped link and retried.
 - Any other error during a silent attempt (`HidNotFound`, `NotifyFailed`, or a
-  Report Map error) is reported to the coordinator, which releases the slot and
-  shows the error; that slot stops retrying.
+  Report Map error on a link that is still up) is reported to the coordinator,
+  which releases the slot and shows the error; that slot stops retrying.
 - On link loss the worker first sends `HidEvent::Disconnected` so the
   aggregator releases that source's held input, then `SlotEvent::LinkLost`.
   `on_slot_link_lost` keeps the slot reserved in the connecting state, under
@@ -1239,10 +1250,10 @@ should do about each message is in
 | Path | Bound | On failure | Source |
 | --- | --- | --- | --- |
 | User scan | 8 s window, 10 s backstop | Results so far are used; a SoftDevice error shows "Scan failed" | [scanner.rs](../src/ble/scanner.rs) |
-| Connect attempt | 6 s whitelist scan | User connect: error, and a connection that took over a background retry goes back to it while the device's keys remain. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs) |
+| Connect attempt | 6 s whitelist scan | User connect: error, and a connection that took over a background retry goes back to it while the device's keys remain. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs), [slot_link.rs](../src/ble/slot_link.rs) |
 | Reconnect scan | 6 s; fast duty cycle for 30 s after power-up or a lost link | Retry after 500 ms, or at once when the other slot's scan sees the device | [scanner.rs](../src/ble/scanner.rs), [reconnect.rs](../src/ble/reconnect.rs) |
-| Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [slot_worker.rs](../src/ble/slot_worker.rs) |
-| GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |
+| Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [slot_link.rs](../src/ble/slot_link.rs) |
+| GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. When the link itself dropped, any discovery failure becomes `ConnectFailed`, which a background reconnect retries. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |
 | Flash write | 3 attempts, 20 ms apart | `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
 | USB endpoint write | 100 ms deadline | Replay current state; back off 20 ms doubling to 1 s | [delivery.rs](../src/hid/delivery.rs) |
 | OLED operation | 500 ms, then STOP and keep waiting | Re-initialize after 1 s doubling to 30 s | [display.rs](../src/ui/display.rs), [display_logic.rs](../src/ui/display_logic.rs) |

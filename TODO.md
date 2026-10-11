@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 45 | 2 | 0 |
+| [FIXME](#fixme) | 46 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **132** | **73** | **21** |
+| **Total** | **133** | **72** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -653,7 +653,7 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   documents still naming the old boot selection or `coordinator.rs` for the
   scan list, all corrected
   ([validation record](docs/testing.md#validation-record--2026-10-11-retry-takeover-review-fixes)).
-- [ ] **P2** **A background reconnect that loses its link during HID
+- [x] **P2** **A background reconnect that loses its link during HID
   discovery stops retrying.** Found while fixing "The retry takeover raced the
   slot's own events". A silent attempt that connects and secures the link but
   then fails HID discovery reports the error (`No HID service`,
@@ -666,6 +666,18 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the bridge restarts. Accept when a silent attempt whose link dropped during
   discovery is retried like a connection failure, a discovery failure on an
   intact link is still reported, and the documents say which is which.
+  Fixed: when securing or discovering fails, `connect_and_run_secure` reads
+  the link's handle before closing it; the vendored crate marks the link
+  disconnected before it fails the pending GATT procedure, so a link already
+  gone dropped during the step. `ErrorTag::for_failed_setup`
+  (`src/ble/coordinator.rs`, one host test) then reports `ConnectFailed`,
+  which a silent attempt retries, and logs
+  `slot {} link dropped during HID discovery`; a failure on a link still up
+  keeps its own error. A selection whose link drops shows `Connect failed`
+  instead of an HID error. To make room under 500 lines, one attempt's
+  connect, secure, discover, and run phases moved from
+  `src/ble/slot_worker.rs` to `src/ble/slot_link.rs`
+  ([architecture](docs/architecture.md#background-reconnect)).
 - [ ] **P2** **Keys held in RAM and saved records are evicted separately.**
   Found by the independent review of "The retry takeover raced the slot's own
   events". `Bonder` keeps the keys of up to four peers in RAM, loaded from
@@ -740,7 +752,7 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [x] Serialize SoftDevice scan and connection setup with one shared GAP
   procedure lock, and bound each connection attempt by
   `BLE_CONNECT_TIMEOUT_SECS` (6 s) so a user scan does not wait indefinitely
-  behind a reconnect (`src/ble/mod.rs` `GAP_PROCEDURE`, `src/ble/slot_worker.rs`,
+  behind a reconnect (`src/ble/mod.rs` `GAP_PROCEDURE`, `src/ble/slot_link.rs`,
   `src/config.rs`). *(hardware evidence pending)*
 - [x] Stored pairing/bond records, boot reconnect, identity-key matching, and
   retries after link loss; a lost or not-yet-seen paired device is retried,
@@ -755,13 +767,13 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [x] Require encrypted links before HID discovery, restrict
   application-initiated fresh pairing to explicit user connection attempts, and
   handle cancellation during owned-link security/discovery
-  (`src/ble/slot_worker.rs`). *(hardware evidence pending)*
+  (`src/ble/slot_link.rs`). *(hardware evidence pending)*
 - [x] Preserve UTF-8 advertising names, merge scan-response names, and release
   the radio procedure lock before delivering UI scan results (`src/ble/`).
   *(hardware evidence pending)*
 - [x] Discover a BLE keyboard's LED output report during HID discovery and write
   each host LED change to it from the slot that owns the link
-  (`src/ble/hid_client.rs` `write_leds`, `src/ble/slot_worker.rs`; the USB side
+  (`src/ble/hid_client.rs` `write_leds`, `src/ble/slot_link.rs`; the USB side
   is under [USB HID Device](#usb-hid-device)). *(hardware evidence pending)*
 - [x] Read complete GATT Report Maps by offset up to 512 bytes, distinguish
   missing maps from invalid/unreadable/oversized maps, and restrict legacy
@@ -1010,7 +1022,7 @@ workers. Context: [architecture](docs/architecture.md#hid-path-and-limits),
 - [x] Release every key, mouse button, and consumer usage a BLE link was
   holding when that link ends for any reason: the slot worker sends
   `HidEvent::Disconnected` after its run phase, so a lost keyboard cannot leave
-  a key repeating on the host (`src/ble/slot_worker.rs`, `src/hid/aggregate.rs`).
+  a key repeating on the host (`src/ble/slot_link.rs`, `src/hid/aggregate.rs`).
   *(hardware evidence pending)*
 - [ ] **P0** **Multi-device aggregation hardware acceptance.** *(hardware)*
   Validate the implemented per-source key/modifier/button unions and
@@ -1426,8 +1438,9 @@ Host tests, simulation, and code-health work. Context:
   tests ([testing](docs/testing.md#known-verification-gaps)).
 - [ ] **P1** **Host tests for the I/O shells.** The connection workers,
   security handler, GATT HID client, USB device, and display driver
-  (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/bonder.rs`,
-  `src/ble/hid_client.rs`, `src/usb/hid_device.rs`, `src/usb/host_requests.rs`,
+  (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/slot_link.rs`,
+  `src/ble/bonder.rs`, `src/ble/hid_client.rs`, `src/usb/hid_device.rs`,
+  `src/usb/host_requests.rs`,
   `src/ui/display.rs`) have no host tests; only the pure modules they call do.
   The storage shell (`src/storage.rs`) is down to flash I/O and SoftDevice type
   conversion since the device-store move. Move remaining decisions into

@@ -297,6 +297,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `peer asked for connection parameters {}; granting {}` | The request was bounded to the [ADR 0016](adr/0016-bounded-peer-connection-parameters.md) limits; the granted interval is still inside the range the peripheral asked for | None |
 | warn | `peer asked for connection parameters {}; granting {}, outside its interval range` | The granted interval is outside the requested range: the peripheral's fastest requested interval is slower than 30 ms, or its whole range is below the Core's 7.5 ms minimum | If the peripheral then disconnects, record its name and this line for the compatibility baseline |
 | warn | `slot {} failed to secure BLE link` | Encryption or pairing failed, the link dropped, or security did not complete within 5 s | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
+| info | `slot {} link dropped during HID discovery` | The link dropped while its HID service was discovered or subscribed, for example a keyboard going back to sleep; the attempt failed as `Connect failed` | None for a background reconnect, which retries; for a selection, select the device again while it is awake |
 | info | `slot {} link lost; reconnecting` | An established link dropped; held input was released | None; retries follow |
 | info | `slot {} link lost; no keys to reconnect` | An established link dropped, and the bridge holds no keys for that device (its pairing showed `Pairing not saved`, the peripheral paired without bonding, or a newer pairing evicted its keys); held input was released and the slot was freed | Select the device from a scan to pair it again |
 | info | `slot {} has no keys to reconnect` | A background reconnect stopped before an attempt because the bridge no longer holds the device's keys: a newer pairing bonded while four were held and dropped the oldest, whether or not that device was then saved; the slot was freed | Select the device from a scan to pair it again |
@@ -575,10 +576,11 @@ reboot or after it slept.
   two evictions are not yet kept in step ([FIXME](../TODO.md#fixme)).
 - Retries were stopped: DOWN on the Connected screen disconnects every slot; a
   scan started while both slots were occupied disconnects both first; Forget or
-  Factory reset stops the affected slots. A background reconnect retries only
-  connection and security failures; a later failure during HID discovery or
-  subscription (for example `No HID service`) ends that slot's retries and shows
-  the error.
+  Factory reset stops the affected slots. A background reconnect retries
+  connection and security failures, and a link that drops during HID
+  discovery (`slot N link dropped during HID discovery`); a failure during HID
+  discovery or subscription on a link that stays up (for example
+  `No HID service`) ends that slot's retries and shows the error.
 - The peer was never saved: the store is read-only or the save failed
   (`Storage failed`), or it was evicted
   (`Paired device store full - evicting oldest entry`).
@@ -824,7 +826,9 @@ timed out, it has no notifiable input report, or its Report Map is over 512
 bytes or rejected by the parser in
 [report_protocol.rs](../src/hid/report_protocol.rs) (malformed items,
 unbalanced collections, alternative usage sets, or no keyboard, mouse, or
-consumer input). The bridge rejects these rather than guessing.
+consumer input). The bridge rejects these rather than guessing. A link that
+drops during discovery is not one of these: it shows `Connect failed` and logs
+`slot N link dropped during HID discovery`.
 
 Field layouts are a different case. The parser keeps only routing metadata, so
 an NKRO keyboard or a mouse with 16-bit axes connects normally. Its reports are

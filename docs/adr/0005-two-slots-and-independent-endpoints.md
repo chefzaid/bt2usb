@@ -196,7 +196,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Concern | Where |
 | --- | --- |
 | Slot count and reducers | `BLE_MAX_CONNECTIONS` in [config.rs](../../src/config.rs), which sizes every per-link array, pool, and SoftDevice count; `MAX_CONNECTIONS` and `ConnManager` in [coordinator.rs](../../src/ble/coordinator.rs) |
-| Slot workers, boot reconnect, link end | `connection_slot_task` and `connect_and_run_secure` in [slot_worker.rs](../../src/ble/slot_worker.rs), and `ble_task` in [multi_conn.rs](../../src/ble/multi_conn.rs); the log lines `slot {} link lost; reconnecting` and, when `Bonder` holds no keys for the device and the slot is freed instead, `slot {} link lost; no keys to reconnect` |
+| Slot workers, boot reconnect, link end | `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs), `connect_and_run_secure` in [slot_link.rs](../../src/ble/slot_link.rs), and `ble_task` in [multi_conn.rs](../../src/ble/multi_conn.rs); the log lines `slot {} link lost; reconnecting` and, when `Bonder` holds no keys for the device and the slot is freed instead, `slot {} link lost; no keys to reconnect` |
 | Shared reconnect scan and address resolution ([ADR 0015](0015-shared-reconnect-scan.md)) | `ReconnectTable` and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs); `find_saved_peer` in [scanner.rs](../../src/ble/scanner.rs) |
 | GAP serialization | `GAP_PROCEDURE` in [ble/mod.rs](../../src/ble/mod.rs) |
 | Timing constants | `BLE_CONNECT_TIMEOUT_SECS`, `BLE_RECONNECT_BACKOFF_MS`, `BLE_CONN_EVENT_LENGTH`, `BLE_FAST_SCAN_INTERVAL`, `BLE_FAST_SCAN_WINDOW`, `BLE_FAST_RECONNECT_SECS` in [config.rs](../../src/config.rs) |

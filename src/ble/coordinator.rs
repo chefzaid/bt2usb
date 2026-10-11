@@ -41,6 +41,20 @@ pub enum ErrorTag {
     ReportMapInvalid,
 }
 
+impl ErrorTag {
+    /// The error a slot reports when securing a new link or discovering its
+    /// HID service fails. A link that dropped meanwhile failed to connect, as
+    /// if it had never come up, which a background reconnect retries; on a
+    /// link still up the step's own error stands.
+    pub fn for_failed_setup(self, link_up: bool) -> Self {
+        if link_up {
+            self
+        } else {
+            Self::ConnectFailed
+        }
+    }
+}
+
 /// Minimal device identity the coordinator needs.
 ///
 /// Generic over the address type `A` so host tests don't depend on the

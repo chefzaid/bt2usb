@@ -141,7 +141,7 @@ implemented in the source cited; none is hardware-verified.
 
 | Actor | Threat | Current mitigation | Gap |
 | --- | --- | --- | --- |
-| Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [slot_worker.rs](../src/ble/slot_worker.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
+| Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [slot_link.rs](../src/ble/slot_link.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Advertise a look-alike HID device so the user selects and pairs it, then inject input | Pairing only after an explicit Connect from the device list (`allow_pairing`, [slot_worker.rs](../src/ble/slot_worker.rs)); only advertisements carrying the HID UUID are listed (`merge_advertisement` in [scan_list.rs](../src/ble/scan_list.rs)) | Names are attacker-chosen and the list shows names only; no confirmation code, allowlist, or pairing window. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Act as a man in the middle during pairing | None: `IoCapabilities::None` offers no user-confirmed authentication | TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing); [ADR 0011](adr/0011-interim-just-works-pairing.md) records the interim decision |
 | Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. Since 2026-10-11 a background reconnect runs only while `Bonder` holds the device's keys, so a peer's Security Request on it is answered by encrypting with them; if a pairing on the other slot drops those keys while an attempt is under way or while the link it opened is up, a Security Request makes the vendored crate request pairing; untested. TODO: [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing) |
@@ -588,8 +588,8 @@ Not covered by automated tests:
 - the `src/storage.rs` shell: flash reads and writes, write retries, the
   conversion to SoftDevice address and key types, and IRK resolution through
   the SoftDevice
-- USB `set_report` validation and the `slot_worker.rs` and `bonder.rs`
-  security flow (encryption wait, `allow_pairing`, bond replacement)
+- USB `set_report` validation and the `slot_link.rs`, `slot_worker.rs`, and
+  `bonder.rs` security flow (encryption wait, `allow_pairing`, bond replacement)
 - fuzzing, power-loss injection, and any on-air security test
 
 Hardware security acceptance (sniffed pairing, spoofed reconnect, forgotten

@@ -159,7 +159,9 @@ grows past it splits again into a child module that shares its helpers (as
 pure module splits by responsibility (as `scan_list.rs`, the scan result list,
 left `coordinator.rs` with its tests on 2026-10-11), and a shell module
 splits by task or handler (as `multi_conn.rs` gave up `slot_worker.rs` and
-`bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10).
+`bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10,
+and `slot_worker.rs` gave up one attempt's connect, secure, discover, and run
+phases to `slot_link.rs` on 2026-10-11).
 The device-store tests split the same way when the store moved into host
 code: `devices_tests.rs` holds the list rules and `devices_format_tests.rs`,
 a child module of it that shares its helpers, the codec and load tests.

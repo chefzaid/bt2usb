@@ -294,7 +294,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `bt2usb firmware starting: version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}` | `main` started; names the build | Quote the line in a report; twice in a row on the first boot after a UICR erase is expected ([boot sequence](#boot-sequence)) |
 | info | `stack guard: {=u32} bytes at {=u32:#010x}..{=u32:#010x}` | The MPU stack guard is on: its size and address range | None; see [memory checks](#stack-and-memory-checks) |
 | warn | `stack guard off: {}` (`BadSize`, `StackInUse`, or `NoMpu`) | The guard could not be turned on, so an overflow would corrupt statics silently | Report it with the boot lines; `BadSize` means `STACK_GUARD_BYTES` is not a power of two of at least 32 |
-| error | `stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The stack ran into the guard and the core stopped. With the stack pointer at or above the guard's base nothing below the guard was overwritten; below the base, a frame stepped over the guard and the RAM below it is suspect | [Stack overflow incident](#the-stack-overflows) |
+| error | `stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The stack ran into the guard and the core stopped. With the stack pointer a few hundred bytes or more above the guard's base nothing below the guard was overwritten; closer to the base the fault handler's own frame may have reached the statics, and below the base a frame stepped over the guard, so the RAM below it is suspect | [Stack overflow incident](#the-stack-overflows) |
 | warn | `previous boot: stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The boot before this one ended in a stack overflow; the values are the ones the fault handler stored. Logged once, after a reset that kept RAM | [Stack overflow incident](#the-stack-overflows); expected once after the self-test's deliberate overflow |
 | info | `reset reason: {}` | The causes of the last reset, joined with ` + `, and any undefined register bits | See [Reset Reasons](#reset-reasons) |
 | info | `softdevice RAM: {:?} bytes` (vendor) | RAM the SoftDevice configuration needs | Record it; must be at most 24576 |
@@ -556,8 +556,14 @@ close the stack had come; compare it with the paths that ran just before, such
 as a scan with both slots reconnecting or a flash save. Where the reported
 stack pointer lies says how far the damage goes:
 
-- Inside the guard (`0x<base>` up to `0x<top>`), or just above its top with a
-  PC: the guard stopped the overflow, and the statics below it are intact.
+- Inside the guard (`0x<base>` up to `0x<top>`) at least a few hundred bytes
+  above `0x<base>`, or just above its top with a PC: the guard stopped the
+  overflow, and the statics below it are intact.
+- Inside the guard but within a few hundred bytes of `0x<base>`: the guard
+  stopped the overflow, but the fault handler runs on the guard's bytes with
+  the MPU off, and its own frame may have reached the statics just below
+  the guard ([ADR 0026](adr/0026-mpu-stack-guard.md)). Treat them as
+  suspect.
 - Below `0x<base>`: one frame larger than the stack left stepped over the
   guard and was written into the RAM below it before anything faulted. The
   statics there, the defmt RTT buffer included, are suspect, and so is the

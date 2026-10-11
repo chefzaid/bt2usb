@@ -943,7 +943,12 @@ takes it from a SELECT already held, and stops the recursion by the guard's
 address; the simulation fences its UART buffer before the DMA starts; and
 the docs the review named now match the code. The checks ran locally on
 Linux in a container, on the working tree just before that commit; nothing
-ran on a board.
+ran on a board. A second, three-part check of that commit found two doc
+errors, fixed in a doc-only follow-up: the self-test's next largest frame
+is 1,080 bytes, not 1,540 (the scan had merged two functions of the same
+name), and the statics are intact only when the reported stack pointer is
+at least the fault handler's own stack use above the guard's base, not
+anywhere inside the guard.
 
 | Check | Environment | Result |
 | --- | --- | --- |
@@ -953,7 +958,7 @@ ran on a board.
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
 | Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
 | Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge `.text` 125,156 bytes with `DEFMT_LOG=debug` and 124,144 with `DEFMT_LOG=info` (+48 each since `a51cec1`); `.bss` 25,380 and `.uninit` 1,048 unchanged, so `_stack_end` stays `0x2000CDA4` and the guard `0x2000D000`–`0x2000E000` |
-| Largest frames | `llvm-objdump -d` of the images `mask` builds (release at `DEFMT_LOG=debug`; the simulation's debug build), each function's saved registers plus every prologue `sub sp` immediate, cross-checked against the sum of every `sub sp` in the function, functions named from DWARF | Bridge 2,704 bytes (the display task's poll: 36 saved, 2,668 locals); self-test 4,480 (its main task's poll, whose prologue has two `sub sp`), next largest at most 1,540; simulation 5,856 (its main task's poll), next 3,024 (`apply`). The two frames above the 4 KiB guard are main tasks the executor polls only from the top of the stack. `overflow_stack` is 536 bytes (24 saved, 512 locals) and compares its copy's address, the frame's lowest, with the guard's top before recursing. The `ba13354` record's 2,668 and 3,412 counted only one `sub sp` per function, no saved registers, and a `DEFMT_LOG=info` self-test |
+| Largest frames | `llvm-objdump -d` of the images `mask` builds (release at `DEFMT_LOG=debug`; the simulation's debug build), each function's saved registers plus every prologue `sub sp` immediate, cross-checked against the sum of every `sub sp` in the function, functions named from DWARF | Bridge 2,704 bytes (the display task's poll: 36 saved, 2,668 locals); self-test 4,480 (its main task's poll, whose prologue has two `sub sp`), next largest 1,080 (a `Pin<P> as Future>::poll` instance: 36 saved, 1,044 locals); simulation 5,856 (its main task's poll), next 3,024 (`apply`). The two frames above the 4 KiB guard are main tasks the executor polls only from the top of the stack. `overflow_stack` is 536 bytes (24 saved, 512 locals) and compares its copy's address, the frame's lowest, with the guard's top before recursing. The `ba13354` record's 2,668 and 3,412 counted only one `sub sp` per function, no saved registers, and a `DEFMT_LOG=info` self-test |
 | Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
 | Documentation checker | `python3 scripts/check_docs.py` | Passed: 46 Markdown files |
 | Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 17.54 s, the stack overflow case in 7.62 s (Renode reported `stack pointer 0x20004000`, the guard's top, and `PC not stacked`), and the model checks in 0.63 s, with the local platform copy without `ApplySVD` described in an earlier record |

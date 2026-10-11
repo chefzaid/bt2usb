@@ -77,7 +77,7 @@ Facts that shaped the decision:
   self-test, and 5,856 in the simulation; DWARF names each. The two above
   4 KiB are each image's main task, which the executor polls only from its
   loop at the top of the stack, so they are never entered near the guard.
-  Every other frame is at most 1,540 bytes in the self-test and 3,024 in the
+  Every other frame is at most 1,080 bytes in the self-test and 3,024 in the
   simulation. A guard of 4 KiB therefore cannot be stepped over by one
   firmware frame entered near it: every byte of such a frame that starts
   above the guard lies above the guard's base. The figures are a 2026-10-11
@@ -233,9 +233,11 @@ Positive:
 
 - An overflow now stops the bridge with
   `stack overflow: stack pointer ..., guard ..., PC not stacked` instead of
-  corrupting statics. When the reported stack pointer is at or above the
-  guard's base, the statics below the guard are intact when it stops; one
-  below the base means a frame stepped over the guard.
+  corrupting statics. When the reported stack pointer is at least the
+  handler's own stack use (a few hundred bytes) above the guard's base, the
+  statics below the guard are intact when it stops; closer to the base the
+  handler's frame may reach them (see Negative), and a stack pointer below
+  the base means a frame stepped over the guard.
 - The self-test shows on each board that the region is still programmed after
   the SoftDevice has run, and can show a real overflow on demand.
 - `stack high-water: X of Y bytes` reports the usable stack (above the guard)

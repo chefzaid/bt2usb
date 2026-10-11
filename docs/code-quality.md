@@ -956,7 +956,7 @@ assert. The [hardware guide](hardware.md#memory-layout) and
   frame at 2,704 bytes in the bridge (the display task's poll). The
   self-test's main task frame (4,480 bytes) and the simulation's (5,856) are
   larger than the guard, but the executor polls them only from the top of
-  the stack; every other frame is at most 1,540 bytes in the self-test and
+  the stack; every other frame is at most 1,080 bytes in the self-test and
   3,024 in the simulation. No check keeps frames entered deep in the stack
   under the guard's 4 KiB, and the SoftDevice's frames are not visible.
 - **SoftDevice RAM.** The 24 KiB reservation is not derived from a

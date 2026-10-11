@@ -61,7 +61,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [selftest.rs](../src/selftest.rs) | Entry point | Staged board bring-up image |
 | [lib.rs](../src/lib.rs) | Host crate | Host-test entry point for hardware-free logic |
 | [config.rs](../src/config.rs) | Constants | Timing, scan, connection, USB identity, and storage constants |
-| [diagnostics.rs](../src/diagnostics.rs) | Pure core | The build identity the boot line reports (version, source commit, profile, `DEFMT_LOG` filter) and the decoding of `POWER.RESETREAS` into reset causes |
+| [diagnostics.rs](../src/diagnostics.rs) | Pure core | The build identity the boot line reports (version, source commit, profile, `DEFMT_LOG` filter), the decoding of `POWER.RESETREAS` into reset causes, and the saturating event counters (`COUNTERS`) with the policy for when the UI loop logs them (`CounterReport`) |
 | [build.rs](../build.rs) | Build script | Writes the linker memory layout with the storage bounds, and passes the build identity (git commit, profile, `DEFMT_LOG`) to the crate |
 | [sd_setup.rs](../src/sd_setup.rs) | Board shell | Shared SoftDevice setup and USB power events |
 | [power.rs](../src/power.rs) | Board shell | Activity tracking and power state over `embassy-time` |
@@ -1128,7 +1128,10 @@ cooperative: a task runs until it awaits, and every task shares the one stack,
 whose deepest use is painted and measured by [stack.rs](../src/stack.rs) and
 logged from the 1-second tick, whenever it grows, as
 `"stack high-water: {} of {} bytes"`
-([ADR 0010](adr/0010-static-memory-layout.md)). There is no heap; buffers are
+([ADR 0010](adr/0010-static-memory-layout.md)). The same tick logs the event
+counters as `"diagnostics: {}"` when they change, at most once per
+`DIAGNOSTICS_REPORT_INTERVAL_SECS` (60 s)
+([event counters](operations.md#event-counters)). There is no heap; buffers are
 `static`, `StaticCell`, or fixed-capacity `heapless` types.
 
 The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
@@ -1210,6 +1213,7 @@ The other shared primitives:
 | Notification `wake` | `Signal<()>` per connection | GATT callback → drain future | Wake-up |
 | `GAP_PROCEDURE` | Async mutex | Scanner and both workers | One GAP scan or connect at a time |
 | `DEVICE_STORE` | Async mutex | Coordinator | Pairing cache |
+| `COUNTERS` | `AtomicU32` per counter | Connection workers, notification loops, endpoint mailboxes, store → UI loop | Saturating counts since boot; each bump is one atomic update, so no lock |
 
 Ownership of the data behind them is listed in the
 [data model](data-model.md#data-ownership-rules).
@@ -1258,6 +1262,10 @@ produces no `StoreError` but disables writes and raises `StorageFailed` once at
 boot. A silent reconnect attempt that fails with `ConnectFailed` is retried
 without telling the UI. Display faults never become tags: the display task logs
 them and retries with backoff while the rest of the bridge keeps running.
+Lost links, background reconnect attempts and failures, coalesced and
+overflowed reports, and failed USB, LED, and flash writes are also counted in
+`diagnostics::COUNTERS`, which the UI loop logs and nothing acts on
+([event counters](operations.md#event-counters)).
 
 The tag, every cause that raises it, and its OLED text are defined in one
 place, the [data model](data-model.md#error-tags-and-ui-messages); what a user

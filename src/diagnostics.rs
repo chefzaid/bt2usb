@@ -1,14 +1,19 @@
-//! What a defect report needs to name the firmware and the last reset, without
-//! any input or key material.
+//! What a defect report needs to name the firmware, the last reset, and how
+//! often things went wrong since, without any input or key material.
 //!
 //! The firmware logs the build's identity and the decoded reset reason at
 //! boot (`src/main.rs`), so a log interval says which code wrote it and why
 //! the chip last restarted. The build script supplies the identity
 //! (`build.rs`); the reset reason comes from the nRF52840's `POWER.RESETREAS`
 //! register, which the firmware reads and clears before the SoftDevice takes
-//! the POWER peripheral. Both are hardware-free here so the host tests cover
-//! the decoding; `docs/operations.md` ("Reporting A Defect") says how a report
-//! collects them.
+//! the POWER peripheral. The shells count lost links, background reconnects,
+//! coalesced and dropped reports, and failed writes in [`COUNTERS`], and the
+//! main loop logs them when they change ([`CounterReport`]). All of it is
+//! hardware-free here so the host tests cover it; `docs/operations.md`
+//! ("Reporting A Defect") says how a report collects it.
+
+use crate::config::DIAGNOSTICS_REPORT_INTERVAL_SECS;
+use core::sync::atomic::{AtomicU32, Ordering};
 
 /// The crate version from `Cargo.toml`.
 pub const FIRMWARE_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -141,6 +146,165 @@ impl defmt::Format for ResetReasons {
         if self.undefined_bits() != 0 {
             defmt::write!(f, " (undefined bits {=u32:#x})", self.undefined_bits());
         }
+    }
+}
+
+/// One kind of event the firmware counts since boot. Each count is a number
+/// of occurrences only: no address, name, or report content.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Counter {
+    /// An established link that the peer or the radio dropped.
+    LinksLost,
+    /// A background reconnect that found its saved device and started to
+    /// connect.
+    ReconnectAttempts,
+    /// A background reconnect attempt that ended without a working link.
+    ReconnectFailures,
+    /// A report from a peripheral that replaced or merged into the previous
+    /// one before that reached the bridge's report channel, usually because
+    /// the channel was full. The latest state still goes out; a replaced
+    /// keyboard or media state is lost, merged mouse motion is not
+    /// (`hid::coalesce::ReportCoalescer`).
+    ReportsCoalesced,
+    /// A USB endpoint queue that was full and collapsed to its latest state,
+    /// dropping intermediate presses or motion
+    /// (`hid::delivery::EndpointDelivery`).
+    EndpointOverflows,
+    /// A USB endpoint whose report write failed or timed out after it last
+    /// worked or the bus last reset or resumed. The endpoint keeps retrying
+    /// with the current state, backing off to one retry a second, and the
+    /// retries are not counted again.
+    UsbWriteFailures,
+    /// A host LED state write to a BLE keyboard that failed.
+    LedWriteFailures,
+    /// A flash write of the device store that failed and was retried, which
+    /// the SoftDevice does while the radio leaves it no time to write.
+    FlashWriteRetries,
+    /// A device store save that failed on every attempt, or the erase of an
+    /// unreadable store before a factory reset that failed.
+    FlashWriteFailures,
+}
+
+impl Counter {
+    /// Every counter, in the order the log line lists them.
+    pub const ALL: [Counter; 9] = [
+        Counter::LinksLost,
+        Counter::ReconnectAttempts,
+        Counter::ReconnectFailures,
+        Counter::ReportsCoalesced,
+        Counter::EndpointOverflows,
+        Counter::UsbWriteFailures,
+        Counter::LedWriteFailures,
+        Counter::FlashWriteRetries,
+        Counter::FlashWriteFailures,
+    ];
+
+    /// The counter as the log line names it.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Counter::LinksLost => "links lost",
+            Counter::ReconnectAttempts => "reconnect attempts",
+            Counter::ReconnectFailures => "reconnect failures",
+            Counter::ReportsCoalesced => "reports coalesced",
+            Counter::EndpointOverflows => "endpoint overflows",
+            Counter::UsbWriteFailures => "USB write failures",
+            Counter::LedWriteFailures => "LED write failures",
+            Counter::FlashWriteRetries => "flash write retries",
+            Counter::FlashWriteFailures => "flash write failures",
+        }
+    }
+}
+
+/// Counts since boot, one per [`Counter`], each stopping at `u32::MAX`
+/// instead of wrapping. Any task may bump them; the atomics need no lock.
+pub struct Counters([AtomicU32; Counter::ALL.len()]);
+
+impl Counters {
+    pub const fn new() -> Self {
+        Self([const { AtomicU32::new(0) }; Counter::ALL.len()])
+    }
+
+    /// Count one more `counter` event.
+    pub fn bump(&self, counter: Counter) {
+        if let Some(count) = self.0.get(counter as usize) {
+            let _ = count.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1));
+        }
+    }
+
+    /// The counts now.
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot(Counter::ALL.map(|counter| {
+            self.0
+                .get(counter as usize)
+                .map_or(0, |count| count.load(Ordering::Relaxed))
+        }))
+    }
+
+    /// Set a count, so the tests can start one near its limit.
+    #[cfg(test)]
+    pub(crate) fn set(&self, counter: Counter, value: u32) {
+        if let Some(count) = self.0.get(counter as usize) {
+            count.store(value, Ordering::Relaxed);
+        }
+    }
+}
+
+impl Default for Counters {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The firmware's counters, bumped by the shells that see each event.
+pub static COUNTERS: Counters = Counters::new();
+
+/// Every count at one moment, in [`Counter::ALL`] order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Snapshot([u32; Counter::ALL.len()]);
+
+#[cfg(feature = "defmt")]
+impl defmt::Format for Snapshot {
+    fn format(&self, f: defmt::Formatter) {
+        for (index, (counter, count)) in Counter::ALL.iter().zip(self.0).enumerate() {
+            if index > 0 {
+                defmt::write!(f, ", ");
+            }
+            defmt::write!(f, "{=str} {=u32}", counter.name(), count);
+        }
+    }
+}
+
+/// When the main loop logs the counters: as soon as they change after a quiet
+/// spell, then at most once per [`DIAGNOSTICS_REPORT_INTERVAL_SECS`] while
+/// they keep changing, and never while they stay the same.
+pub struct CounterReport {
+    logged: Snapshot,
+    next_ms: u64,
+}
+
+impl CounterReport {
+    /// Starts from all zero counts, which are never logged on their own.
+    pub const fn new() -> Self {
+        Self {
+            logged: Snapshot([0; Counter::ALL.len()]),
+            next_ms: 0,
+        }
+    }
+
+    /// The counts to log at `now_ms`, if any.
+    pub fn poll(&mut self, now_ms: u64, counts: Snapshot) -> Option<Snapshot> {
+        if counts == self.logged || now_ms < self.next_ms {
+            return None;
+        }
+        self.logged = counts;
+        self.next_ms = now_ms.saturating_add(DIAGNOSTICS_REPORT_INTERVAL_SECS * 1000);
+        Some(counts)
+    }
+}
+
+impl Default for CounterReport {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

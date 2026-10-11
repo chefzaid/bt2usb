@@ -43,18 +43,25 @@ impl EndpointDelivery {
         }
     }
 
-    pub fn publish(&mut self, report: HidReport, available: bool) {
+    /// Queue a report for the endpoint. Returns `true` when the FIFO was full
+    /// and collapsed to this latest report, dropping the reports still queued
+    /// ([`Counter::EndpointOverflows`](crate::diagnostics::Counter::EndpointOverflows)).
+    /// Holding only the current state while the endpoint is unavailable or
+    /// recovering is not an overflow.
+    pub fn publish(&mut self, report: HidReport, available: bool) -> bool {
         self.current = durable(&report);
         if !available || self.recovering {
             self.recovering = true;
             self.pending.clear();
             let _ = self.pending.push_back(self.current.clone());
-            return;
+            return false;
         }
-        if self.pending.is_full() {
+        let overflowed = self.pending.is_full();
+        if overflowed {
             self.pending.clear();
         }
         let _ = self.pending.push_back(report);
+        overflowed
     }
 
     /// Invalidate in-flight work when bus/protocol state changes, then replay
@@ -265,6 +272,26 @@ mod tests {
             last = Some(report.report);
         }
         assert_eq!(last, Some(key(0)));
+    }
+
+    #[test]
+    fn publish_reports_only_a_full_queue_collapsing() {
+        let mut endpoint = EndpointDelivery::new(key(0));
+        for code in 0..ENDPOINT_QUEUE_CAPACITY {
+            assert!(!endpoint.publish(key(code as u8), true));
+        }
+        // The queue is full: this report replaces every queued one.
+        assert!(endpoint.publish(key(0), true));
+        assert_eq!(endpoint.take().unwrap().report, key(0));
+        assert!(endpoint.take().is_none());
+        // Holding the current state while the endpoint is unavailable or
+        // recovering is not an overflow, however much input arrives.
+        for _ in 0..2 * ENDPOINT_QUEUE_CAPACITY {
+            assert!(!endpoint.publish(key(4), false));
+        }
+        for _ in 0..2 * ENDPOINT_QUEUE_CAPACITY {
+            assert!(!endpoint.publish(key(5), true));
+        }
     }
 
     #[test]

@@ -907,11 +907,16 @@ commit, profile, and log filter, `reset reason`, `SoftDevice started`,
 `USB HID device started`, `BLE task started`,
 `UI and isolated OLED tasks started`, `USB configured by host: true`, and
 `stack high-water: {} of {} bytes`, printed whenever the painted-stack
-high-water mark grows ([`stack.rs`](../src/stack.rs)). The
+high-water mark grows ([`stack.rs`](../src/stack.rs)), and
+`diagnostics: {}`, which counts lost links, background reconnects, coalesced
+and overflowed reports, and failed USB, LED, and flash writes since boot and
+is printed when the counts change, at most once a minute
+([event counters](operations.md#event-counters)). The
 [first-flash checklist](first-flash.md) is the hardware acceptance procedure,
 and the [operations runbook](operations.md#recovery-and-diagnostics) maps
-symptoms to checks. Build identification, reset causes, and diagnostic counters
-are open work.
+symptoms to checks. Logging each peripheral's Device Information Service PnP
+ID is open work
+([diagnostics](../TODO.md#platform-memory-and-recovery)).
 
 ## Development And Release Tooling
 
@@ -924,8 +929,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 402 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 391 unit tests, the 3
+- The source contains 411 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 400 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs),
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   and the 5 tests of the vendored SoftDevice crate's event portal in

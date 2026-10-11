@@ -413,6 +413,7 @@ logs them. What application code does log:
 | --- | --- | --- | --- |
 | info | Task lifecycle, counts, results | `SoftDevice started`, `Loaded {} BLE bonds into security handler`, `Saved {} devices to flash` | None |
 | info | Build identity and reset cause | `bt2usb firmware starting: version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}`, `reset reason: {}` | None: the commit, profile, and log filter of the build and the chip's reset causes; nothing about the user or the unit |
+| info | Event counters | `diagnostics: {}`, listing each counter as `name N` | Counts only, with no address, name, slot, or report content. `reports coalesced` can rise during mouse movement or fast typing, so the times of these lines can show when the bridge was in use, at one-minute resolution; they never show what was typed |
 | info | Peer's advertised name | `slot {} connecting to {}` | Names can identify a person ("Alex's keyboard") |
 | info | Nearby HID device names (self-test only) | `BLE: HID device '{}' (RSSI {})` | Names of other people's devices in range |
 | info | Host lock-key LED state | `Host LEDs: num={} caps={} scroll={}` | Reveals when Caps/Num/Scroll Lock change, not other keys |

@@ -22,6 +22,7 @@ use crate::ble::scanner::SavedPeer;
 use crate::ble::slot_link::{connect_and_run_secure, ConnectionRequest, SlotOutcome};
 use crate::ble::{scanner, BleErrorTag, DiscoveredDevice};
 use crate::config;
+use crate::diagnostics::{Counter, COUNTERS};
 use crate::hid::delivery::HidEvent;
 use defmt::info;
 use embassy_futures::select::{select, select3, Either, Either3};
@@ -147,7 +148,10 @@ pub async fn connection_slot_task(
                     pending_cmd = superseded(slot, attempt, next, slot_event_tx).await;
                     continue;
                 }
-                Either::Second(Some(address)) => device.address = address,
+                Either::Second(Some(address)) => {
+                    COUNTERS.bump(Counter::ReconnectAttempts);
+                    device.address = address;
+                }
                 Either::Second(None) => {
                     retry = Some(device);
                     continue;
@@ -155,7 +159,7 @@ pub async fn connection_slot_task(
             }
         }
 
-        match connect_and_run_secure(
+        let outcome = connect_and_run_secure(
             sd,
             ConnectionRequest {
                 device: &device,
@@ -168,8 +172,13 @@ pub async fn connection_slot_task(
             cmd_rx,
             led_rx.as_mut(),
         )
-        .await
-        {
+        .await;
+        match outcome {
+            SlotOutcome::Closed => COUNTERS.bump(Counter::LinksLost),
+            SlotOutcome::Failed(_) if silent => COUNTERS.bump(Counter::ReconnectFailures),
+            _ => {}
+        }
+        match outcome {
             // Without keys for the device (its pairing was refused, the
             // peripheral paired without bonding, or a newer pairing evicted
             // them), a background reconnect, which never pairs, could never

@@ -23,7 +23,7 @@ hardware-verified result; record board results with the
 
 | Surface | Where | What it shows |
 | --- | --- | --- |
-| RTT log | Debug probe, `mask run --release` or `mask rtt` | `defmt` boot, BLE, USB, storage, display, power, and stack high-water logs, each with an uptime timestamp |
+| RTT log | Debug probe, `mask run --release` or `mask rtt` | `defmt` boot, BLE, USB, storage, display, power, stack high-water, and event counter logs, each with an uptime timestamp |
 | OLED | On the device | Current screen, connected devices, retained errors and notices |
 | USB enumeration | Host device manager, `lsusb` | Keyboard, mouse, and consumer interfaces; VID/PID, strings, per-unit serial |
 | Self-test | `mask selftest` | Staged `[PASS]`/`[FAIL]`/`[SKIP]` results for each peripheral |
@@ -229,6 +229,9 @@ A first pairing adds `Added paired device - now storing N` and
 
 - No `warn` or `error` lines while idle or typing.
 - `stack high-water` stops growing after the paths in use have run.
+- No `diagnostics:` line while nothing goes wrong. Links lost and reconnect
+  attempts when peripherals sleep and wake are normal; failures, overflows,
+  and flash counts that keep rising are not ([event counters](#event-counters)).
 - `Power: Active -> Idle` after 60 seconds without activity. Typing, mouse
   traffic, button presses, and BLE connections count as activity. With no BLE
   link, `Power: Idle -> LowPower` follows after a further 60 seconds.
@@ -277,6 +280,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | panic | Starts with `Softdevice assertion failed:`, `Softdevice memory access violation.`, or `Softdevice unknown fault` (vendor) | SoftDevice fault handler | Report with the full message and PC value; see [panics](#firmware-panics-or-stops-responding) |
 | info | `SoftDevice started`, `USB HID device started`, `BLE task started`, `UI and isolated OLED tasks started` | Each group of tasks was spawned | None |
 | info | `stack high-water: {} of {} bytes` | Deepest stack use since reset, of the stack region size | Keep well under half; see [memory checks](#stack-and-memory-checks) |
+| info | `diagnostics: {}` | Every event counter since boot, as `name N` pairs; logged when they change, at most once a minute | Quote the latest line in a report; see [Event Counters](#event-counters) |
 
 ### USB And Power
 
@@ -917,6 +921,54 @@ System OFF, or starts the watchdog, so most causes come from outside it.
 `(undefined bits 0x...)` after the causes quotes register bits the nRF52840
 does not define; include it in a report as printed.
 
+### Event Counters
+
+The firmware counts events that a report needs to size a problem, without
+recording what was typed or which device was involved. Each count is a
+number of occurrences since boot and nothing else: no address, name, key,
+or report content
+([`diagnostics.rs`](../src/diagnostics.rs)). A line lists every counter in
+this order:
+
+```text
+diagnostics: links lost 3, reconnect attempts 3, reconnect failures 1, reports coalesced 0, endpoint overflows 0, USB write failures 0, LED write failures 0, flash write retries 0, flash write failures 0
+```
+
+| Counter | Counted when | Normal | Worth reporting |
+| --- | --- | --- | --- |
+| `links lost` | An established link closed without the user asking: the peripheral slept or moved out of range, or the radio dropped it | Rises as peripherals sleep, about one per sleep | Rising while a peripheral is in use and close by: [reconnect incident](#saved-peripheral-does-not-reconnect) |
+| `reconnect attempts` | A background reconnect found its saved device advertising and started to connect | About one per lost link or power-up | Far above `links lost`, which means attempts keep failing |
+| `reconnect failures` | A background reconnect attempt ended without a working link | Occasional, such as a device that stops advertising mid-attempt | Close to `reconnect attempts`: [reconnect incident](#saved-peripheral-does-not-reconnect), [private address](#bonded-peer-with-a-private-address-is-not-found) |
+| `reports coalesced` | A report from a peripheral replaced or merged into the previous one before that reached the bridge's report channel, usually because the USB side was behind | 0 while typing; mouse movement can merge now and then, which loses no motion | Rising during typing: a fast tap may have been missed ([stuck input](#keys-or-buttons-stay-pressed-on-the-host)) |
+| `endpoint overflows` | A USB endpoint's 16-report queue was full, so it collapsed to the latest state and dropped the reports queued before it | 0 | Any: the host stopped polling that endpoint for a while; the final state still went out ([endpoint stalls](#a-usb-endpoint-stalls)) |
+| `USB write failures` | A USB endpoint's write failed or timed out after it last worked or the bus last reset or resumed; its retries count once | 0 in use; a host that stops polling an endpoint, which a firmware setup screen may do for an interface it does not use (inferred, not measured), adds one each time | Rising in normal use: [endpoint stalls](#a-usb-endpoint-stalls) |
+| `LED write failures` | The host's Caps/Num/Scroll Lock state could not be written to a keyboard | 0 | Any, if the keyboard's lock LEDs then stay wrong |
+| `flash write retries` | A device store write failed and was retried, as happens while the radio leaves the SoftDevice no time to write | Occasional at connect time | Many per save: [flash writes](#flash-writes-report-busy-or-fail) |
+| `flash write failures` | A device store save failed all three attempts, or a factory reset could not erase an unreadable store | 0 | Any: a pairing or Forget did not reach flash ([flash writes](#flash-writes-report-busy-or-fail)) |
+
+How to collect them:
+
+1. Attach a debug probe and read the RTT log (`mask rtt`, or `mask run
+   --release` when flashing); see [RTT with a debug probe](#rtt-with-a-debug-probe).
+   The counters have no other output: no USB interface, OLED screen, or flash
+   record carries them.
+2. Reproduce the problem. The first change after a quiet spell is logged at
+   the next one-second housekeeping tick; while the counts keep changing,
+   the next line waits until 60 seconds after the previous one
+   (`DIAGNOSTICS_REPORT_INTERVAL_SECS`) and then carries the latest counts.
+   Counts that stay the same are never logged, so a quiet log means nothing
+   was counted.
+3. Quote the last `diagnostics:` line with the boot lines. Each line has every
+   count since boot, so the latest line is enough; its uptime timestamp
+   places it against the failure.
+
+The counts start at zero at every boot and are lost on reset, so read the
+log before power-cycling a unit that misbehaves. Each count stops at
+4294967295 instead of wrapping. The line is logged at `info`, so a build
+whose `DEFMT_LOG` is `warn` or stricter does not print it. The Renode
+simulation build does not run the BLE, USB, or flash shells that count, so
+it never prints the line.
+
 ## Stack And Memory Checks
 
 The memory map is fixed at link time ([hardware](hardware.md#memory-layout),
@@ -1002,7 +1054,9 @@ For a defect report, record the artifact hash, exact firmware version, board,
 peripheral, host/hub, reproduction sequence, and relevant log interval. The
 first two boot lines carry the version, the source commit, the profile, the
 `DEFMT_LOG` filter, and the reset reason ([boot sequence](#boot-sequence)), so
-quote them rather than retyping the build details. Sanitize device
+quote them rather than retyping the build details. Add the last
+`diagnostics:` line logged before the failure or after reproducing it
+([event counters](#event-counters)). Sanitize device
 identifiers and never share bond keys or private input captures publicly.
 Suspected vulnerabilities follow the [security policy](../SECURITY.md) instead.
 

@@ -1,5 +1,6 @@
-//! Host tests for the boot diagnostics: the build identity the build script
-//! supplies, and the decoding of `POWER.RESETREAS`.
+//! Host tests for the diagnostics: the build identity the build script
+//! supplies, the decoding of `POWER.RESETREAS`, and the event counters with
+//! the policy for logging them.
 
 use super::*;
 
@@ -99,4 +100,100 @@ fn every_cause_has_a_distinct_name() {
             assert_ne!(a.name(), b.name());
         }
     }
+}
+
+/// A snapshot with `count` for each listed counter and zero for the rest.
+fn counts(set: &[(Counter, u32)]) -> Snapshot {
+    let counters = Counters::new();
+    for &(counter, count) in set {
+        counters.set(counter, count);
+    }
+    counters.snapshot()
+}
+
+#[test]
+fn each_counter_has_its_own_slot_in_log_order() {
+    for (index, counter) in Counter::ALL.into_iter().enumerate() {
+        assert_eq!(counter as usize, index, "{counter:?}");
+        let counters = Counters::new();
+        counters.bump(counter);
+        counters.bump(counter);
+        let mut expected = [0; Counter::ALL.len()];
+        expected[index] = 2;
+        assert_eq!(counters.snapshot(), Snapshot(expected), "{counter:?}");
+    }
+}
+
+#[test]
+fn every_counter_has_a_distinct_name() {
+    for (i, a) in Counter::ALL.iter().enumerate() {
+        assert!(!a.name().is_empty());
+        for b in &Counter::ALL[i + 1..] {
+            assert_ne!(a.name(), b.name());
+        }
+    }
+}
+
+#[test]
+fn a_count_stops_at_its_limit_instead_of_wrapping() {
+    let counters = Counters::new();
+    counters.set(Counter::UsbWriteFailures, u32::MAX - 1);
+    counters.bump(Counter::UsbWriteFailures);
+    counters.bump(Counter::UsbWriteFailures);
+    counters.bump(Counter::LinksLost);
+    assert_eq!(
+        counters.snapshot(),
+        counts(&[
+            (Counter::UsbWriteFailures, u32::MAX),
+            (Counter::LinksLost, 1)
+        ])
+    );
+}
+
+#[test]
+fn counters_and_reports_start_at_zero() {
+    assert_eq!(Counters::default().snapshot(), Snapshot::default());
+    assert_eq!(COUNTERS.snapshot().0.len(), Counter::ALL.len());
+    assert_eq!(CounterReport::default().poll(0, Snapshot::default()), None);
+}
+
+#[test]
+fn counts_that_never_change_are_never_logged() {
+    let mut report = CounterReport::new();
+    for second in 0..600 {
+        assert_eq!(report.poll(second * 1000, Snapshot::default()), None);
+    }
+}
+
+#[test]
+fn a_change_is_logged_at_once_then_at_most_once_per_interval() {
+    let interval = DIAGNOSTICS_REPORT_INTERVAL_SECS * 1000;
+    let mut report = CounterReport::new();
+    let first = counts(&[(Counter::LinksLost, 1)]);
+    assert_eq!(report.poll(5_000, first), Some(first));
+    // Unchanged: nothing more, however long it stays so.
+    assert_eq!(report.poll(5_000 + 3 * interval, first), None);
+
+    // A change after a quiet spell is logged at once, and the next ones wait
+    // out the interval; the line then carries the latest counts.
+    let second = counts(&[(Counter::LinksLost, 2)]);
+    let start = 5_000 + 4 * interval;
+    assert_eq!(report.poll(start, second), Some(second));
+    let third = counts(&[(Counter::LinksLost, 2), (Counter::ReconnectAttempts, 1)]);
+    assert_eq!(report.poll(start + 1_000, third), None);
+    let fourth = counts(&[(Counter::LinksLost, 2), (Counter::ReconnectAttempts, 3)]);
+    assert_eq!(report.poll(start + interval - 1, fourth), None);
+    assert_eq!(report.poll(start + interval, fourth), Some(fourth));
+    assert_eq!(report.poll(start + 2 * interval, fourth), None);
+}
+
+#[test]
+fn the_report_clock_cannot_overflow() {
+    let mut report = CounterReport::new();
+    let changed = counts(&[(Counter::FlashWriteRetries, 1)]);
+    assert_eq!(report.poll(u64::MAX - 1, changed), Some(changed));
+    // The next report time saturates instead of wrapping to the past, so the
+    // next change still waits.
+    let later = counts(&[(Counter::FlashWriteRetries, 2)]);
+    assert_eq!(report.poll(u64::MAX - 1, later), None);
 }

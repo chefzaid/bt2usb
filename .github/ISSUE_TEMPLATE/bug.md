@@ -17,6 +17,7 @@ Describe the observed behavior and its impact.
 
 - Firmware commit or release tag, and ELF/HEX SHA-256:
 - Boot lines `bt2usb firmware starting: ...` and `reset reason: ...`, copied from the log:
+- The last `diagnostics: ...` line (event counters) before or after the failure, if the log has one:
 - Build: local `mask`/`cargo` or a release package:
 - Board and revision, pin changes, power arrangement:
 - SoftDevice version:

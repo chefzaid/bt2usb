@@ -30,6 +30,7 @@ measurement that supports each result in Notes.
 
 - SoftDevice RAM requirement (`softdevice RAM: N bytes`):
 - Stack high-water after section 4 (`stack high-water: X of Y bytes`):
+- Latest event counters after sections 4 and 5 (`diagnostics: links lost N, ...`):
 - Reconnect and release timings (sections 4 and 5):
 
 ## [0. Before you start](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md#0-before-you-start)
@@ -92,6 +93,7 @@ measurement that supports each result in Notes.
 | No stuck mouse/media input (record release latency) | | |
 | Scan while reconnecting (record the delay) | | |
 | Stack high-water after the above | | Bytes: |
+| Counters: lost links and reconnect attempts match the above; overflows and write failures are 0 | | Latest `diagnostics:` line: |
 
 ## [5. In the monitor](https://github.com/chefzaid/bt2usb/blob/main/docs/first-flash.md#5-in-the-monitor)
 

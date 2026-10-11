@@ -16,6 +16,7 @@
 
 use super::long_read::{EndOfValue, LongRead, ReadFailure, MAX_ATTRIBUTE_LEN};
 use crate::ble::BleErrorTag;
+use crate::diagnostics::{Counter, COUNTERS};
 use crate::hid;
 use crate::hid::coalesce::ReportCoalescer;
 use crate::hid::delivery::HidEvent;
@@ -262,6 +263,7 @@ impl HidServiceClient {
                 .await
                 .is_err()
             {
+                COUNTERS.bump(Counter::LedWriteFailures);
                 warn!("Failed to write LED state to BLE keyboard");
             }
         }
@@ -388,7 +390,9 @@ pub async fn run_notification_loop(
     let gatt_fut = gatt_client::run(conn, client, |event: ReportNotification| {
         let parsed = hid::classify_gatt_notification(&event.data, event.kind, descriptor.as_ref());
         if let Some(report) = parsed {
-            coalescer.borrow_mut().push(report);
+            if coalescer.borrow_mut().push(report) {
+                COUNTERS.bump(Counter::ReportsCoalesced);
+            }
             wake.signal(());
         }
     });

@@ -141,6 +141,14 @@ pub const SCREEN_AUTO_OFF_TIMEOUT_SECS: u64 = 120;
 /// few seconds: the affected links close, then the store is written to flash.
 pub const UI_MANAGEMENT_TIMEOUT_SECS: u64 = 30;
 
+// Diagnostics
+
+/// The shortest time between two `diagnostics:` log lines while the event
+/// counters keep changing (seconds). The first change after a quiet spell is
+/// logged at the next one-second housekeeping tick; unchanged counters are
+/// never logged.
+pub const DIAGNOSTICS_REPORT_INTERVAL_SECS: u64 = 60;
+
 // Paired-device storage
 
 /// Maximum number of paired devices tracked in storage.

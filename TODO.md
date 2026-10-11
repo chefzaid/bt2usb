@@ -1323,8 +1323,15 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   SoftDevice starts (seven host tests). Release staging refuses an image
   that does not report the tagged commit clean, Renode checks the identity
   line, and the bug and hardware-result templates ask for both boot lines
-  ([reset reasons](docs/operations.md#reset-reasons)). Still open: the
-  bounded counters with their collection method, and the PnP ID.
+  ([reset reasons](docs/operations.md#reset-reasons)). The shells now count
+  lost links, background reconnect attempts and failures, coalesced and
+  overflowed reports, and failed USB, LED, and flash writes in saturating
+  counters, and the UI loop logs them as `diagnostics:` when they change, at
+  most once a minute (`DIAGNOSTICS_REPORT_INTERVAL_SECS`); the runbook gives
+  the collection method and what each count means, and the first-flash
+  checklist and both templates ask for the latest line
+  ([event counters](docs/operations.md#event-counters)). Still open: the PnP
+  ID.
 
 ## Device Security And Provisioning
 

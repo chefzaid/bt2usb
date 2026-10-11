@@ -268,6 +268,12 @@ currently unauthenticated Just Works bonding; see
       slot afterwards.
 - [ ] **Stack:** after all of the above, the latest `stack high-water` line is
       well under half of the total. Recorded: ______ bytes.
+- [ ] **Counters:** copy the latest `diagnostics:` line. `links lost` and
+      `reconnect attempts` match the sleeps and reboots above, give or take
+      an attempt that found a device just as it stopped advertising; `endpoint
+      overflows`, `USB write failures`, `LED write failures`, and `flash write
+      failures` are 0
+      ([event counters](operations.md#event-counters)).
 
 ## 5. In the monitor
 
@@ -430,7 +436,8 @@ labels the issue `hardware-evidence`, and has these parts:
 - **Setup:** board and revision, pin changes, supply, debug probe; peripheral
   make, model, and firmware; host OS and version, BIOS/UEFI, monitor and hub.
 - **Measurements:** the `softdevice RAM` value, the stack high-water after
-  section 4, and reconnect and release timings from sections 4 and 5.
+  section 4, the latest `diagnostics:` line after sections 4 and 5, and
+  reconnect and release timings from sections 4 and 5.
 - **One table per section 0–8** of this checklist. Fill in the tables: write
   `pass`, `fail`, or `skip: <reason>` in every Result cell, and quote the
   supporting log line or measurement in Notes. The section 8 table also has

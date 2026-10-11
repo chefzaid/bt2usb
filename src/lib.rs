@@ -23,7 +23,8 @@
 // count from here, as they do in the firmware.
 pub mod config;
 
-// The build identity and reset-reason decoding the firmware logs at boot.
+// The build identity and reset-reason decoding the firmware logs at boot, and
+// the event counters with the policy for logging them.
 pub mod diagnostics;
 
 // The HID module is entirely hardware-free, so it is shared verbatim with the

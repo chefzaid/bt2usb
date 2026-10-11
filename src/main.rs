@@ -235,6 +235,7 @@ async fn main(spawner: Spawner) {
     let mut ui = UiController::<nrf_softdevice::ble::Address>::new();
     let mut power = PowerManager::new();
     let mut stack_reported = 0;
+    let mut counter_report = diagnostics::CounterReport::new();
     let mut housekeeping = Ticker::every(Duration::from_secs(1));
     ui::display::publish(&ui.state, power.display_on());
 
@@ -258,6 +259,10 @@ async fn main(spawner: Spawner) {
                 if used > stack_reported {
                     stack_reported = used;
                     info!("stack high-water: {} of {} bytes", used, total);
+                }
+                let counts = diagnostics::COUNTERS.snapshot();
+                if let Some(counts) = counter_report.poll(Instant::now().as_millis(), counts) {
+                    info!("diagnostics: {}", counts);
                 }
                 if ui.tick(Instant::now().as_millis(), power.display_on()) {
                     warn!("management request got no reply; result unknown");

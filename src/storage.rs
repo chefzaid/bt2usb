@@ -28,6 +28,7 @@ use devices::{
 };
 
 use crate::config::{MAX_PAIRED_DEVICES, STORAGE_FLASH_END, STORAGE_FLASH_START};
+use crate::diagnostics::{Counter, COUNTERS};
 use crate::sd_setup::FlashBuffer;
 use defmt::{debug, error, info, warn};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -272,9 +273,11 @@ impl DeviceStore {
                 }
                 Err(e) => {
                     if attempt < FLASH_WRITE_ATTEMPTS {
+                        COUNTERS.bump(Counter::FlashWriteRetries);
                         warn!("Flash write busy (attempt {}), retrying", attempt);
                         Timer::after(Duration::from_millis(FLASH_RETRY_BACKOFF_MS)).await;
                     } else {
+                        COUNTERS.bump(Counter::FlashWriteFailures);
                         error!(
                             "Flash write failed after {} attempts: {:?}",
                             FLASH_WRITE_ATTEMPTS,
@@ -330,7 +333,10 @@ impl DeviceStore {
                 flash
                     .erase(STORAGE_FLASH_START, STORAGE_FLASH_END)
                     .await
-                    .map_err(|_| StoreError::Flash)?;
+                    .map_err(|_| {
+                        COUNTERS.bump(Counter::FlashWriteFailures);
+                        StoreError::Flash
+                    })?;
             }
             next.save_to_flash(flash).await
         })

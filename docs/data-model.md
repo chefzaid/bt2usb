@@ -555,6 +555,7 @@ backpressure ([hid/coalesce.rs](../src/hid/coalesce.rs)).
 | `KEYBOARD_DELIVERY`, `MOUSE_DELIVERY`, `CONSUMER_DELIVERY` | Endpoint mailboxes | HID dispatcher, USB event handler | Endpoint workers | 16-report FIFO, held state, transfer epoch |
 | `USB_CONFIGURED`, `USB_SUSPENDED`, `KEYBOARD_BOOT_PROTOCOL`, `MOUSE_BOOT_PROTOCOL` | `AtomicBool` | USB handlers | USB tasks, self-test | Host-facing state |
 | `HID_ACTIVITY` | `AtomicBool` | HID dispatcher | Power manager tick | Input counts as activity for display power |
+| `COUNTERS` | `diagnostics::Counters`, one `AtomicU32` per counter | Connection workers, notification loops, endpoint mailboxes, store shell | Main UI loop | Event counts since boot, each stopping at `u32::MAX`; logged as `diagnostics: {}` when they change ([diagnostics.rs](../src/diagnostics.rs), [event counters](operations.md#event-counters)) |
 | `DEVICE_STORE` | Async `Mutex<DeviceStore>` | BLE coordinator | BLE coordinator | Pairing cache; held across flash writes |
 | `GAP_PROCEDURE` | Async `Mutex<()>` | Scanner, connection workers | Same | One SoftDevice scan or connection setup at a time |
 | Bonder | `StaticCell` around a `RefCell` | SoftDevice security callbacks, coordinator | Same, plus connection workers | In-RAM bond table: the store's bonds, marked saved, plus one unsaved pairing per link ([bond_table.rs](../src/ble/bond_table.rs)) |
@@ -825,7 +826,9 @@ Bond keys are stored unencrypted in internal flash. Device names are kept for
 display; RSSI is stored but not used. Logical deletion does not guarantee
 physical erasure; see [security](security.md#key-storage-and-deletion).
 Factory reset of a readable store appends an empty item rather than erasing
-pages.
+pages. The event counters hold only numbers of occurrences, live in RAM, and
+start at zero at every boot; nothing writes them to flash or sends them to a
+host ([event counters](operations.md#event-counters)).
 
 Which logs may contain this data, and at which level, is defined in
 [security: logging and privacy](security.md#logging-and-privacy). In short,

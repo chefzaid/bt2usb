@@ -5,6 +5,7 @@
 
 use super::host_requests;
 use crate::config;
+use crate::diagnostics::{Counter, COUNTERS};
 use crate::hid::aggregate::InputAggregator;
 use crate::hid::consumer::{ConsumerReport, CONSUMER_REPORT_DESCRIPTOR};
 use crate::hid::delivery::{
@@ -85,8 +86,12 @@ impl EndpointMailbox {
     }
 
     fn publish(&self, report: HidReport) {
-        self.state
+        let overflowed = self
+            .state
             .lock(|state| state.borrow_mut().publish(report, usb_available()));
+        if overflowed {
+            COUNTERS.bump(Counter::EndpointOverflows);
+        }
         self.pending.signal(());
     }
 
@@ -114,6 +119,7 @@ impl DeliveryQueue for EndpointMailbox {
     fn failed(&self, epoch: u32, first_failure: bool) {
         self.state.lock(|state| state.borrow_mut().failed(epoch));
         if first_failure {
+            COUNTERS.bump(Counter::UsbWriteFailures);
             warn!("USB HID endpoint unavailable; retaining current input state");
         }
     }

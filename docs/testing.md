@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that logs the build identity and reset reason at
-boot. The tree holds 402 `#[test]` functions: 391 in
+2026-10-11, in the commit that adds the event counters. The tree holds 411
+`#[test]` functions: 400 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -179,8 +179,8 @@ and the 384 passed the same day. There are no `#[ignore]` or
 | [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs) | 10 | Which report is the keyboard's (`HidDescriptor::is_unnumbered_keyboard_only` and `is_keyboard_report`, the rule `subscribe_all` uses for the LED output report): an unnumbered keyboard-only map owns every report, a numbered map only the keyboard ID, and an unnumbered map with another input, or an ID shared by two kinds, owns none. The reserved keyboard byte: a keyboard report carrying OEM data there is accepted, with the reserved byte cleared, when `classify_known` is given the keyboard kind, when a Report Reference resolves through a numbered Report Map to the keyboard report as `subscribe_all` resolves it, and when an unnumbered map describes only a keyboard; the check stays when an unnumbered map also has other kinds and on the length- and ID-inferred paths; a declared keyboard report must still be 8 bytes. |
 | [lib_logic_tests.rs](../src/lib_logic_tests.rs) | 14 | `HidReport` serialization, equality, and kind helpers; HID UUID detection, name extraction, malformed lengths, and name truncation through the public `ble::adv_parser` API; scan-dot cycling; `power_logic::screen_should_be_on` auto-off policy. |
 | [hid/aggregate.rs](../src/hid/aggregate.rs) | 6 | Two-source union: a key held by both sources survives one release or disconnect, rollover recovers when a source disconnects, one source's rollover error is forwarded while the other holds a key, a consumer usage above the supported range is dropped without a wake, mouse buttons union without replaying the other source's motion, consumer lowest-slot priority with fallback, and out-of-range sources cannot change state or wake the host. |
-| [hid/coalesce.rs](../src/hid/coalesce.rs) | 8 | Per-endpoint coalescing: latest keyboard and consumer state wins but a release survives, mouse motion accumulates with saturation while the latest buttons win, round-robin pop across endpoints, and endpoint independence. |
-| [hid/delivery.rs](../src/hid/delivery.rs) | 6 | `EndpointDelivery` state: short taps keep press/release order, a failed press recovers the latest release rather than the failed packet, relative motion is never replayed after failure, resume, or reset, stale completions cannot erase post-reset input, queue overflow keeps the final release, and a blocked consumer endpoint does not block keyboard or mouse state. |
+| [hid/coalesce.rs](../src/hid/coalesce.rs) | 9 | Per-endpoint coalescing: latest keyboard and consumer state wins but a release survives, mouse motion accumulates with saturation while the latest buttons win, `push` reports exactly the reports it replaced or merged (the `reports coalesced` counter), round-robin pop across endpoints, and endpoint independence. |
+| [hid/delivery.rs](../src/hid/delivery.rs) | 6 | `EndpointDelivery` state: short taps keep press/release order, a failed press recovers the latest release rather than the failed packet, relative motion is never replayed after failure, resume, or reset, stale completions cannot erase post-reset input, queue overflow keeps the final release, `publish` reports only a full queue collapsing and never the held state of an unavailable or recovering endpoint (the `endpoint overflows` counter), and a blocked consumer endpoint does not block keyboard or mouse state. |
 | [hid/delivery_tests.rs](../src/hid/delivery_tests.rs) | 4 | The production `run_endpoint` worker, polled by hand with fake queues, sinks, and a fake clock: an unpolled consumer endpoint does not stop keyboard and mouse writes, a press that times out (100 ms write deadline) is replaced by the latest release after a 20 ms backoff, a bus change cancels stale motion, and repeated errors back off 20, 40, 80, 160, 320, 640, then 1000 ms (capped) and recover. |
 | [hid/consumer.rs](../src/hid/consumer.rs) | 6 | Consumer report defaults, a volume-up usage, serialization, and parsing from bytes; a short or out-of-range payload is refused and a too-small buffer serializes nothing; every named usage round trips and an unknown code maps to `None`. |
 | [hid/host_leds.rs](../src/hid/host_leds.rs) | 5 | `forward_host_leds`, polled by hand with a fake host: a new link gets the host's current lock-key state first, a reconnecting keyboard gets a state the slot already forwarded to its previous link, nothing is written before the host sends a state, later changes follow in order, and the host's first state is forwarded when it arrives during the link. |
@@ -225,7 +225,7 @@ protect.
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | 2 | OLED retry backoff of 1, 2, 4, 8, 16, then 30 s (capped) without blocking new frames, reset on recovery, and saturating deadlines. |
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | 3 | The device-list window keeps the selection visible, handles an empty list and a stale selection, and the scan spinner recovers from an out-of-range state. |
 | [ui/layout_tests.rs](../src/ui/layout_tests.rs), for [layout.rs](../src/ui/layout.rs) | 12 | Every screen's lines and baselines: Home's title and hints, the scan's dots cycling, the one-line waiting screens, a device list that marks the selection with `> ` and scrolls to keep it among four rows, an empty list, the saved list ending with Factory reset and its footer, the Forget confirmation naming the device (or "Device unavailable") with Cancel as the default, the reset confirmation, and the name or message under each status title. Every fixed label fits the 21 columns of the panel, lines stay on the panel and never overlap, and a name wider than the panel is kept whole for the panel to cut. |
-| [diagnostics_tests.rs](../src/diagnostics_tests.rs), for [diagnostics.rs](../src/diagnostics.rs) | 7 | The build identity `build.rs` supplies: the crate version, a 40-digit commit with an optional `-dirty` or `unknown`, a `debug` or `release` profile, and a log filter. `POWER.RESETREAS` decoding: no defined bit reads as power-on or brown-out, each defined bit maps to its cause, accumulated causes list in bit order, undefined bits are kept for the report, the defined mask equals the cause bits, and every cause has a distinct name. |
+| [diagnostics_tests.rs](../src/diagnostics_tests.rs), for [diagnostics.rs](../src/diagnostics.rs) | 14 | The build identity `build.rs` supplies: the crate version, a 40-digit commit with an optional `-dirty` or `unknown`, a `debug` or `release` profile, and a log filter. `POWER.RESETREAS` decoding: no defined bit reads as power-on or brown-out, each defined bit maps to its cause, accumulated causes list in bit order, undefined bits are kept for the report, the defined mask equals the cause bits, and every cause has a distinct name. Event counters: each counter has its own slot in log order and a distinct name, counts start at zero and stop at `u32::MAX`, and `CounterReport` never logs unchanged counts, logs the first change at once, then waits out `DIAGNOSTICS_REPORT_INTERVAL_SECS` and logs the latest counts, without its clock wrapping. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
 
 ### Integration Tests
@@ -895,6 +895,38 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Event Counters
+
+This record covers the commit that adds the bounded counters of P1
+"Diagnostics without sensitive input" in
+[TODO.md](../TODO.md#platform-memory-and-recovery). The pure
+`src/diagnostics.rs` gains nine saturating `AtomicU32` counters
+(`COUNTERS`) and `CounterReport`, which decides when the UI loop's 1-second
+tick logs `diagnostics: {}`: at the first change after a quiet spell, then at
+most once per `DIAGNOSTICS_REPORT_INTERVAL_SECS` (60 s), never while the counts
+stay the same. `ReportCoalescer::push` and `EndpointDelivery::publish` now
+return whether they coalesced or collapsed a full queue; the slot worker, the
+notification loop and LED writer, the endpoint mailboxes, and the store shell
+bump the counters. The [event counters](operations.md#event-counters) section
+documents each count and how to collect it. The checks ran locally on Linux
+in a container, on the working tree just before that commit; nothing ran on a
+board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 400 unit tests (7 new in `diagnostics_tests.rs`, 1 in `hid/coalesce.rs`, 1 in `hid/delivery.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.80% of lines, 98.79% of regions, 99.11% of functions (from 99.08%); `diagnostics.rs` 98.86% of lines: the uncovered line is the out-of-range branch of `Counters::bump`, which a `Counter` cannot reach |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five, after replacing two intra-doc links to `hid` items, which the simulation build does not contain, with plain code spans |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 121,056 bytes (+1,132 since `a621ef2`), `.rodata` 12,324 (+240: the counter names), `.data` 1,640, `.bss` 24,724 (+88: `COUNTERS` takes 36 bytes and `__embassy_main::POOL` grows from 712 to 760 for the `CounterReport`, measured with `llvm-nm -S`; `ble_slot_task::POOL` stays at 5,760), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 120,072 bytes |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files, including the new `DIAGNOSTICS_REPORT_INTERVAL_SECS` row in the [configuration defaults](hardware.md#configuration-defaults) |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record; the simulation build does not run the shells that count, so it logs no `diagnostics:` line |
+| Counters on the target | Review | Built and reviewed, not tested: no host test or Renode scenario runs the slot worker, the USB mailboxes, or the store shell that bump the counters; the first-flash [pairing and daily use](first-flash.md#4-pairing-and-daily-use) checks now record the latest line |
+| Hosted CI | GitHub Actions | Push run 38109571606 (`8425cb6`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
 
 ## Validation Record — 2026-10-11, Portal Guard Comments
 

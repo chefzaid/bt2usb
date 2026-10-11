@@ -60,16 +60,17 @@ impl ReportCoalescer {
     }
 
     /// Enqueue a report, merging it into any unsent pending report for the same
-    /// endpoint per the module's policy.
-    pub fn push(&mut self, report: HidReport) {
+    /// endpoint per the module's policy. Returns `true` when the report
+    /// replaced or merged into one still pending, which the firmware counts
+    /// ([`Counter::ReportsCoalesced`](crate::diagnostics::Counter::ReportsCoalesced)).
+    pub fn push(&mut self, report: HidReport) -> bool {
         match report {
-            HidReport::Keyboard(k) => self.keyboard = Some(k),
-            HidReport::Consumer(c) => self.consumer = Some(c),
+            HidReport::Keyboard(k) => self.keyboard.replace(k).is_some(),
+            HidReport::Consumer(c) => self.consumer.replace(c).is_some(),
             HidReport::Mouse(m) => {
-                self.mouse = Some(match self.mouse {
-                    Some(pending) => pending.merged_with(&m),
-                    None => m,
-                });
+                let pending = self.mouse.take();
+                self.mouse = Some(pending.map_or(m, |pending| pending.merged_with(&m)));
+                pending.is_some()
             }
         }
     }
@@ -167,6 +168,23 @@ mod tests {
         c.push(mouse(0, 100, -100, 0));
         // i8 saturation: 100+100 -> 127, -100-100 -> -128.
         assert_eq!(c.pop(), Some(mouse(0, 127, -128, 0)));
+    }
+
+    #[test]
+    fn push_reports_only_the_reports_it_coalesced() {
+        let mut c = ReportCoalescer::new();
+        assert!(!c.push(keyboard(0, 0x04)));
+        assert!(!c.push(mouse(0, 1, 0, 0)));
+        assert!(!c.push(HidReport::Consumer(ConsumerReport::empty())));
+        // Each endpoint already holds a report: the next one replaces or
+        // merges into it.
+        assert!(c.push(keyboard(0, 0x05)));
+        assert!(c.push(mouse(0, 1, 0, 0)));
+        assert!(c.push(HidReport::Consumer(ConsumerReport::empty())));
+        while c.pop().is_some() {}
+        // Drained: nothing is pending to coalesce with.
+        assert!(!c.push(keyboard(0, 0)));
+        assert!(!c.push(mouse(0, 0, 0, 0)));
     }
 
     #[test]

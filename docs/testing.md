@@ -896,6 +896,24 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-11, Portal Guard Comments
+
+This record covers the commit that closes the FIXME "The portal guard's
+comments describe the old behaviour" in [TODO.md](../TODO.md#fixme). It
+changes only the two comments above the drop guard in the vendored
+`vendor/nrf-softdevice/src/util/portal.rs`, which now state that the guard
+clears the portal only while it holds the wait's own closure, as the
+[portal fix](#validation-record--2026-10-11-portal-clears-only-its-own-wait)
+made it do. No code changed. The checks ran locally on Linux in a container,
+on the working tree just before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Vendored-portal tests | `cargo test --locked --test vendor_portal` | Passed: 5 tests, compiled from the edited file |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed |
+| Hosted CI | GitHub Actions | Push run 38108965919 (`a621ef2`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-11, Boot Identity And Reset Reason
 
 This record covers the commit that starts P1 "Diagnostics without sensitive

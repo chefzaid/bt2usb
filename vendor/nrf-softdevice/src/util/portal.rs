@@ -86,8 +86,10 @@ impl<T> Portal<T> {
             // state gets dropped here, which allows calling the function again
         };
 
-        // If the future gets cancelled from the outside, this gets dropped,
-        // and resets the state of the portal to None
+        // bt2usb patch: this gets dropped when the future is cancelled from
+        // the outside or ends after its closure ran. It resets the state of
+        // the portal to None only while the portal still holds this wait's
+        // own closure, so it never clears a later wait's registration.
         let own = Self::closure_address(core::ptr::addr_of!(call_func));
         let _bomb = OnDrop::new(move || self.clear_if_registered(own));
 
@@ -141,8 +143,10 @@ impl<T> Portal<T> {
             // state gets dropped here, which allows calling the function again
         };
 
-        // If the future gets cancelled from the outside, this gets dropped,
-        // and resets the state of the portal to None
+        // bt2usb patch: this gets dropped when the future is cancelled from
+        // the outside or ends after its closure ran. It resets the state of
+        // the portal to None only while the portal still holds this wait's
+        // own closure, so it never clears a later wait's registration.
         let own = Self::closure_address(core::ptr::addr_of!(call_func));
         let _bomb = OnDrop::new(move || self.clear_if_registered(own));
 

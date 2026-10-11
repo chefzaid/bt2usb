@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 48 | 0 | 0 |
+| [FIXME](#fixme) | 49 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **135** | **71** | **21** |
+| **Total** | **136** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -736,6 +736,20 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the coverage rows that gave the region figure as the line figure, all
   corrected in "Keys held in RAM and saved records are evicted separately"
   ([validation record](docs/testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)).
+- [x] **P3** **The portal guard's comments describe the old behaviour.** Found
+  by the independent review of "A GATT wait that ends after a peer disconnect
+  can clear the next link's portal". The comment above the drop guard in
+  `Portal::wait_once` and `Portal::wait_many`
+  (`vendor/nrf-softdevice/src/util/portal.rs`) still said the guard resets
+  the portal to None whenever the wait is cancelled, which the fix had
+  changed to "only while the portal holds this wait's own closure"; a reader
+  checking the patch against the comment would take the comment for the
+  behaviour. Fixed: both comments now carry the `bt2usb patch:` marker and
+  state the ownership check. The same review's other finding, that saving a
+  fifth device drops the keys of an evicted device a slot still uses, was
+  refuted: that eviction predates the fix and is the documented outcome
+  ([security](docs/security.md#pairing-and-authentication),
+  [first flash](docs/first-flash.md#6-device-management-and-degraded-display)).
 
 ## Needs Your Input
 

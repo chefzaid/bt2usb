@@ -619,7 +619,7 @@ The remaining panic paths, and why each does not fire:
 | SoftDevice fault handler | `fault_handler`: an internal SoftDevice assertion, an application access to SoftDevice-protected memory or peripherals, an unknown fault | bt2usb touches TWIM0, USBD, GPIOTE, and RTC1 (the embassy-time driver) through embassy-nrf, plus GPIO and FICR, never POWER, CLOCK, or other SoftDevice-owned blocks directly, and runs the interrupts it uses at priority 2 |
 | Event fetch | `run_soc`, `run_ble`, `on_soc_evt` | With a valid buffer the SoftDevice returns only "no event", "BLE not enabled", or "data size", and the buffer covers the largest event. SoC event IDs come from the same S140 bindings |
 | Connection bookkeeping | Reference-count `checked_add` and `checked_sub`, `with_state_by_conn_handle`, `index_by_handle` (also behind the non-panicking `try_with_state_by_conn_handle`), `gatt_client::portal` and `hvx_portal` (which index by connection handle), `Connection::new`, `on_disconnected` | A link has a few `Connection` clones at most (the slot worker, the HID client, the LED forwarder) against a `u8` count. The SoftDevice sends one DISCONNECTED per handle and every other event for a handle after its CONNECTED, and the 20-entry state and portal tables cover the 2 links, whose handles S140 numbers from 0 |
-| Event portals | `Multiple tasks waiting on same portal`; each portal's `RefCell` and thread-mode mutex; `unreachable!()` in `wait_many` | `GAP_PROCEDURE` serializes scans and connects, the GATT procedures on one link run one after another, and notifications and the LED write wait on different portals. Every portal call runs in thread mode, and no waiter closure re-enters a portal |
+| Event portals | `Multiple tasks waiting on same portal`; each portal's `RefCell` and thread-mode mutex; `unreachable!()` in `wait_many` | `GAP_PROCEDURE` serializes scans and connects, the GATT procedures on one link run one after another, and notifications and the LED write wait on different portals. A slot worker drops its pending GATT waits before closing the link, so a dropped wait clears its portal while the handle is still this link's, never after the SoftDevice reuses it ([takeover](architecture.md#attempt-numbers-and-retry-takeover)). Every portal call runs in thread mode, and no waiter closure re-enters a portal |
 | Connect waiter | `unexpected event {}` in `central::connect_inner` | The connect portal receives only CONNECTED or the connect timeout |
 | Notification loop | `unwrap!(Connection::from_handle(..))` in `gatt_client::run` | The notification portal receives events only while the link has an index, DISCONNECTED clears it, and the loop returns on DISCONNECTED |
 | Security callbacks | The `SecurityHandler` defaults `display_passkey`, `enter_passkey`, and `recv_out_of_band`, and the passkey arm's `debug_assert_eq!` | `Bonder` declares no input, no output, and no out-of-band data, so pairing is Just Works and the SoftDevice never asks for a passkey or out-of-band data. `Bonder` implements `on_bonded` |
@@ -683,8 +683,8 @@ for the same run. Report which tool produced a figure.
 Coverage measures only the code that host tests compile:
 
 - the host library as built for tests: `src/hid/`, the BLE advertisement
-  parser, connection-parameter bounds, coordinator, reconnect table,
-  long-read assembler, and management logic, `src/power_logic.rs`, and the UI display, input, and state-machine
+  parser, connection-parameter bounds, coordinator, scan result list,
+  reconnect table, long-read assembler, and management logic, `src/power_logic.rs`, and the UI display, input, and state-machine
   logic
 - `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
   `lib.rs` includes only under `cfg(test)`

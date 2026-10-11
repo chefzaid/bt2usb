@@ -158,10 +158,13 @@ Negative:
   `encrypt()` call fails with `PeerKeysNotFound`, pairing is not allowed, and
   the slot closes the link; but a pairing the binding has already started can
   run until the disconnect completes, and a completed one reaches `on_bonded`,
-  which updates the in-memory bond cache. Background reconnects also target
-  stored peers that have no bond. Whether such a pairing can complete before
-  the link closes has not been tested or observed; the TODO item below exists
-  to close this path.
+  which updates the in-memory bond cache. Since 2026-10-11 a background
+  reconnect starts an attempt only while `Bonder` holds the device's keys
+  (power-up skips a stored peer without a bond, and each attempt checks
+  first), so this arises only when a pairing on the other slot drops those
+  keys during an attempt or while the link it opened is up; on a link already
+  up the slot does not close it. Whether such a pairing can complete has not
+  been tested or observed; the TODO item below exists to close this path.
 - The connect path tries stored keys first and requests pairing only when no
   keys are stored. A peripheral that has discarded its side of the bond is
   therefore expected to fail to connect until it is forgotten in the Saved

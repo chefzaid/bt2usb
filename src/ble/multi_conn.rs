@@ -44,8 +44,8 @@ pub enum SlotCommand {
         attempt: u32,
     },
     /// Keep silently retrying a paired device until it connects (boot-time
-    /// auto-reconnect). Ends only on success, on losing the device's keys, or
-    /// on a new command.
+    /// auto-reconnect). Ends on success, on losing the device's keys, on an
+    /// error other than a failed connection (reported), or on a new command.
     Reconnect {
         device: DiscoveredDevice,
         attempt: u32,

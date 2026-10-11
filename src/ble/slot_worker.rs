@@ -402,31 +402,38 @@ async fn connect_and_run_secure(
     // security or GATT discovery, not only after notifications start flowing.
     // The user selecting this device while a background attempt is under way
     // takes the attempt over instead: it carries on under the new number.
-    let mut prepare = pin!(secure_and_discover(&conn, allow_pairing, slot));
+    // `prepare` is pinned inside the block so it is dropped before the link is
+    // closed: its GATT waits release their per-handle portals while the handle
+    // still belongs to this link, and cannot clear a registration another slot
+    // makes once the SoftDevice reuses the handle.
     let mut takeover = None;
-    let prepared = loop {
-        match select(cmd_rx.receive(), prepare.as_mut()).await {
-            Either::First(next_cmd) => match take_over(next_cmd, device) {
-                Ok((next, next_attempt)) => {
-                    *attempt = next_attempt;
-                    takeover = Some(next);
-                }
-                Err(next_cmd) => {
-                    close_connection(&conn).await;
-                    return SlotOutcome::Superseded(next_cmd);
-                }
-            },
-            Either::Second(result) => break result,
+    let prepared = {
+        let mut prepare = pin!(secure_and_discover(&conn, allow_pairing, slot));
+        loop {
+            match select(cmd_rx.receive(), prepare.as_mut()).await {
+                Either::First(next_cmd) => match take_over(next_cmd, device) {
+                    Ok((next, next_attempt)) => {
+                        *attempt = next_attempt;
+                        takeover = Some(next);
+                    }
+                    Err(next_cmd) => break Err(next_cmd),
+                },
+                Either::Second(result) => break Ok(result),
+            }
         }
     };
     let (client, descriptor) = match prepared {
-        Ok(value) => value,
-        Err(tag) => {
+        Ok(Ok(value)) => value,
+        Ok(Err(tag)) => {
             close_connection(&conn).await;
             return match takeover {
                 Some(next) => SlotOutcome::TakenOver(next),
                 None => SlotOutcome::Failed(tag),
             };
+        }
+        Err(next_cmd) => {
+            close_connection(&conn).await;
+            return SlotOutcome::Superseded(next_cmd);
         }
     };
 
@@ -447,29 +454,36 @@ async fn connect_and_run_secure(
     // link in the SoftDevice, which would leak a central connection slot).
     // A takeover keeps the link: the user selected this device before the
     // coordinator handled its Connected, so confirm it under the new number.
-    let mut run = pin!(hid_client::run_notification_loop(
-        &conn, &client, descriptor, report_tx, led_rx, slot
-    ));
-    let outcome = loop {
-        match select(cmd_rx.receive(), run.as_mut()).await {
-            Either::First(next_cmd) => match take_over(next_cmd, device) {
-                Ok((_, next_attempt)) => {
-                    *attempt = next_attempt;
-                    slot_event_tx
-                        .send(SlotEvent::Connected {
-                            slot,
-                            attempt: next_attempt,
-                            device: device.clone(),
-                        })
-                        .await;
-                }
-                Err(next_cmd) => {
-                    close_connection(&conn).await;
-                    break SlotOutcome::Superseded(next_cmd);
-                }
-            },
-            Either::Second(()) => break SlotOutcome::Closed,
+    // As with `prepare`, `run` is dropped before the link is closed.
+    let superseding = {
+        let mut run = pin!(hid_client::run_notification_loop(
+            &conn, &client, descriptor, report_tx, led_rx, slot
+        ));
+        loop {
+            match select(cmd_rx.receive(), run.as_mut()).await {
+                Either::First(next_cmd) => match take_over(next_cmd, device) {
+                    Ok((_, next_attempt)) => {
+                        *attempt = next_attempt;
+                        slot_event_tx
+                            .send(SlotEvent::Connected {
+                                slot,
+                                attempt: next_attempt,
+                                device: device.clone(),
+                            })
+                            .await;
+                    }
+                    Err(next_cmd) => break Some(next_cmd),
+                },
+                Either::Second(()) => break None,
+            }
         }
+    };
+    let outcome = match superseding {
+        Some(next_cmd) => {
+            close_connection(&conn).await;
+            SlotOutcome::Superseded(next_cmd)
+        }
+        None => SlotOutcome::Closed,
     };
 
     // Whatever this link was holding down on the host (a key, a mouse button)

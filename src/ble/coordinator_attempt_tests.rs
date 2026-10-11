@@ -1,6 +1,7 @@
 //! Host tests for attempt numbers and retry takeovers: a selection that takes
 //! over a background reconnect, reports from an attempt the coordinator has
-//! since replaced, and a failed takeover handing the slot back to the retry.
+//! since replaced, a failed takeover handing the slot back to the retry, and
+//! a reserved slot freed when its attempt ends without a link.
 
 use super::*;
 
@@ -118,6 +119,50 @@ fn a_failed_takeover_goes_back_to_the_retry() {
         acts.as_slice(),
         [Action::ConnectSlot { slot: 0, attempt: next, .. }] if *next != attempt
     ));
+}
+
+#[test]
+fn a_reserved_slot_is_freed_when_its_attempt_ends() {
+    // No link is up yet for the user's connection, a background retry, or a
+    // selection that took a retry over; an error the worker will not retry,
+    // or a disconnect, frees the slot.
+    let kb = dev(7, "kb");
+    for case in 0..3 {
+        let reserve = |m: &mut ConnManager<Addr>| match case {
+            0 => m.reserve_slot(0, &kb),
+            1 => m.reserve_retry(0, &kb),
+            _ => {
+                retrying(m, &kb, false);
+                plan_connect(m, core::slice::from_ref(&kb), 0, PartialEq::eq);
+                m.slot_attempt(0)
+            }
+        };
+        let mut m = mgr();
+        let attempt = reserve(&mut m);
+        let acts = on_slot_error(&mut m, 0, attempt, ErrorTag::HidNotFound, false);
+        assert_eq!(
+            acts.as_slice(),
+            &[
+                Action::Emit(UiEvent::Error(ErrorTag::HidNotFound)),
+                Action::Emit(UiEvent::Disconnected),
+            ]
+        );
+        assert!(!m.is_slot_occupied(0));
+        assert_eq!(m.slot_attempt(0), 0);
+        // The next selection reserves the slot afresh.
+        let acts = plan_connect(&mut m, core::slice::from_ref(&kb), 0, PartialEq::eq);
+        assert!(matches!(
+            acts.as_slice(),
+            [Action::ConnectSlot { slot: 0, attempt: next, .. }] if *next != attempt
+        ));
+
+        let mut m = mgr();
+        let attempt = reserve(&mut m);
+        let acts = on_slot_disconnected(&mut m, 0, attempt);
+        assert_eq!(acts.as_slice(), &[Action::Emit(UiEvent::Disconnected)]);
+        assert!(!m.is_slot_occupied(0));
+        assert_eq!(m.find_empty_slot(), Some(0));
+    }
 }
 
 #[test]

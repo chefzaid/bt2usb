@@ -69,6 +69,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot and event reducers |
+| [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives |
@@ -109,7 +110,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, conn_params, coordinator, scan_list, reconnect, long_read, management, messages}`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, bonder, hid_client, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -144,7 +145,7 @@ flowchart TD
         SDS["sd_setup and stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, messages, reconnect, conn_params, management, long_read, adv_parser"]
+        BC["ble::coordinator, scan_list, messages, reconnect, conn_params, management, long_read, adv_parser"]
         HID["hid modules"]
         UIL["ui::controller, ui_logic, input_logic, display_logic"]
         PL["power_logic"]
@@ -475,10 +476,12 @@ worker waiting to retry drops its target. Stored records and bonds are kept.
 
 ### Background Reconnect
 
-A slot reconnects silently, without pairing, in three cases: `ble_task` sends
+A slot reconnects silently, without pairing, in four cases: `ble_task` sends
 it `Reconnect` at power-up; an established link closes (`"slot {} link lost;
 reconnecting"`), including one that the user connected, unless `Bonder` holds
-no keys for the device; or a silent attempt fails with `ConnectFailed`. A
+no keys for the device; a silent attempt fails with `ConnectFailed`; or a user
+connection that took over a retry fails while `Bonder` still holds the
+device's keys ([takeover](#attempt-numbers-and-retry-takeover)). A
 silent attempt never pairs, so the retry runs only while `Bonder` holds the
 device's keys: power-up skips a saved device without a bond, and every
 attempt checks the keys first.
@@ -639,6 +642,15 @@ numbers keep those late reports from undoing the newer decision.
 - Any other command that arrives during an attempt supersedes it: the worker
   closes the link, reports `Disconnected` under the old number, and handles
   the command next (a `Disconnect` needs nothing more).
+- To carry an attempt on through a takeover, the worker pins the security and
+  discovery future, and then the notification loop, in a block that returns
+  the result or the superseding command; the future is dropped when that
+  block ends, before the worker closes the link. A pending wait of the
+  vendored GATT client clears its per-handle portal when dropped
+  (`vendor/nrf-softdevice/src/util/portal.rs`), so dropping it after the
+  disconnect could erase a wait the other slot had registered on the reused
+  handle and leave that slot's connect waiting forever with the GAP procedure
+  lock held.
 
 ### Peripheral Connection Parameter Requests
 

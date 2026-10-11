@@ -174,8 +174,8 @@ about one second after boot and again only when the high-water mark grows.
 
 ### Reconnecting Saved Peripherals
 
-With saved peers, the BLE task hands the two most recently added peers to the
-two connection slots at once, without a scan. Each slot listens for both saved
+With saved peers, the BLE task hands the two most recently added peers that
+have a bond to the two connection slots at once, without a scan. Each slot listens for both saved
 peers and connects to whichever it hears; a slot that hears the other slot's
 peer hands it over and logs `slot N scan found slot M's device`. For a
 keyboard:
@@ -299,7 +299,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `slot {} failed to secure BLE link` | Encryption or pairing failed, the link dropped, or security did not complete within 5 s | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
 | info | `slot {} link lost; reconnecting` | An established link dropped; held input was released | None; retries follow |
 | info | `slot {} link lost; no keys to reconnect` | An established link dropped, and the bridge holds no keys for that device (its pairing showed `Pairing not saved`, the peripheral paired without bonding, or a newer pairing evicted its keys); held input was released and the slot was freed | Select the device from a scan to pair it again |
-| info | `slot {} has no keys to reconnect` | A background reconnect stopped before an attempt because the bridge no longer holds the device's keys, which saving a fifth device evicts; the slot was freed | Select the device from a scan to pair it again |
+| info | `slot {} has no keys to reconnect` | A background reconnect stopped before an attempt because the bridge no longer holds the device's keys: a newer pairing bonded while four were held and dropped the oldest, whether or not that device was then saved; the slot was freed | Select the device from a scan to pair it again |
 | warn | `sd_ble_gap_connect err {:?}`, `sd_ble_gap_scan_start err {:?}`, `sd_ble_gap_authenticate err {:?}` (vendor) | A SoftDevice GAP call was rejected | Note the error; report if it repeats |
 | warn | `att mtu exchange refused: {:?}; keeping the default mtu` (vendor) | The peripheral answered the bridge's Exchange MTU Request with an ATT error, usually Request Not Supported. The link continues at the default 23-byte MTU, so the Report Map is read in 22-byte pieces | None; record the peripheral for the compatibility baseline |
 | warn | `sd_ble_gatts_exchange_mtu_reply err {:?}`, `sd_ble_gatts_sys_attr_set err {:?}` (vendor) | The SoftDevice rejected the bridge's answer to a peripheral's own MTU exchange or to its access of the bridge's Service Changed CCCD; the peripheral's request then times out after 30 s, and it may stop sending reports on that link | Record the peripheral and the error; if its input stops about 30 s after connecting, report it |
@@ -560,15 +560,19 @@ reboot or after it slept.
   connection, which shows `Connect failed` while the slot keeps retrying;
   forget it and pair it again. (Separately, the vendored crate answers a
   peer's Security Request by requesting pairing when it finds no keys, which
-  a background reconnect meets only when the keys are evicted while its
-  attempt is under way; refusing that is open work in
+  a background reconnect meets only when the keys are dropped while its
+  attempt is under way or while the link it opened is up; refusing that is
+  open work in
   [TODO.md](../TODO.md#ble-central-and-pairing).)
 - Only the two most recently added saved peers with a bond get a slot at
   boot. A third or fourth stored peer, or one saved without a bond because it
   paired without bonding, is connected only when selected from a scan.
-- The bridge no longer holds the peer's keys: saving a fifth device evicted
-  its record and keys, and a slot still retrying it stopped with
-  `slot N has no keys to reconnect`.
+- The bridge no longer holds the peer's keys: a newer pairing bonded while
+  four keys were held and dropped this peer's, even if that pairing was then
+  not saved, and a slot still retrying it stopped with
+  `slot N has no keys to reconnect`. Unless saving the newer device also
+  evicted its record, the peer gets its keys back at the next restart; the
+  two evictions are not yet kept in step ([FIXME](../TODO.md#fixme)).
 - Retries were stopped: DOWN on the Connected screen disconnects every slot; a
   scan started while both slots were occupied disconnects both first; Forget or
   Factory reset stops the affected slots. A background reconnect retries only
@@ -946,8 +950,8 @@ before restoring an older version; see
 [storage compatibility](deployment.md#storage-compatibility).
 
 The store holds at most four peers. Pairing a fifth evicts the one added
-earliest, and at boot the two most recently added peers get the connection
-slots. Stored keys are never backed up or exported; the only way to restore a
+earliest, and at boot the two most recently added peers with a bond get the
+connection slots. Stored keys are never backed up or exported; the only way to restore a
 lost pairing is to pair again.
 
 To replace a peer's keys, for example after suspected exposure, Forget it on the

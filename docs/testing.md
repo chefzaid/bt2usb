@@ -147,8 +147,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that numbers each slot attempt. The tree
-holds 379 `#[test]` functions: 373 in
+2026-10-11, in the commit that fixes the review findings on the retry
+takeover. The tree holds 380 `#[test]` functions: 374 in
 files compiled into the host library, 3 in `tests/integration.rs`, and 3 in
 `tests/oled_font.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
@@ -162,7 +162,8 @@ device-store tests, 17 controller, message, and management-target tests, and
 2026-10-10, as did the 6 integration tests. The panic lints, the bond
 identity fixes, the refused-pairing fix, the retry takeover, and the attempt
 numbers then added 20, and the 373 passed on 2026-10-11 with the 6
-integration tests. There are no `#[ignore]` or
+integration tests; the review fixes added one more, and the 374 passed the
+same day. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -189,7 +190,7 @@ integration tests. There are no `#[ignore]` or
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
 | [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 24 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success with the reservation's attempt number on the command, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved under the same attempt number, reconnection, and disconnect during retry. |
-| [ble/coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs) | 7 | Attempt numbers and retry takeovers ([architecture](architecture.md#attempt-numbers-and-retry-takeover)): a selection takes over the slot retrying the same device in the background, at power-up or after a link loss, under a new number, and the slot then waits like a user connection; Connected, Error, LinkLost, and Disconnected from the replaced retry change nothing, while Connected under the new number completes the connection; a free or out-of-range slot ignores every event, including one numbered like a reservation it has dropped; a failed takeover reported with `retrying` keeps the slot reserved and retrying under the same number, still completes when the retry connects, and can be taken over again; numbers wrap past 0; connecting keeps the reservation's number; a bonded peer selected at a new address uses the slot that holds it, retrying or connected. |
+| [ble/coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs) | 8 | Attempt numbers and retry takeovers ([architecture](architecture.md#attempt-numbers-and-retry-takeover)): a selection takes over the slot retrying the same device in the background, at power-up or after a link loss, under a new number, and the slot then waits like a user connection; Connected, Error, LinkLost, and Disconnected from the replaced retry change nothing, while Connected under the new number completes the connection; a free or out-of-range slot ignores every event, including one numbered like a reservation it has dropped; a failed takeover reported with `retrying` keeps the slot reserved and retrying under the same number, still completes when the retry connects, and can be taken over again; a slot reserved for the user's connection, for a background retry, or for a selection that took a retry over, with no link up yet, is freed by an `Error` without `retrying` or by `Disconnected`, and the next selection reserves it afresh; numbers wrap past 0; connecting keeps the reservation's number; a bonded peer selected at a new address uses the slot that holds it, retrying or connected. |
 | [ble/scan_list_tests.rs](../src/ble/scan_list_tests.rs), for [scan_list.rs](../src/ble/scan_list.rs) | 8 | `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 8 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. A zero-length or overrunning structure ends the walk, keeping the structures before it. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
@@ -888,6 +889,36 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
 
+## Validation Record — 2026-10-11, Retry Takeover Review Fixes
+
+This record covers the commit that fixes what the independent review of the
+[retry-takeover commit](#validation-record--2026-10-11-retry-takeover-races)
+upheld (FIXME "A superseded link's pending GATT wait could outlive it" in
+[TODO.md](../TODO.md#fixme)). The slot worker drops its pinned security,
+discovery, and notification futures before it closes a superseded link; one
+host test covers the release of a reserved slot without a link; and the
+documents now describe the RAM and store evictions separately, the Security
+Request window over the whole life of a background-opened link, and the boot
+selection of bonded records only. Keeping the two evictions in step is the
+open FIXME "Keys held in RAM and saved records are evicted separately". The
+checks ran locally on Linux in a container, on the working tree just before
+that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 374 unit tests, 3 integration tests, and 3 glyph-table tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.90% of lines, 99.01% of functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 117,420 bytes (−88 since `b13a1bf`), `.rodata` 11,608, `.data` 1,640, `.bss` 24,484 (−576: with each future pinned in its own block, the two slot-worker task futures in `ble_slot_task::POOL` shrink from 3,152 to 2,864 bytes each, measured with `llvm-nm -S`), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 116,400 bytes |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 51 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record |
+| Slot worker drop order | Review | Built and reviewed, not tested: the GATT portals and the reuse of a connection handle exist only in the SoftDevice, and the window needs the other slot to connect within the 10 ms the closing worker polls |
+| Hosted CI | GitHub Actions | Push run 38102873180 (`b13a1bf`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-11, Retry Takeover Races
 
 This record covers the commit that numbers each slot attempt, keeps a link or
@@ -905,12 +936,12 @@ on the working tree just before that commit; nothing ran on a board.
 | Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
 | Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
 | Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
-| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 117,508 bytes (+1,112 since `01200b1`), `.rodata` 11,608, `.data` 1,640, `.bss` 25,060 (+1,784: each of the two slot-worker task futures grows from 2,296 to 3,152 bytes, measured with `llvm-nm -S` on `ble_slot_task::POOL`), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 116,552 bytes |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 117,508 bytes (+1,112 since `01200b1`), `.rodata` 11,608, `.data` 1,640, `.bss` 25,060 (+1,784, measured with `llvm-nm -S`: 1,712 is the two slot-worker task futures in `ble_slot_task::POOL` growing from 2,296 to 3,152 bytes each, 24 is the `ble_task` future, and 48 is spread over smaller statics such as the larger slot command and event channels), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 116,552 bytes |
 | Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 51 tests, 2 skipped |
 | Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
 | Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record |
-| Slot worker and boot filter | Review | Built and reviewed, not tested: they depend on SoftDevice types. The coordinator side of every takeover path is host-tested in `coordinator_attempt_tests.rs` |
-| Independent review | Reviewers told to refute the change (protocol, security, documentation, tests), each finding then checked by a second reviewer told to refute it | Running when this commit was made; upheld findings go into a follow-up commit |
+| Slot worker and boot filter | Review | Built and reviewed, not tested: they depend on SoftDevice types. The coordinator reducers the takeover relies on are host-tested in `coordinator_attempt_tests.rs`; the review found the release of a reserved slot without a link untested, and the follow-up added that test |
+| Independent review | Reviewers told to refute the change (protocol, security, documentation, tests), each finding then checked by a second reviewer told to refute it | Finished after this commit: 19 findings upheld, two of them duplicates, and 3 refuted. The upheld ones (a GATT wait that could outlive its link, the untested slot release, the RAM and store evictions described as one, and stale documents) were fixed in the next commit ([review fixes](#validation-record--2026-10-11-retry-takeover-review-fixes)) |
 | Hosted CI | GitHub Actions | Push runs 38098634874 (`8474673`) and 38099057792 (`01200b1`), the commits before this one, passed every job |
 | Board/radio/USB acceptance | Physical hardware | Not performed; the change needs the "Select a reconnecting device" check in the first-flash checklist ([4. Pairing and daily use](first-flash.md#4-pairing-and-daily-use)) |
 

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 44 | 1 | 0 |
+| [FIXME](#fixme) | 45 | 2 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **131** | **72** | **21** |
+| **Total** | **132** | **73** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -623,13 +623,36 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   checks the keys and, without them, frees the slot
   (`slot {} has no keys to reconnect`); power-up reserves slots only for
   saved devices with a bond. A background reconnect therefore never targets a
-  device it could not secure, which also narrows the open P0 "Refuse
-  peer-initiated pairing on background reconnects" to keys evicted during an
-  attempt. `merge_advertisement` moved to `src/ble/scan_list.rs` with its
+  device the bridge holds no keys for, which also narrows the open P0 "Refuse
+  peer-initiated pairing on background reconnects" to keys dropped during an
+  attempt or while the link it opened is up. `merge_advertisement` moved to `src/ble/scan_list.rs` with its
   tests to keep `src/ble/coordinator.rs` under 500 lines. Seven host tests in
   `src/ble/coordinator_attempt_tests.rs` cover the numbers and the takeover
   ([architecture](docs/architecture.md#attempt-numbers-and-retry-takeover));
   the worker is checked by the embedded builds and Clippy.
+- [x] **P2** **A superseded link's pending GATT wait could outlive it.**
+  Found by the independent review of "The retry takeover raced the slot's own
+  events". To let a takeover carry on with a link's security and HID
+  discovery, or with its notification loop, that change pinned those futures
+  for the whole of `connect_and_run_secure` (`src/ble/slot_worker.rs`), so a
+  pending one was dropped only after `close_connection` had seen the link
+  gone. The vendored GATT client keeps one portal per connection handle, and
+  dropping a pending wait clears whatever that portal then holds
+  (`Portal::wait_once` and `wait_many` in
+  `vendor/nrf-softdevice/src/util/portal.rs`). If the other slot connected in
+  the 10 ms polling window and the SoftDevice gave it the freed handle, the
+  late drop erased its MTU exchange, its `connect_with_security` never
+  returned, and it held the GAP procedure lock until the bridge was reset,
+  stalling every scan and connect. Fixed: each future is pinned inside a
+  block that returns the result or the superseding command, so it is dropped
+  before the link is closed, as before that change. The same review found the
+  coordinator's release of a reserved slot without a link untested (one host
+  test added in `src/ble/coordinator_attempt_tests.rs`), the RAM and store
+  evictions described as one event (documents corrected; the code is the
+  FIXME below), the Security Request window stated too narrowly, and
+  documents still naming the old boot selection or `coordinator.rs` for the
+  scan list, all corrected
+  ([validation record](docs/testing.md#validation-record--2026-10-11-retry-takeover-review-fixes)).
 - [ ] **P2** **A background reconnect that loses its link during HID
   discovery stops retrying.** Found while fixing "The retry takeover raced the
   slot's own events". A silent attempt that connects and secures the link but
@@ -643,6 +666,25 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   the bridge restarts. Accept when a silent attempt whose link dropped during
   discovery is retried like a connection failure, a discovery failure on an
   intact link is still reported, and the documents say which is which.
+- [ ] **P2** **Keys held in RAM and saved records are evicted separately.**
+  Found by the independent review of "The retry takeover raced the slot's own
+  events". `Bonder` keeps the keys of up to four peers in RAM, loaded from
+  the store's bonded records at boot, and `on_bonded` drops the oldest of
+  them (`peers.remove(0)`) as soon as a bonding completes while four are
+  held, before the device is saved (`src/ble/bonder.rs`). The store evicts
+  its oldest record only when `Action::PersistDevice` adds a fifth
+  (`DeviceList::add`), and leaves that record's keys in RAM (`DeviceStore::add`
+  only logs `AddedAfterEviction`, `src/storage.rs`). A user pairing that bonds
+  and then fails HID discovery, or that the user cancels, therefore saves
+  nothing yet drops the oldest saved device's keys until restart: a slot
+  retrying that device stops (`slot N has no keys to reconnect`), and the P0
+  Security Request path opens without a fifth device ever being saved. And
+  when one of the four saved records has no bond, so RAM held only three keys,
+  saving a fifth device evicts the oldest record while its keys stay: a slot
+  retrying it keeps retrying and, when it reconnects, saves the record again
+  and evicts another. Accept when the keys in RAM match the store's bonded
+  records except for pairings not yet saved, a pairing that is never saved
+  drops no other device's keys, and host tests show both.
 
 ## Needs Your Input
 
@@ -806,8 +848,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   `vendor/nrf-softdevice/src/ble/gap.rs`). Since 2026-10-11 a background
   reconnect starts an attempt only while `Bonder` holds the device's keys, so
   the crate answers such a request by encrypting with them; a pairing can
-  still start when a pairing on the other slot evicts the keys during an
-  attempt. Accept when a
+  still start when a pairing on the other slot drops the keys during an
+  attempt or while the link it opened is up. Accept when a
   Security Request on a link whose request does not allow pairing cannot create
   or replace a bond, shown by a test or by recorded on-air evidence
   ([security](docs/security.md#threat-model)).
@@ -1828,11 +1870,11 @@ These decisions come first because several items below depend on them.
   prototype against named hardware. Accept when input reaches the intended PC
   without leaking held keys during a switch.
 - [ ] **P2** **Connect any saved device that is present.** Only the two most
-  recently added saved devices reconnect at boot
-  (`store.iter_recent().take(MAX_CONNECTIONS)` in `ble_task`,
-  `src/ble/multi_conn.rs`), and a slot whose link drops stays reserved for
-  that device (`on_slot_link_lost` in `src/ble/coordinator.rs`). A third or
-  fourth saved device, such as a second keyboard kept at another desk,
+  recently added saved devices with a bond reconnect at boot
+  (`store.iter_recent().filter(|paired| paired.bond.is_some()).take(MAX_CONNECTIONS)`
+  in `ble_task`, `src/ble/multi_conn.rs`), and a slot whose link drops stays
+  reserved for that device (`on_slot_link_lost` in `src/ble/coordinator.rs`).
+  A third or fourth saved device, such as a second keyboard kept at another desk,
   therefore connects only through a scan and a selection on the bridge, and
   that scan first disconnects both slots when both are in use
   (`plan_start_scan`). Let a saved device that advertises take a free slot, or

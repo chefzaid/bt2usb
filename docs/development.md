@@ -579,7 +579,7 @@ in a public issue. See the [security policy](../SECURITY.md).
 
 | You changed | Run before review | Also needed |
 | --- | --- | --- |
-| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `management`, `messages`, `controller`, `ui_logic`, `layout`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
+| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `scan_list`, `management`, `messages`, `controller`, `ui_logic`, `layout`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
 | `sim.rs`, `sim_ble.rs`, `ui/buttons.rs`, `ui/display.rs`, or `renode/` | `mask ci`, `mask sim-test` | |
 | The display font, or the `embedded-graphics` version | `cargo test --locked --test oled_font`, which also checks that `display.rs` draws in `FONT_6X10`; when only the glyphs changed, `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font` rewrites [oled-font-6x10.txt](../renode/oled-font-6x10.txt); then `mask sim-test` | Review the glyph table diff. A font with another cell size also needs the test's font, the text reader's cell size in [ssd1306.cs](../renode/ssd1306.cs), and the baselines in `ui::layout` changed ([OLED checks](testing.md#oled-checks)) |

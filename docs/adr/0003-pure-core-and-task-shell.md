@@ -203,10 +203,10 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 379 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 373 unit tests, 3 integration tests,
+  finds 380 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 374 unit tests, 3 integration tests,
   and 3 glyph-table tests, which passed on 2026-10-11 (the
-  [retry-takeover record](../testing.md#validation-record--2026-10-11-retry-takeover-races);
+  [retry-takeover review fixes record](../testing.md#validation-record--2026-10-11-retry-takeover-review-fixes);
   the [test map](../testing.md#test-map) lists what was added since the
   [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes

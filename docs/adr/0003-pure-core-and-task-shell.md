@@ -182,6 +182,7 @@ Follow-up obligations:
 - Test files: `src/lib_tests.rs`, `src/lib_logic_tests.rs`,
   `src/hid_descriptor_tests.rs`, `src/hid_keyboard_report_tests.rs`,
   `src/hid_classify_tests.rs`, `src/ble/coordinator_tests.rs`,
+  `src/ble/coordinator_scan_tests.rs`,
   `src/ble/reconnect_tests.rs`, `src/storage/devices_tests.rs`,
   `src/storage/devices_format_tests.rs`, `src/ui/ui_logic_tests.rs`,
   `src/ui/controller_tests.rs`, `src/ui/layout_tests.rs`,
@@ -201,8 +202,8 @@ Follow-up obligations:
 
 - **Implemented:** the split in the table above, for every subsystem listed.
 - **Software-verified:** counting with `grep -rh '#\[test\]' src tests | wc -l`
-  finds 372 test attributes, all of them compiled by
-  `cargo test --locked --lib --tests`: 366 unit tests, 3 integration tests,
+  finds 374 test attributes, all of them compiled by
+  `cargo test --locked --lib --tests`: 368 unit tests, 3 integration tests,
   and 3 glyph-table tests, which passed on 2026-10-11 (the
   [refused-pairing record](../testing.md#validation-record--2026-10-11-refused-pairing-not-stored);
   the [test map](../testing.md#test-map) lists what was added since the

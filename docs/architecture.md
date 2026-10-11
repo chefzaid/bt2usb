@@ -376,10 +376,17 @@ which can be too late for a firmware setup key.
 4. The UI collects names while on Scanning and moves to the device list, or to
    "No devices found" when the list is empty.
 5. SELECT on a device yields `Connect(index)`. `plan_connect` checks the index
-   against the coordinator's snapshot: a stale index or no free slot reports
-   `ConnectFailed`; an already connected address re-emits `Connected`; an
-   address already connecting produces no action; otherwise the first empty
-   slot is reserved and sent `SlotCommand::Connect`.
+   against the coordinator's snapshot; a stale index reports `ConnectFailed`.
+   It then looks for a slot that already holds the device: by the same
+   address, or, through `Bonder::same_peer`, by one bonded peer's identity key
+   that resolves both the held and the selected address. A connected one
+   re-emits `Connected`; a slot retrying it in the background (reserved at
+   power-up or after a link loss) is reserved again for this connection and
+   sent `SlotCommand::Connect`, because a background reconnect never pairs and
+   might never report; a connection the user already asked for produces no
+   action. Otherwise the first empty slot is reserved and sent
+   `SlotCommand::Connect`, or, with no free slot, `ConnectFailed` is
+   reported.
 6. The worker in [slot_worker.rs](../src/ble/slot_worker.rs) logs
    `"slot {} connecting to {}"`, takes the GAP lock, and calls
    `central::connect_with_security` with a whitelist of that one address, a
@@ -562,6 +569,13 @@ flowchart TD
   `"slot {} link lost; no keys to reconnect"`: a silent attempt never pairs,
   so it could never secure the link, and would hold the slot until the user
   disconnected.
+- Selecting the device from a scan while its slot retries replaces the retry
+  with a `SlotCommand::Connect` to the same slot, which may pair (step 5 of
+  [the user connect](#user-scan-connect-pairing-and-hid-discovery)). The worker drops the retry without
+  reporting `Disconnected`: the coordinator sends a `Connect` only to a slot
+  it has just reserved for it, so the report would free that reservation and
+  move the UI off Connecting. Any other superseding command still reports
+  `Disconnected` once.
 - A background reconnect that reaches Connected moves the UI from Home or
   Connecting to Connected. A scan the user started keeps its picker on screen;
   an error or notice also stays until acknowledged.

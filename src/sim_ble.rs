@@ -180,7 +180,9 @@ impl SimBle {
             }
             Command::Connect(index) => {
                 let scan = self.scan.clone();
-                for action in coordinator::plan_connect(&mut self.manager, &scan, index) {
+                for action in
+                    coordinator::plan_connect(&mut self.manager, &scan, index, PartialEq::eq)
+                {
                     self.execute(console, action, &mut events);
                 }
             }
@@ -237,7 +239,9 @@ impl SimBle {
                     device.name
                 );
                 let peripherals = self.peripherals.clone();
-                for action in coordinator::plan_connect(&mut self.manager, &peripherals, index) {
+                for action in
+                    coordinator::plan_connect(&mut self.manager, &peripherals, index, PartialEq::eq)
+                {
                     self.execute(console, action, &mut events);
                 }
             }

@@ -109,8 +109,7 @@ pub async fn connection_slot_task(
             match select(cmd_rx.receive(), scanner::find_saved_peer(sd, slot)).await {
                 Either::First(next) => {
                     scanner::clear_reconnect(slot);
-                    slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-                    pending_cmd = Some(next);
+                    pending_cmd = superseded(slot, next, slot_event_tx).await;
                     continue;
                 }
                 Either::Second(Some(address)) => device.address = address,
@@ -166,18 +165,30 @@ pub async fn connection_slot_task(
                 slot_event_tx.send(SlotEvent::Error { slot, tag }).await;
             }
             SlotOutcome::Superseded(next_cmd) => {
-                slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
-                // Re-process a superseding connect (Disconnect is a no-op here
-                // since the link is already torn down).
-                if !matches!(next_cmd, SlotCommand::Disconnect) {
-                    pending_cmd = Some(next_cmd);
-                }
+                pending_cmd = superseded(slot, next_cmd, slot_event_tx).await;
             }
         }
         if retry.is_none() {
             scanner::clear_reconnect(slot);
         }
     }
+}
+
+/// A command ended this slot's attempt or background retry; returns the
+/// command still to handle. The slot is reported free unless the command is a
+/// `Connect`: the coordinator sends one only to a slot it has just reserved
+/// for it (taking over a background retry), and a `Disconnected` would release
+/// that reservation and move the UI off Connecting. A `Disconnect` needs
+/// nothing more, since the attempt is already torn down.
+async fn superseded(
+    slot: usize,
+    next: SlotCommand,
+    slot_event_tx: &Sender<'_, CriticalSectionRawMutex, SlotEvent, 8>,
+) -> Option<SlotCommand> {
+    if !matches!(next, SlotCommand::Connect(_)) {
+        slot_event_tx.send(SlotEvent::Disconnected { slot }).await;
+    }
+    (!matches!(next, SlotCommand::Disconnect)).then_some(next)
 }
 
 /// Await the GAP disconnect event before publishing quiescence. Merely queuing

@@ -153,7 +153,10 @@ exceed 500 lines, counted with `wc -l` (blank and comment lines included). The
 host-tests job runs the check on Linux and lists each file over the limit. Split a file that grows past it along a responsibility, not at an
 arbitrary line: tests go to a sibling `*_tests.rs` file included with
 `#[cfg(test)] #[path = "..."] mod tests;` (as `ui_logic_tests.rs`,
-`reconnect_tests.rs`, and `coordinator_tests.rs` are), and a shell module
+`reconnect_tests.rs`, and `coordinator_tests.rs` are), and a test file that
+grows past it splits again into a child module that shares its helpers (as
+`coordinator_scan_tests.rs` left `coordinator_tests.rs` on 2026-10-11), and a
+shell module
 splits by task or handler (as `multi_conn.rs` gave up `slot_worker.rs` and
 `bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10).
 The device-store tests split the same way when the store moved into host
@@ -690,6 +693,7 @@ Coverage measures only the code that host tests compile:
 The test code in separate files is compiled with instrumentation but left out
 of the llvm-cov report: `tests/integration.rs`, the `src/*_tests.rs` files
 that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
+`coordinator_scan_tests.rs`,
 `reconnect_tests.rs`, `delivery_tests.rs`, `ui_logic_tests.rs`,
 `devices_tests.rs`, and `devices_format_tests.rs`. On 2026-10-10, after the device-store move,
 cargo-llvm-cov 0.9.1's summary listed 24 files, all of them source modules; passing

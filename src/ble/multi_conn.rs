@@ -111,7 +111,7 @@ pub async fn ble_task(
             .collect()
     };
     for (slot, device) in peers.into_iter().enumerate() {
-        manager.reserve_slot(slot, &device);
+        manager.reserve_retry(slot, &device);
         // A paired device that's asleep or off right now will advertise
         // once it wakes, so keep trying rather than failing once.
         send_slot_cmd(slot, SlotCommand::Reconnect(device), slot_txs).await;
@@ -137,7 +137,11 @@ pub async fn ble_task(
                         Some(scan) => scan.devices.as_slice(),
                         None => &[],
                     };
-                    for action in coordinator::plan_connect(&mut manager, devices, index) {
+                    let same_peer = |held: &Address, seen: &Address| {
+                        held == seen || bonder().same_peer(*held, *seen)
+                    };
+                    for action in coordinator::plan_connect(&mut manager, devices, index, same_peer)
+                    {
                         execute_action(action, event_tx, slot_txs, &mut flash).await;
                     }
                 }

@@ -127,6 +127,8 @@ pub struct Slot<A> {
     name: String<32>,
     connected: bool,
     connecting: bool,
+    /// The connecting slot is a background reconnect, which never pairs.
+    retrying: bool,
 }
 
 impl<A> Slot<A> {
@@ -136,6 +138,7 @@ impl<A> Slot<A> {
             name: String::new(),
             connected: false,
             connecting: false,
+            retrying: false,
         }
     }
 
@@ -187,33 +190,31 @@ impl<A: Clone + PartialEq> ConnManager<A> {
         self.slots.get(slot).and_then(|s| s.address.as_ref())
     }
 
-    /// Is this address already in use by an occupied slot?
-    pub fn is_connected_address(&self, address: &A) -> bool {
-        self.slots
-            .iter()
-            .any(|s| s.is_occupied() && s.address.as_ref() == Some(address))
+    /// Mark a slot as connecting (reserved) for the given device, on a
+    /// connection the user asked for.
+    pub fn reserve_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
+        self.set_slot(slot, device, false, false);
     }
 
-    /// Mark a slot as connecting (reserved) for the given device.
-    pub fn reserve_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
-        if let Some(entry) = self.slots.get_mut(slot) {
-            *entry = Slot {
-                address: Some(device.address.clone()),
-                name: device.name.clone(),
-                connected: false,
-                connecting: true,
-            };
-        }
+    /// Mark a slot as reserved for a background reconnect to the given device:
+    /// at power-up, or after its link was lost.
+    pub fn reserve_retry(&mut self, slot: usize, device: &DeviceInfo<A>) {
+        self.set_slot(slot, device, false, true);
     }
 
     /// Mark a slot as fully connected for the given device.
     pub fn connect_slot(&mut self, slot: usize, device: &DeviceInfo<A>) {
+        self.set_slot(slot, device, true, false);
+    }
+
+    fn set_slot(&mut self, slot: usize, device: &DeviceInfo<A>, connected: bool, retrying: bool) {
         if let Some(entry) = self.slots.get_mut(slot) {
             *entry = Slot {
                 address: Some(device.address.clone()),
                 name: device.name.clone(),
-                connected: true,
-                connecting: false,
+                connected,
+                connecting: !connected,
+                retrying,
             };
         }
     }
@@ -309,10 +310,16 @@ pub fn plan_start_scan<A: Clone + PartialEq>(
 
 /// Decide how to handle a connect request for `devices[index]`, reserving a
 /// slot on success.
+///
+/// `same_peer` says whether two addresses belong to one peripheral: equal, or
+/// both resolved by one bonded peer's identity key, which takes the
+/// SoftDevice on the firmware. A slot already holding the selected peer is
+/// used instead of a second one.
 pub fn plan_connect<A: Clone + PartialEq>(
     manager: &mut ConnManager<A>,
     devices: &[DeviceInfo<A>],
     index: usize,
+    same_peer: impl Fn(&A, &A) -> bool,
 ) -> Vec<Action<A>, 1> {
     let mut actions = Vec::new();
 
@@ -321,20 +328,35 @@ pub fn plan_connect<A: Clone + PartialEq>(
         return actions;
     };
 
-    if manager.is_connected_address(&device.address) {
-        // Selecting an established peer must finish the UI's Connecting state
-        // even though no new worker operation (or flash write) is necessary.
-        if manager
-            .slots
-            .iter()
-            .any(|slot| slot.connected && slot.address.as_ref() == Some(&device.address))
-        {
+    let held = manager.slots.iter().enumerate().find(|(_, slot)| {
+        slot.is_occupied()
+            && slot
+                .address
+                .as_ref()
+                .is_some_and(|address| same_peer(address, &device.address))
+    });
+    if let Some((slot, held)) = held {
+        if held.connected {
+            // Selecting an established peer must finish the UI's Connecting
+            // state even though no new worker operation (or flash write) is
+            // necessary.
             let _ = actions.push(Action::Emit(UiEvent::Connected(connection_summary(
                 manager,
             ))));
+        } else if held.retrying {
+            // A background reconnect never pairs, so it cannot recover a peer
+            // that lost its keys or a record saved without any, and would
+            // leave the UI on Connecting for good. The user's selection
+            // replaces it with a connection that may pair.
+            manager.reserve_slot(slot, device);
+            let _ = actions.push(Action::ConnectSlot {
+                slot,
+                device: device.clone(),
+            });
         }
-        // An in-progress attempt still owns its slot and will publish its own
-        // eventual success/error; never report it as established prematurely.
+        // Otherwise a connection the user asked for still owns its slot and
+        // will publish its own success or error; never report it as
+        // established prematurely.
         return actions;
     }
 
@@ -402,7 +424,7 @@ pub fn on_slot_link_lost<A: Clone + PartialEq>(
     device: &DeviceInfo<A>,
 ) -> Vec<Action<A>, 1> {
     let mut actions = Vec::new();
-    manager.reserve_slot(slot, device);
+    manager.reserve_retry(slot, device);
     let _ = actions.push(Action::Emit(link_state(manager)));
     actions
 }

@@ -60,6 +60,15 @@ impl Bonder {
         }
     }
 
+    /// Whether one bond's identity key matches both addresses, so they are one
+    /// bonded peer whatever private addresses it used ([`key_matches`]).
+    pub(crate) fn same_peer(&self, a: Address, b: Address) -> bool {
+        self.peers
+            .borrow()
+            .iter()
+            .any(|bond| key_matches(&bond.peer_id, a) && key_matches(&bond.peer_id, b))
+    }
+
     /// Whether the pairing on the link to `address` was refused, forgetting
     /// the refusal.
     pub(crate) fn take_refused(&self, address: Address) -> bool {

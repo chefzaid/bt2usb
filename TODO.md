@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 42 | 1 | 0 |
+| [FIXME](#fixme) | 43 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **129** | **72** | **21** |
+| **Total** | **130** | **71** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -560,16 +560,38 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   peer that lost its keys and a legacy record without a bond. The slot
   worker is checked by the embedded builds and Clippy; the coordinator's
   handling of `Disconnected` is host-tested.
-- [ ] **P2** **Selecting a device whose slot is retrying leaves the UI on
-  Connecting.** `plan_connect` returns no action when the selected address
-  is reserved by a slot that is not connected, expecting that attempt to
-  report. A background retry that cannot succeed, such as one for a peripheral
-  that lost its keys after pairing with another host, never reports, so
-  `Connecting...` stays on screen and the device cannot be paired again
-  without disconnecting everything first. Close by sending the selection to
-  that slot as an explicit connect, which may pair, with a coordinator host
-  test and a guard so the slot's `Disconnected` for the superseded retry does
-  not free the reservation.
+- [x] **P1** **Selecting a device whose slot was retrying left the UI on
+  Connecting.** `plan_connect` returned no action when the selected address
+  was reserved by a slot that was not connected, expecting that attempt to
+  report. A background retry that cannot succeed, such as one for a
+  peripheral that lost its keys after pairing with another computer, or for a
+  legacy record without keys, never reports, so `Connecting...`, which
+  ignores every button, stayed on screen until the device was forgotten from
+  Saved devices or the bridge was reset; after a reset the boot reconnect
+  started the same retry again. A bonded peer selected at a new private
+  address was not recognized as the device its slot was retrying at all, so
+  a second slot connected it, or `Connect failed` showed when none was free.
+  Raised from P2 because the trap needs no hostile peer: a keyboard paired
+  with another computer, the usual case behind a KVM, reaches it. Found while
+  fixing "A refused pairing still stored the device". Fixed: `ConnManager`
+  marks a slot reserved by a background reconnect (`reserve_retry`, used at
+  power-up and by `on_slot_link_lost`), and `plan_connect` takes a
+  `same_peer` test, which the firmware answers with the address or
+  `Bonder::same_peer` (one bond's identity key matching both addresses). A
+  slot that holds the selected device and is retrying is reserved again for
+  the user's connection and sent `SlotCommand::Connect`, which may pair; a
+  connected one is acknowledged. The worker drops a retry superseded by a
+  `Connect` without reporting `Disconnected`, which would free the slot and
+  move the UI off Connecting, and reports a superseding `Disconnect` once
+  instead of twice (`superseded` in `src/ble/slot_worker.rs`). A peripheral
+  that lost its own keys now ends in `Connect failed`, from which the user
+  forgets and pairs it again. Two coordinator host tests cover the takeover
+  at power-up and after a link loss, and a bonded peer at a new address
+  (`src/ble/coordinator_tests.rs`, from which the scan tests moved to
+  `coordinator_scan_tests.rs` to stay under 500 lines;
+  [architecture](docs/architecture.md#user-scan-connect-pairing-and-hid-discovery)).
+  The worker and `Bonder::same_peer` are checked by the embedded builds and
+  Clippy.
 
 ## Needs Your Input
 
@@ -620,7 +642,7 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
 - [x] Keep connection-slot, scan-merge, and command/event decisions in a pure
   coordinator reducer that returns actions for the async shell to execute,
   with host tests (`src/ble/coordinator.rs`, `src/ble/coordinator_tests.rs`,
-  `src/ble/multi_conn.rs`; [ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)).
+  `src/ble/coordinator_scan_tests.rs`, `src/ble/multi_conn.rs`; [ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)).
 - [x] Serialize SoftDevice scan and connection setup with one shared GAP
   procedure lock, and bound each connection attempt by
   `BLE_CONNECT_TIMEOUT_SECS` (6 s) so a user scan does not wait indefinitely
@@ -752,7 +774,7 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   the bridge is always listed. Ties keep the listed device, an unavailable RSSI
   (127) ranks last, and a replaced device can return only through an
   advertisement that carries the HID UUID. Six host tests in
-  `src/ble/coordinator_tests.rs` cover it, including a keyboard at -40 dBm
+  `src/ble/coordinator_scan_tests.rs` cover it, including a keyboard at -40 dBm
   heard after twenty advertisers at -70 to -89 dBm. Advertisers that reach the
   bridge more strongly than the intended device can still crowd it out
   ([security](docs/security.md#threat-model); `src/ble/coordinator.rs`,

@@ -113,7 +113,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `coordinator.rs` (with `coordinator_tests.rs` and `coordinator_scan_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/ui/display_logic.rs`, `input_logic.rs`, `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -147,8 +147,9 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that stopped storing refused pairings. The tree
-holds 372 `#[test]` functions: 366 in
+2026-10-11, in the commit that lets a selection take over a background
+retry. The tree
+holds 374 `#[test]` functions: 368 in
 files compiled into the host library, 3 in `tests/integration.rs`, and 3 in
 `tests/oled_font.rs`, and every one of them runs under
 `cargo test --locked --lib --tests` (see
@@ -160,8 +161,8 @@ fourteen UI tests (the management deadline, the saved-device list, scans, and
 device-store tests, 17 controller, message, and management-target tests, and
 12 screen-layout tests were added; the 353 passed with `cargo test` on
 2026-10-10, as did the 6 integration tests. The panic lints, the bond
-identity fixes, and the refused-pairing fix then added 13, and the 366
-passed on 2026-10-11 with the 6 integration tests. There are no `#[ignore]` or
+identity fixes, the refused-pairing fix, and the retry takeover then added
+15, and the 368 passed on 2026-10-11 with the 6 integration tests. There are no `#[ignore]` or
 `#[should_panic]` tests.
 
 ### HID Reports, Descriptors, And Delivery
@@ -186,7 +187,8 @@ passed on 2026-10-11 with the 6 integration tests. There are no `#[ignore]` or
 
 | Location | Tests | Behavior covered |
 | --- | --- | --- |
-| [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 32 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success, already connected acknowledges without a duplicate connect, already connecting waits, no free slot), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved, reconnection, and disconnect during retry. `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
+| [ble/coordinator_tests.rs](../src/ble/coordinator_tests.rs) | 26 | `ConnManager` slot state machine (reserve, connect, disconnect, ignored out-of-range slots, second slot when the first is busy, summary text) and the reducers: `plan_start_scan`, `plan_connect` (out of range, success, already connected acknowledges without a duplicate connect, already connecting waits, no free slot, a selection takes over the slot retrying the same device in the background, at power-up or after a link loss, and the slot then waits like a user connection; a bonded peer selected at a new address uses the slot that holds it, connecting or connected), `plan_disconnect`, `on_slot_connected` (persist and summary), `on_slot_disconnected`, `on_slot_error`, `on_slot_link_lost` keeping the slot reserved, reconnection, and disconnect during retry. |
+| [ble/coordinator_scan_tests.rs](../src/ble/coordinator_scan_tests.rs) | 8 | `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 8 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. A zero-length or overrunning structure ends the walk, keeping the structures before it. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
 | [ble/management.rs](../src/ble/management.rs) | 6 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. `forget_targets` picks the connected or reconnecting slots of the forgotten peer only. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |

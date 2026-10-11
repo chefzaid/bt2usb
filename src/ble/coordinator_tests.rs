@@ -1,8 +1,11 @@
 //! Host tests for the pure connection coordinator: the slot manager, the
-//! scan, connect, and disconnect plans, the slot event reducers, and scan
-//! results that update or enroll a device.
+//! scan, connect, and disconnect plans, and the slot event reducers. The scan
+//! result tests are in `coordinator_scan_tests.rs`.
 
 use super::*;
+
+#[path = "coordinator_scan_tests.rs"]
+mod scan;
 
 // Trivial stand-in for the embedded `Address` type.
 type Addr = u8;
@@ -41,7 +44,7 @@ fn reserve_then_connect_then_disconnect() {
     assert!(m.is_slot_occupied(0));
     assert_eq!(m.occupied_count(), 1);
     assert_eq!(m.active_count(), 0, "reserved != active");
-    assert!(m.is_connected_address(&1));
+    assert_eq!(m.slot_address(0), Some(&1));
 
     m.connect_slot(0, &kb);
     assert_eq!(m.active_count(), 1);
@@ -50,7 +53,7 @@ fn reserve_then_connect_then_disconnect() {
     m.disconnect_slot(0);
     assert_eq!(m.occupied_count(), 0);
     assert_eq!(m.active_count(), 0);
-    assert!(!m.is_connected_address(&1));
+    assert_eq!(m.slot_address(0), None);
 }
 
 #[test]
@@ -76,7 +79,7 @@ fn default_matches_new() {
 fn reserve_uses_second_slot_when_first_busy() {
     let mut m = mgr();
     m.connect_slot(0, &dev(1, "kb"));
-    let acts = plan_connect(&mut m, &[dev(2, "mouse")], 0);
+    let acts = plan_connect(&mut m, &[dev(2, "mouse")], 0, PartialEq::eq);
     match &acts[0] {
         Action::ConnectSlot { slot, .. } => assert_eq!(*slot, 1),
         other => panic!("expected ConnectSlot to slot 1, got {other:?}"),
@@ -127,7 +130,7 @@ fn plan_start_scan_disconnects_all_when_full() {
 #[test]
 fn plan_connect_out_of_range_errors() {
     let mut m = mgr();
-    let acts = plan_connect(&mut m, &[], 0);
+    let acts = plan_connect(&mut m, &[], 0, PartialEq::eq);
     assert_eq!(
         acts[0],
         Action::Emit(UiEvent::Error(ErrorTag::ConnectFailed))
@@ -138,7 +141,7 @@ fn plan_connect_out_of_range_errors() {
 fn plan_connect_success_reserves_and_emits_connect() {
     let mut m = mgr();
     let devices = [dev(1, "kb"), dev(2, "mouse")];
-    let acts = plan_connect(&mut m, &devices, 1);
+    let acts = plan_connect(&mut m, &devices, 1, PartialEq::eq);
     assert_eq!(acts.len(), 1);
     match &acts[0] {
         Action::ConnectSlot { slot, device } => {
@@ -157,7 +160,7 @@ fn plan_connect_already_connected_acknowledges_without_duplicate_connect() {
     let mut m = mgr();
     m.connect_slot(0, &dev(7, "kb"));
     let devices = [dev(7, "kb")];
-    let acts = plan_connect(&mut m, &devices, 0);
+    let acts = plan_connect(&mut m, &devices, 0, PartialEq::eq);
     assert_eq!(
         acts.as_slice(),
         &[Action::Emit(UiEvent::Connected(dev(7, "kb").name))]
@@ -171,9 +174,70 @@ fn plan_connect_already_connecting_waits_for_real_result() {
     let mut m = mgr();
     let devices = [dev(7, "kb")];
     m.reserve_slot(0, &devices[0]);
-    let acts = plan_connect(&mut m, &devices, 0);
+    let acts = plan_connect(&mut m, &devices, 0, PartialEq::eq);
     assert!(acts.is_empty(), "no duplicate worker or premature success");
     assert_eq!(m.active_count(), 0);
+    assert_eq!(m.occupied_count(), 1);
+}
+
+/// A stand-in for identity resolution: 0x1N and 0x2N are two addresses of
+/// the same bonded peer N.
+fn same_bonded_peer(a: &Addr, b: &Addr) -> bool {
+    a == b || (a & 0x0F == b & 0x0F && a & 0xF0 != 0 && b & 0xF0 != 0)
+}
+
+#[test]
+fn selecting_a_device_takes_over_its_background_retry() {
+    for retry in [
+        |m: &mut ConnManager<Addr>, kb: &DeviceInfo<Addr>| m.reserve_retry(0, kb),
+        |m: &mut ConnManager<Addr>, kb: &DeviceInfo<Addr>| {
+            m.connect_slot(0, kb);
+            on_slot_link_lost(m, 0, kb);
+        },
+    ] {
+        let mut m = mgr();
+        let devices = [dev(7, "kb")];
+        retry(&mut m, &devices[0]);
+        let acts = plan_connect(&mut m, &devices, 0, PartialEq::eq);
+        // The same slot connects again, now allowed to pair; no second slot.
+        assert_eq!(
+            acts.as_slice(),
+            &[Action::ConnectSlot {
+                slot: 0,
+                device: dev(7, "kb"),
+            }]
+        );
+        assert_eq!(m.occupied_count(), 1);
+        assert_eq!(m.find_empty_slot(), Some(1));
+        // The slot is now the user's connection: selecting again waits for it.
+        assert!(plan_connect(&mut m, &devices, 0, PartialEq::eq).is_empty());
+    }
+}
+
+#[test]
+fn a_bonded_peer_at_a_new_address_uses_the_slot_that_holds_it() {
+    let mut m = mgr();
+    m.reserve_retry(0, &dev(0x13, "kb"));
+    let devices = [dev(0x23, "kb")];
+    let acts = plan_connect(&mut m, &devices, 0, same_bonded_peer);
+    assert_eq!(
+        acts.as_slice(),
+        &[Action::ConnectSlot {
+            slot: 0,
+            device: dev(0x23, "kb"),
+        }]
+    );
+    assert_eq!(m.slot_address(0), Some(&0x23));
+    assert_eq!(m.occupied_count(), 1);
+
+    // Connected under its old address, it is acknowledged, not connected twice.
+    let mut m = mgr();
+    m.connect_slot(1, &dev(0x13, "kb"));
+    let acts = plan_connect(&mut m, &devices, 0, same_bonded_peer);
+    assert_eq!(
+        acts.as_slice(),
+        &[Action::Emit(UiEvent::Connected(dev(0x13, "kb").name))]
+    );
     assert_eq!(m.occupied_count(), 1);
 }
 
@@ -183,7 +247,7 @@ fn plan_connect_no_free_slot_errors() {
     m.connect_slot(0, &dev(1, "a"));
     m.connect_slot(1, &dev(2, "b"));
     let devices = [dev(3, "c")];
-    let acts = plan_connect(&mut m, &devices, 0);
+    let acts = plan_connect(&mut m, &devices, 0, PartialEq::eq);
     assert_eq!(
         acts[0],
         Action::Emit(UiEvent::Error(ErrorTag::ConnectFailed))
@@ -281,7 +345,7 @@ fn on_slot_link_lost_keeps_slot_reserved_for_reconnect() {
     // connect request can't take the slot out from under the reconnect.
     assert_eq!(m.active_count(), 0);
     assert!(m.is_slot_occupied(0));
-    assert!(m.is_connected_address(&1));
+    assert_eq!(m.slot_address(0), Some(&1));
     assert_eq!(m.find_empty_slot(), Some(1));
 }
 
@@ -324,142 +388,4 @@ fn disconnect_while_reconnecting_targets_the_slot() {
     on_slot_link_lost(&mut m, 0, &kb);
     let acts = plan_disconnect(&m);
     assert_eq!(acts.as_slice(), &[Action::DisconnectSlot(0)]);
-}
-
-#[test]
-fn name_only_scan_response_updates_known_hid_even_when_list_is_full() {
-    let mut found = heapless::Vec::<_, 1>::new();
-    assert!(merge_advertisement(
-        &mut found,
-        1u8,
-        -60,
-        &[3, 3, 0x12, 0x18]
-    ));
-    assert_eq!(found[0].name.as_str(), "Unknown");
-    assert!(!merge_advertisement(
-        &mut found,
-        1,
-        -50,
-        &[3, 9, b'K', b'B']
-    ));
-    assert_eq!(found[0].name.as_str(), "KB");
-    assert_eq!(found[0].rssi, -50);
-    assert!(!merge_advertisement(
-        &mut found,
-        2,
-        -70,
-        &[3, 3, 0x12, 0x18]
-    ));
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].address, 1);
-    assert!(!merge_advertisement(&mut found, 1, -40, &[2, 1, 6]));
-    assert_eq!(found[0].name.as_str(), "KB");
-}
-
-#[test]
-fn name_without_hid_uuid_cannot_enroll_an_unknown_device() {
-    let mut found = heapless::Vec::<_, 2>::new();
-    assert!(!merge_advertisement(
-        &mut found,
-        1u8,
-        -20,
-        &[3, 9, b'K', b'B']
-    ));
-    assert!(found.is_empty());
-}
-
-// ── Crowded scans ──────────────────────────────────────────────────────
-
-/// An advertisement carrying only the HID service UUID.
-const HID_ADV: &[u8] = &[3, 3, 0x12, 0x18];
-
-fn addresses<const N: usize>(found: &heapless::Vec<DeviceInfo<Addr>, N>) -> Vec<Addr, N> {
-    let mut list: Vec<Addr, N> = found.iter().map(|d| d.address).collect();
-    list.sort_unstable();
-    list
-}
-
-#[test]
-fn crowded_scan_still_lists_the_device_next_to_the_bridge() {
-    const N: usize = crate::config::BLE_MAX_DISCOVERED;
-    let mut found = heapless::Vec::<_, N>::new();
-    // Twenty HID advertisers, from -70 dBm down to -89 dBm, fill the list
-    // before the keyboard in pairing mode is heard.
-    for address in 0..20u8 {
-        merge_advertisement(&mut found, address, -70 - address as i8, HID_ADV);
-    }
-    assert_eq!(found.len(), N);
-    let keyboard = [3, 3, 0x12, 0x18, 3, 9, b'K', b'B'];
-    assert!(merge_advertisement(&mut found, 100, -40, &keyboard));
-    // The distant devices keep advertising; none displaces the keyboard.
-    for address in 0..20u8 {
-        merge_advertisement(&mut found, address, -70 - address as i8, HID_ADV);
-    }
-    let keyboard = found.iter().find(|d| d.address == 100).expect("listed");
-    assert_eq!(keyboard.name.as_str(), "KB");
-    assert_eq!(addresses(&found).as_slice(), &[0, 1, 2, 3, 4, 5, 6, 100]);
-}
-
-#[test]
-fn only_a_stronger_newcomer_replaces_the_weakest_entry() {
-    let mut found = heapless::Vec::<_, 2>::new();
-    assert!(merge_advertisement(&mut found, 1u8, -50, HID_ADV));
-    assert!(merge_advertisement(&mut found, 2, -60, HID_ADV));
-    assert!(!merge_advertisement(&mut found, 3, -60, HID_ADV));
-    assert!(!merge_advertisement(&mut found, 3, -75, HID_ADV));
-    assert_eq!(addresses(&found).as_slice(), &[1, 2]);
-    assert!(merge_advertisement(&mut found, 3, -55, HID_ADV));
-    assert_eq!(addresses(&found).as_slice(), &[1, 3]);
-}
-
-#[test]
-fn latest_rssi_decides_which_entry_is_weakest() {
-    let mut found = heapless::Vec::<_, 2>::new();
-    merge_advertisement(&mut found, 1u8, -40, HID_ADV);
-    merge_advertisement(&mut found, 2, -60, HID_ADV);
-    // Device 1 moves away, so its later advertisements arrive weaker.
-    assert!(!merge_advertisement(&mut found, 1, -80, HID_ADV));
-    assert!(merge_advertisement(&mut found, 3, -70, HID_ADV));
-    assert_eq!(addresses(&found).as_slice(), &[2, 3]);
-}
-
-#[test]
-fn unavailable_rssi_ranks_below_every_measurement() {
-    let mut found = heapless::Vec::<_, 1>::new();
-    assert!(merge_advertisement(
-        &mut found,
-        1u8,
-        RSSI_UNAVAILABLE,
-        HID_ADV
-    ));
-    assert!(merge_advertisement(&mut found, 2, -100, HID_ADV));
-    assert!(!merge_advertisement(
-        &mut found,
-        3,
-        RSSI_UNAVAILABLE,
-        HID_ADV
-    ));
-    assert_eq!(addresses(&found).as_slice(), &[2]);
-}
-
-#[test]
-fn replaced_device_needs_its_hid_uuid_to_return() {
-    let mut found = heapless::Vec::<_, 1>::new();
-    merge_advertisement(&mut found, 1u8, -70, HID_ADV);
-    assert!(merge_advertisement(&mut found, 2, -40, HID_ADV));
-    // A name-only scan response from the replaced device cannot re-enroll it.
-    assert!(!merge_advertisement(
-        &mut found,
-        1,
-        -30,
-        &[3, 9, b'K', b'B']
-    ));
-    assert_eq!(addresses(&found).as_slice(), &[2]);
-}
-
-#[test]
-fn zero_capacity_list_stays_empty() {
-    let mut found = heapless::Vec::<DeviceInfo<Addr>, 0>::new();
-    assert!(!merge_advertisement(&mut found, 1, -40, HID_ADV));
-    assert!(found.is_empty());
 }

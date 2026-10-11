@@ -278,7 +278,11 @@ device the bridge holds no keys for, such as one that showed
 `Pairing not saved`, could reconnect only by pairing, which a background
 reconnect never does, so its slot is freed instead and the log shows
 `slot N link lost; no keys to reconnect`; select the device from a scan to
-pair it again. A link that drops without a disconnect is detected by the supervision timeout, which
+pair it again. Selecting a device from a scan while its slot is reconnecting
+in the background makes that slot connect to it at once, and pair it if the
+bridge holds no keys for it. A device that lost its own keys, for example by
+pairing with another computer, then shows `Connect failed`: forget it in
+saved devices and pair it again. A link that drops without a disconnect is detected by the supervision timeout, which
 is never longer than 4 seconds, whatever the peripheral asks for
 ([Connection And Security](#connection-and-security)).
 
@@ -888,8 +892,8 @@ are open work.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 372 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 366 unit tests, the 3
+- The source contains 374 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 368 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs), and
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   all of which run with `mask test`.

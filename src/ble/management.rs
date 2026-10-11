@@ -139,7 +139,7 @@ mod tests {
         let mut manager = ConnManager::new();
         assert_eq!(forget_targets(&manager, |_: &u8| true), [false, false]);
         manager.connect_slot(0, &device(7));
-        manager.reserve_slot(1, &device(9)); // link lost, retrying in the background
+        manager.reserve_retry(1, &device(9)); // link lost, retrying in the background
         assert_eq!(forget_targets(&manager, |a| *a == 9), [false, true]);
         assert_eq!(forget_targets(&manager, |a| *a == 7), [true, false]);
         assert_eq!(forget_targets(&manager, |a| *a == 8), [false, false]);

@@ -161,19 +161,24 @@ pub enum Counter {
     /// A background reconnect attempt that ended without a working link.
     ReconnectFailures,
     /// A report from a peripheral that replaced or merged into the previous
-    /// one before that reached the bridge's report channel, usually because
-    /// the channel was full. The latest state still goes out; a replaced
-    /// keyboard or media state is lost, merged mouse motion is not
-    /// (`hid::coalesce::ReportCoalescer`).
+    /// one while that one still waited for the slot to hand it on towards
+    /// USB. Notifications the radio delivers together, in one connection
+    /// event or after the firmware was busy elsewhere, all reach the slot
+    /// before it hands any on, and a full report channel holds reports back
+    /// the same way. The latest keyboard and media state and the newer mouse
+    /// buttons go out, so a state in between, such as a fast tap or a click
+    /// whose press and release merged, is lost; mouse motion is added up,
+    /// stopping at ±127 per axis (`hid::coalesce::ReportCoalescer`).
     ReportsCoalesced,
     /// A USB endpoint queue that was full and collapsed to its latest state,
     /// dropping intermediate presses or motion
     /// (`hid::delivery::EndpointDelivery`).
     EndpointOverflows,
     /// A USB endpoint whose report write failed or timed out after it last
-    /// worked or the bus last reset or resumed. The endpoint keeps retrying
-    /// with the current state, backing off to one retry a second, and the
-    /// retries are not counted again.
+    /// worked, or after the bus last reset, resumed, or was configured. The
+    /// endpoint keeps retrying with the current state, backing off to one
+    /// retry a second, and the retries are not counted again
+    /// (`hid::delivery::run_endpoint`).
     UsbWriteFailures,
     /// A host LED state write to a BLE keyboard that failed.
     LedWriteFailures,

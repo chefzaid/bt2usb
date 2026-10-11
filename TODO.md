@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 50 | 0 | 0 |
+| [FIXME](#fixme) | 51 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **138** | **70** | **21** |
+| **Total** | **139** | **70** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -770,6 +770,31 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   fifth-device check expects the two newest to reconnect and names both
   no-keys log lines, and every other statement now matches the code
   ([first flash](docs/first-flash.md#6-device-management-and-degraded-display)).
+- [x] **P2** **The event counters' docs and one count did not match the
+  code.** Found by an independent review of the event-counter commit
+  `78471e8`, each finding confirmed by a second check. `USB write failures`
+  missed the first failure after a bus resume about ten times in eleven:
+  the endpoint worker re-armed its first-failure test only after a write
+  worked or when a reset or resume landed during the 100 ms write, not
+  during the backoff or while the bus was suspended, although the counter's
+  docs said every reset or resume re-arms it. The first-flash Counters check
+  and its hardware-result row could not pass on correct firmware: the counts
+  restart at every board reset, which section 4 does four times, and two
+  earlier steps leave a slot retrying a device paired elsewhere. The
+  `reports coalesced` docs blamed a full channel or a slow USB side, although
+  notifications delivered together merge without either, and said a mouse
+  merge loses no motion, although it clips at 127 per axis and can lose a
+  click. The security guide gave the counter line's timing as one-minute
+  resolution where the first change shows to about a second; "many per save"
+  described more flash retries than one save can make; and the test map,
+  ADR 0003, and the feature guide carried stale test counts. Fixed: the
+  worker re-arms the test when the bus is unavailable or a lifecycle event
+  ends the backoff, with a host test that fails on the old worker; the
+  Counters check starts from a clean boot and expects one lost link and one
+  attempt per sleep; every other statement now matches the code. One
+  further finding, raised twice, that a background attempt taken over by
+  the user's selection counts as an attempt but not a failure, was refuted:
+  the user stepped in, so it is no longer a background failure.
 
 ## Needs Your Input
 

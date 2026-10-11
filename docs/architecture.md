@@ -805,8 +805,9 @@ sequenceDiagram
    failed packet, logs `"USB HID endpoint unavailable; retaining current input
    state"` on the first failure in a row, and backs off 20, 40, … up to
    1000 ms. A lifecycle event (reset, configuration, suspend or resume, or a
-   protocol change) ends a backoff wait early; one that interrupts a write also
-   resets the backoff to 20 ms.
+   protocol change) that interrupts a write or ends a backoff wait early resets
+   the backoff to 20 ms, as does a spell with USB unavailable, so the first
+   failure after it logs, and counts as a `USB write failures` event, again.
 8. **Write.** `UsbReportSink::write` serializes into an 8-byte buffer, using
    the 3-byte boot layout for the mouse when the host selected boot protocol,
    and calls `HidWriter::write`. Success means the USB hardware accepted the

@@ -1,7 +1,9 @@
 //! Backpressure-safe coalescing of HID reports.
 //!
 //! The BLE→USB path forwards reports through a bounded channel. When the USB
-//! sink falls behind (host slow to poll, bus busy) that channel fills up. The
+//! sink falls behind (host slow to poll, bus busy) that channel fills up, and
+//! the SoftDevice event handler delivers every notification queued in one
+//! connection event before the slot task runs again. The
 //! old behaviour was to `try_send` and silently drop on a full channel — which
 //! can drop a key-*up* (release) report and leave a key stuck on the host.
 //!
@@ -18,9 +20,10 @@
 //!   lost. The only thing sustained backpressure can drop is an *intermediate*
 //!   state (e.g. a very fast tap), never the resting state, so a key can never
 //!   be left stuck.
-//! - **Mouse** movement is *relative*, so deltas are accumulated (saturating)
-//!   and the latest button state wins — coalescing preserves total travel
-//!   instead of discarding motion.
+//! - **Mouse** movement is *relative*, so deltas are accumulated (saturating
+//!   at ±127 per axis, the report's range) and the latest button state wins —
+//!   coalescing keeps the travel instead of discarding motion, but a click
+//!   whose press and release merge is lost.
 //!
 //! This is a pure, hardware-free module (the "functional core"); the async
 //! plumbing that drives it lives in the firmware's `crate::ble::hid_client`.

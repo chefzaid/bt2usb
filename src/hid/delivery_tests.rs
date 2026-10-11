@@ -12,6 +12,9 @@ struct Queue {
     available: Cell<bool>,
     pending: Cell<bool>,
     lifecycle: Cell<bool>,
+    /// The failures the worker reported as first ones (the firmware counts
+    /// and logs those).
+    first_failures: Cell<u32>,
 }
 
 impl Queue {
@@ -21,6 +24,7 @@ impl Queue {
             available: Cell::new(true),
             pending: Cell::new(false),
             lifecycle: Cell::new(false),
+            first_failures: Cell::new(0),
         }
     }
 
@@ -61,8 +65,11 @@ impl DeliveryQueue for Queue {
         self.lifecycle.set(false);
         self.state.borrow().is_current(epoch) && self.available.get()
     }
-    fn failed(&self, epoch: u32, _: bool) {
+    fn failed(&self, epoch: u32, first_failure: bool) {
         self.state.borrow_mut().failed(epoch);
+        if first_failure {
+            self.first_failures.set(self.first_failures.get() + 1);
+        }
     }
     fn succeeded(&self, epoch: u32) {
         self.state.borrow_mut().succeeded(epoch);
@@ -245,4 +252,49 @@ fn repeated_usb_errors_use_capped_backoff_and_eventually_recover() {
     assert!(worker.as_mut().poll(&mut cx).is_pending());
     // A release received during backoff replaces the obsolete recovery press.
     assert_eq!(*sink.writes.borrow(), [key(0)]);
+}
+
+#[test]
+fn only_the_first_failure_since_a_write_or_bus_change_is_reported() {
+    let queue = Queue::new(key(0));
+    let sink = Rc::new(SinkState::default());
+    sink.blocked.set(true);
+    let mut writer = Sink(sink.clone());
+    let clock = Clock::default();
+    let mut worker = pin!(run_endpoint(&queue, &mut writer, &clock));
+    let mut cx = Context::from_waker(Waker::noop());
+    let mut poll_at = |now| {
+        clock.now.set(now);
+        assert!(worker.as_mut().poll(&mut cx).is_pending());
+    };
+    queue.publish(key(4));
+    // Times out at 100, retries at 120 and times out at 220, waits 40.
+    for now in [0, 100, 120, 220] {
+        poll_at(now);
+    }
+    assert_eq!(queue.first_failures.get(), 1, "retries are not reported");
+    // A resume during the backoff: the next timeout is reported again.
+    queue.bus(true);
+    poll_at(230);
+    poll_at(330);
+    assert_eq!(queue.first_failures.get(), 2);
+    // A suspend during the backoff, then a resume while the worker waits.
+    queue.bus(false);
+    poll_at(340);
+    queue.bus(true);
+    poll_at(350);
+    poll_at(450);
+    assert_eq!(queue.first_failures.get(), 3);
+    // Retries after that are not reported until a write succeeds.
+    poll_at(470);
+    poll_at(570);
+    assert_eq!(queue.first_failures.get(), 3);
+    sink.blocked.set(false);
+    poll_at(610);
+    assert_eq!(*sink.writes.borrow(), [key(4)]);
+    sink.blocked.set(true);
+    queue.publish(key(5));
+    poll_at(610);
+    poll_at(710);
+    assert_eq!(queue.first_failures.get(), 4, "a write worked in between");
 }

@@ -708,7 +708,8 @@ two ([`hid/delivery.rs`](../src/hid/delivery.rs)):
 - Each write has a 100 ms deadline. A failed or timed-out write replays the
   endpoint's current state, never the stale failed packet, after a backoff that
   starts at 20 ms and doubles to 1000 ms. The first failure logs
-  `USB HID endpoint unavailable; retaining current input state`.
+  `USB HID endpoint unavailable; retaining current input state`, as does the
+  first one after a bus reset, resume, or reconfiguration.
 - USB reset, configuration, suspend, resume, and protocol changes invalidate
   any transfer in flight and replay held state. Relative mouse motion is never
   replayed.
@@ -932,8 +933,8 @@ symptoms to checks.
   advertisement parser, the paired-device store and its record codec, framing,
   and validation, power policy,
   and UI logic.
-- The source contains 414 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 403 unit tests, the 3
+- The source contains 415 `#[test]` functions, counted with
+  `grep -rh '#\[test\]' src tests | wc -l`: 404 unit tests, the 3
   integration tests in [`tests/integration.rs`](../tests/integration.rs),
   the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
   and the 5 tests of the vendored SoftDevice crate's event portal in

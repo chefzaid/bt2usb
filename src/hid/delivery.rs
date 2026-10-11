@@ -159,6 +159,9 @@ pub async fn run_endpoint(
     let mut retry_ms = 20;
     loop {
         if !queue.available() {
+            // Suspended or unconfigured: a write that fails once the bus is
+            // back is a new failure, whatever failed before.
+            retry_ms = 20;
             queue.pending().await;
             continue;
         }
@@ -183,8 +186,11 @@ pub async fn run_endpoint(
             }
             First::Right(First::Left(Err(()))) | First::Right(First::Right(())) => {
                 queue.failed(pending.epoch, retry_ms == 20);
-                first(clock.after_ms(retry_ms), queue.lifecycle()).await;
-                retry_ms = (retry_ms * 2).min(1000);
+                retry_ms = match first(clock.after_ms(retry_ms), queue.lifecycle()).await {
+                    First::Left(()) => (retry_ms * 2).min(1000),
+                    // A bus reset or resume during the backoff starts over.
+                    First::Right(()) => 20,
+                };
             }
         }
     }

@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that logs each peripheral's PnP ID. The tree holds
-414 `#[test]` functions: 403 in
+2026-10-11, in the commit that fixes the event-counter review findings. The
+tree holds 415 `#[test]` functions: 404 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -180,8 +180,8 @@ and the 384 passed the same day. There are no `#[ignore]` or
 | [lib_logic_tests.rs](../src/lib_logic_tests.rs) | 14 | `HidReport` serialization, equality, and kind helpers; HID UUID detection, name extraction, malformed lengths, and name truncation through the public `ble::adv_parser` API; scan-dot cycling; `power_logic::screen_should_be_on` auto-off policy. |
 | [hid/aggregate.rs](../src/hid/aggregate.rs) | 6 | Two-source union: a key held by both sources survives one release or disconnect, rollover recovers when a source disconnects, one source's rollover error is forwarded while the other holds a key, a consumer usage above the supported range is dropped without a wake, mouse buttons union without replaying the other source's motion, consumer lowest-slot priority with fallback, and out-of-range sources cannot change state or wake the host. |
 | [hid/coalesce.rs](../src/hid/coalesce.rs) | 9 | Per-endpoint coalescing: latest keyboard and consumer state wins but a release survives, mouse motion accumulates with saturation while the latest buttons win, `push` reports exactly the reports it replaced or merged (the `reports coalesced` counter), round-robin pop across endpoints, and endpoint independence. |
-| [hid/delivery.rs](../src/hid/delivery.rs) | 6 | `EndpointDelivery` state: short taps keep press/release order, a failed press recovers the latest release rather than the failed packet, relative motion is never replayed after failure, resume, or reset, stale completions cannot erase post-reset input, queue overflow keeps the final release, `publish` reports only a full queue collapsing and never the held state of an unavailable or recovering endpoint (the `endpoint overflows` counter), and a blocked consumer endpoint does not block keyboard or mouse state. |
-| [hid/delivery_tests.rs](../src/hid/delivery_tests.rs) | 4 | The production `run_endpoint` worker, polled by hand with fake queues, sinks, and a fake clock: an unpolled consumer endpoint does not stop keyboard and mouse writes, a press that times out (100 ms write deadline) is replaced by the latest release after a 20 ms backoff, a bus change cancels stale motion, and repeated errors back off 20, 40, 80, 160, 320, 640, then 1000 ms (capped) and recover. |
+| [hid/delivery.rs](../src/hid/delivery.rs) | 7 | `EndpointDelivery` state: short taps keep press/release order, a failed press recovers the latest release rather than the failed packet, relative motion is never replayed after failure, resume, or reset, stale completions cannot erase post-reset input, queue overflow keeps the final release, `publish` reports only a full queue collapsing and never the held state of an unavailable or recovering endpoint (the `endpoint overflows` counter), and a blocked consumer endpoint does not block keyboard or mouse state. |
+| [hid/delivery_tests.rs](../src/hid/delivery_tests.rs) | 5 | The production `run_endpoint` worker, polled by hand with fake queues, sinks, and a fake clock: an unpolled consumer endpoint does not stop keyboard and mouse writes, a press that times out (100 ms write deadline) is replaced by the latest release after a 20 ms backoff, a bus change cancels stale motion, repeated errors back off 20, 40, 80, 160, 320, 640, then 1000 ms (capped) and recover, and only the first failure since a write worked or the bus reset, resumed, or came back from suspend is reported as one (the `USB write failures` counter). |
 | [hid/consumer.rs](../src/hid/consumer.rs) | 6 | Consumer report defaults, a volume-up usage, serialization, and parsing from bytes; a short or out-of-range payload is refused and a too-small buffer serializes nothing; every named usage round trips and an unknown code maps to `None`. |
 | [hid/host_leds.rs](../src/hid/host_leds.rs) | 5 | `forward_host_leds`, polled by hand with a fake host: a new link gets the host's current lock-key state first, a reconnecting keyboard gets a state the slot already forwarded to its previous link, nothing is written before the host sends a state, later changes follow in order, and the host's first state is forwarded when it arrives during the link. |
 | [hid/keyboard.rs](../src/hid/keyboard.rs) | 4 | Host keyboard LED byte decoding: individual LEDs, Caps Lock with Num Lock, masking of undefined upper bits with round trip, and the all-off default. |
@@ -896,6 +896,38 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Counter Review Fixes
+
+This record covers the commit that fixes the findings an independent review
+of the event-counter commit `78471e8` upheld, listed as a checked P2 entry in
+the [TODO.md FIXME section](../TODO.md#fixme). `run_endpoint`
+(`src/hid/delivery.rs`) now resets its backoff, and with it the test for a
+first failure, when a USB lifecycle event ends the backoff wait or the worker
+finds USB unavailable, so `USB write failures` and the endpoint warning count
+the first failure after every bus reset, resume, or reconfiguration as the
+docs say. The new host test
+`only_the_first_failure_since_a_write_or_bus_change_is_reported` failed on
+the old worker (1 first failure where 2 were due) and passes on the new one.
+The first-flash Counters check now starts from a clean boot and expects one
+lost link and one reconnect attempt per sleep; the `reports coalesced`
+docs give the real causes and what a merge loses; and the security row, the
+flash-retries row, the test map, ADR 0003, and the feature guide match the
+code. The checks ran locally on Linux in a container, on the working tree
+just before that commit; nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 404 unit tests (1 new in `hid/delivery_tests.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.87% of lines (from 98.81%), 98.86% of regions, 99.12% of functions; `hid/delivery.rs` 99.48% of lines and every function |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge `.text` 124,200 bytes with `DEFMT_LOG=debug` and 123,188 with `DEFMT_LOG=info` (+16 each since `2e81820`, the worker's two extra resets); `.rodata`, `.data`, and `.bss` unchanged |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Hosted CI | GitHub Actions | Push run 38110418581 (`2e81820`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the reworked first-flash Counters check is unrun |
 
 ## Validation Record — 2026-10-11, Peripheral PnP ID
 

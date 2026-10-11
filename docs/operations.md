@@ -800,8 +800,10 @@ block the others ([ADR 0005](adr/0005-two-slots-and-independent-endpoints.md)).
 A host without a driver for that interface, or a pre-OS environment that drives
 only some interfaces, could cause this; neither has been characterized.
 
-**Confirm:** the warning is logged once per failure streak. Check the host's
-device list for a driver error on one interface.
+**Confirm:** the warning is logged once per failure streak, and again after
+each bus reset, resume, or reconfiguration that the streak outlasts; the
+`USB write failures` [counter](#event-counters) counts the same events. Check
+the host's device list for a driver error on one interface.
 
 **Fix:** none is needed when the host recovers: the endpoint replays the current
 held state without replaying mouse motion. Short taps or motion made while it
@@ -946,11 +948,11 @@ diagnostics: links lost 3, reconnect attempts 3, reconnect failures 1, reports c
 | `links lost` | An established link closed without the user asking: the peripheral slept or moved out of range, or the radio dropped it | Rises as peripherals sleep, about one per sleep | Rising while a peripheral is in use and close by: [reconnect incident](#saved-peripheral-does-not-reconnect) |
 | `reconnect attempts` | A background reconnect found its saved device advertising and started to connect | About one per lost link or power-up | Far above `links lost`, which means attempts keep failing |
 | `reconnect failures` | A background reconnect attempt ended without a working link | Occasional, such as a device that stops advertising mid-attempt | Close to `reconnect attempts`: [reconnect incident](#saved-peripheral-does-not-reconnect), [private address](#bonded-peer-with-a-private-address-is-not-found) |
-| `reports coalesced` | A report from a peripheral replaced or merged into the previous one before that reached the bridge's report channel, usually because the USB side was behind | 0 while typing; mouse movement can merge now and then, which loses no motion | Rising during typing: a fast tap may have been missed ([stuck input](#keys-or-buttons-stay-pressed-on-the-host)) |
+| `reports coalesced` | A report from a peripheral replaced or merged into the previous one while that one still waited to be handed on towards USB. Notifications the radio delivers together, in one connection event or after the firmware was busy elsewhere, do this, as does a full report channel | Not measured on hardware yet; fast mouse movement is the likeliest source | Rising while taps or clicks go missing: a merge keeps only the latest keyboard and media state and the newer mouse buttons, so a fast tap or a click whose press and release merged is lost, and it adds mouse motion up to 127 per axis ([stuck input](#keys-or-buttons-stay-pressed-on-the-host)) |
 | `endpoint overflows` | A USB endpoint's 16-report queue was full, so it collapsed to the latest state and dropped the reports queued before it | 0 | Any: the host stopped polling that endpoint for a while; the final state still went out ([endpoint stalls](#a-usb-endpoint-stalls)) |
-| `USB write failures` | A USB endpoint's write failed or timed out after it last worked or the bus last reset or resumed; its retries count once | 0 in use; a host that stops polling an endpoint, which a firmware setup screen may do for an interface it does not use (inferred, not measured), adds one each time | Rising in normal use: [endpoint stalls](#a-usb-endpoint-stalls) |
+| `USB write failures` | A USB endpoint's write failed or timed out after it last worked, or after the bus last reset, resumed, or was configured; its retries count once | 0 in use; a host that stops polling an endpoint, which a firmware setup screen may do for an interface it does not use (inferred, not measured), adds one each time | Rising in normal use: [endpoint stalls](#a-usb-endpoint-stalls) |
 | `LED write failures` | The host's Caps/Num/Scroll Lock state could not be written to a keyboard | 0 | Any, if the keyboard's lock LEDs then stay wrong |
-| `flash write retries` | A device store write failed and was retried, as happens while the radio leaves the SoftDevice no time to write | Occasional at connect time | Many per save: [flash writes](#flash-writes-report-busy-or-fail) |
+| `flash write retries` | A device store write failed and was retried, as happens while the radio leaves the SoftDevice no time to write | Occasional at connect time; one save retries at most twice | Rising with most saves: [flash writes](#flash-writes-report-busy-or-fail) |
 | `flash write failures` | A device store save failed all three attempts, or a factory reset could not erase an unreadable store | 0 | Any: a pairing or Forget did not reach flash ([flash writes](#flash-writes-report-busy-or-fail)) |
 
 How to collect them:

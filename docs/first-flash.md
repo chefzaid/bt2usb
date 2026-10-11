@@ -272,12 +272,19 @@ currently unauthenticated Just Works bonding; see
       slot afterwards.
 - [ ] **Stack:** after all of the above, the latest `stack high-water` line is
       well under half of the total. Recorded: ______ bytes.
-- [ ] **Counters:** copy the latest `diagnostics:` line. `links lost` and
-      `reconnect attempts` match the sleeps and reboots above, give or take
-      an attempt that found a device just as it stopped advertising; `endpoint
-      overflows`, `USB write failures`, `LED write failures`, and `flash write
-      failures` are 0
-      ([event counters](operations.md#event-counters)).
+- [ ] **Counters:** the counts start at zero at every boot, and a slot
+      left retrying a device that refuses the bridge keeps adding reconnect
+      attempts, so this check starts from a clean boot. If the steps above
+      left a saved device paired with another computer, forget it on the
+      bridge and pair it again from a scan. Reset the board, wait until both
+      peripherals type, then let the keyboard sleep and wake it, and do the
+      same with the mouse, as in **Sleep reconnect**. Within a minute of the
+      last wake the log shows a `diagnostics:` line; copy it. `links lost` and
+      `reconnect attempts` are both 2, one per sleep; an attempt that found a
+      device just as it stopped advertising adds one to `reconnect attempts`
+      and one to `reconnect failures`. `endpoint overflows`,
+      `USB write failures`, `LED write failures`, and `flash write failures`
+      are 0 ([event counters](operations.md#event-counters)).
 
 ## 5. In the monitor
 

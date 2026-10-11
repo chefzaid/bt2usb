@@ -118,8 +118,10 @@ linker trick.
   value on a board.
 - **Measure the stack.** The `embedded` feature enables cortex-m-rt's
   `paint-stack`, which fills `_stack_end.._stack_start` with `0xCCCC_CCCC` at
-  reset. `high_water()` in [stack.rs](../../src/stack.rs) scans up from
-  `_stack_end` to the first overwritten word and returns `(used, total)`. The
+  reset. `high_water()` in [stack.rs](../../src/stack.rs) scans up from the
+  top of the MPU stack guard ([ADR 0026](0026-mpu-stack-guard.md); reading
+  the guard faults while it is on) to the first overwritten word and returns
+  `(used, total)`, where `total` is the stack above the guard. The
   bridge checks it on every 1-second housekeeping tick and logs
   `stack high-water: {} of {} bytes` whenever the value grows. The self-test
   logs the same line and passes its stack stage only when less than half the

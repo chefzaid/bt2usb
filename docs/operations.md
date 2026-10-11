@@ -76,7 +76,9 @@ Windows user's Cargo tools from WSL. Probe access from WSL and the devcontainer
 is covered in [development](development.md#devcontainer-and-wsl2).
 
 A panic is printed by `panic-probe` through `defmt` and then stops the core.
-When `probe-rs run` is attached, the session ends with the panic message.
+Under `mask run`, the session ends with the panic message and a backtrace.
+Under `mask selftest`, which turns off probe-rs's HardFault catch, the message
+prints and the session stays attached until Ctrl-C.
 
 ### Log Levels
 
@@ -292,7 +294,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `bt2usb firmware starting: version {=str}, commit {=str}, {=str} build, DEFMT_LOG={=str}` | `main` started; names the build | Quote the line in a report; twice in a row on the first boot after a UICR erase is expected ([boot sequence](#boot-sequence)) |
 | info | `stack guard: {=u32} bytes at {=u32:#010x}..{=u32:#010x}` | The MPU stack guard is on: its size and address range | None; see [memory checks](#stack-and-memory-checks) |
 | warn | `stack guard off: {}` (`BadSize`, `StackInUse`, or `NoMpu`) | The guard could not be turned on, so an overflow would corrupt statics silently | Report it with the boot lines; `BadSize` means `STACK_GUARD_BYTES` is not a power of two of at least 32 |
-| error | `stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The stack ran into the guard and the core stopped; nothing below the guard was overwritten | [Stack overflow incident](#the-stack-overflows) |
+| error | `stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The stack ran into the guard and the core stopped. With the stack pointer at or above the guard's base nothing below the guard was overwritten; below the base, a frame stepped over the guard and the RAM below it is suspect | [Stack overflow incident](#the-stack-overflows) |
 | warn | `previous boot: stack overflow: stack pointer {=u32:#010x}, guard {=u32:#010x}..{=u32:#010x}, PC not stacked` (or `PC {=u32:#010x}`) | The boot before this one ended in a stack overflow; the values are the ones the fault handler stored. Logged once, after a reset that kept RAM | [Stack overflow incident](#the-stack-overflows); expected once after the self-test's deliberate overflow |
 | info | `reset reason: {}` | The causes of the last reset, joined with ` + `, and any undefined register bits | See [Reset Reasons](#reset-reasons) |
 | info | `softdevice RAM: {:?} bytes` (vendor) | RAM the SoftDevice configuration needs | Record it; must be at most 24576 |
@@ -526,10 +528,11 @@ Watchdog recovery is open work in
 **Symptoms:** as for a panic (input stops, the OLED freezes, a held key may
 repeat), and the log ends in
 `stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC not stacked`.
-Under `mask run`, the log instead ends in probe-rs's
+Under `mask run`, `mask rtt`, or any `probe-rs attach` session, the log
+instead ends in probe-rs's
 `Firmware exited unexpectedly: Exception` with no panic message before it:
-`probe-rs run` halts the core on entry to every HardFault by default, before
-the handler logs, and the backtrace it prints after that line starts from a
+`probe-rs run` and `probe-rs attach` halt the core on entry to every
+HardFault by default, before the handler logs, and the backtrace it prints after that line starts from a
 frame the overflow could not stack, so its frames are not trustworthy. An
 overflow that hits while a log line is being written cannot log at once: the
 board resets, and the next boot logs
@@ -542,20 +545,31 @@ that record ([ADR 0026](adr/0026-mpu-stack-guard.md)).
 SoftDevice's handlers, which all share one stack, needed more than the stack
 above the guard. The stack pointer ran into the no-access MPU region at the
 bottom of the stack, the fault handler logged the line, and the core stopped
-([ADR 0026](adr/0026-mpu-stack-guard.md)). The statics below the guard were
-not overwritten. `PC not stacked` is normal for an overflow: the fault's
-frame could not be written into the guard, so the faulting instruction is
-unknown.
+([ADR 0026](adr/0026-mpu-stack-guard.md)). `PC not stacked` is normal for an
+overflow: the fault's frame landed in the guard and could not be written, so
+the faulting instruction is unknown. A PC is printed when the frame still
+fitted above the guard, which happens when a push or store faults in the
+guard before the stack pointer reaches it.
 
 **Confirm:** the latest `stack high-water` line before the fault shows how
 close the stack had come; compare it with the paths that ran just before, such
-as a scan with both slots reconnecting or a flash save. A stack pointer far
-below the guard's top means one large frame jumped into it. To see the
-firmware's own line for an `Exception` exit, reproduce with the HardFault catch
-off, as `mask selftest` already runs:
+as a scan with both slots reconnecting or a flash save. Where the reported
+stack pointer lies says how far the damage goes:
+
+- Inside the guard (`0x<base>` up to `0x<top>`), or just above its top with a
+  PC: the guard stopped the overflow, and the statics below it are intact.
+- Below `0x<base>`: one frame larger than the stack left stepped over the
+  guard and was written into the RAM below it before anything faulted. The
+  statics there, the defmt RTT buffer included, are suspect, and so is the
+  rest of this boot's log.
+
+To see the firmware's own line for an `Exception` exit, reproduce with the
+HardFault catch off, as `mask selftest` already runs:
 `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb -- --no-catch-hardfault`.
-A panic in that session still logs its message, but probe-rs prints no
-backtrace and stays attached until Ctrl-C.
+To watch a unit that is already running without the catch, attach with
+`probe-rs attach --no-catch-hardfault --chip nRF52840_xxAA target/thumbv7em-none-eabihf/release/bt2usb`
+instead of `mask rtt`. A panic in either session still logs its message, but
+probe-rs prints no backtrace and stays attached until Ctrl-C.
 
 **Fix:** reset the board with its reset button, which keeps the record for
 the next boot's `previous boot` line, or power-cycle it. File a defect with the log from boot,
@@ -1154,9 +1168,11 @@ internal flash; see [key storage](security.md#key-storage-and-deletion).
 
 For a defect report, record the artifact hash, exact firmware version, board,
 peripheral, host/hub, reproduction sequence, and relevant log interval. The
-first two boot lines carry the version, the source commit, the profile, the
-`DEFMT_LOG` filter, and the reset reason ([boot sequence](#boot-sequence)), so
-quote them rather than retyping the build details. Add the last
+boot lines from `bt2usb firmware starting` to `reset reason` carry the
+version, the source commit, the profile, the `DEFMT_LOG` filter, the stack
+guard, any previous boot's stack overflow, and the reset reason
+([boot sequence](#boot-sequence)), so quote them rather than retyping the
+build details. Add the last
 `diagnostics:` line logged before the failure or after reproducing it
 ([event counters](#event-counters)), and each involved peripheral's
 `slot N PnP ID:` line ([PnP ID](#peripheral-pnp-id)). Sanitize device

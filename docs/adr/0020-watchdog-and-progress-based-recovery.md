@@ -6,10 +6,15 @@
 ## Context
 
 Nothing restarts the bridge today. No file under `src/` uses the nRF52840
-watchdog timer (WDT) or reads the reset reason. All binaries link `panic-probe`
+watchdog timer (WDT). `main` reads and clears the reset reason
+(`POWER.RESETREAS`, decoded by `diagnostics::ResetReasons` in
+[diagnostics.rs](../../src/diagnostics.rs)) and logs it as `reset reason: ...`,
+but nothing acts on it. All binaries link `panic-probe`
 (`use panic_probe as _` in [main.rs](../../src/main.rs)), which in 1.0.0 masks
-interrupts, prints over RTT and executes `udf`; with no `#[exception]` handler
-that ends in `cortex-m-rt` 0.7.7's default `HardFault_`, a `loop {}`. A panic,
+interrupts, prints over RTT and executes `udf`; that ends in the HardFault
+handler in [stack.rs](../../src/stack.rs)
+([ADR 0026](0026-mpu-stack-guard.md)), which reports a stack overflow and
+otherwise spins in a loop, as `cortex-m-rt` 0.7.7's default `HardFault_` did. A panic,
 a SoftDevice assertion or a task that never finishes stops the unit until it is
 unplugged ([not yet handled](../architecture.md#not-yet-handled)), and since
 hosts keep a silent device's last report, a held key repeats on the PC
@@ -68,7 +73,7 @@ Platform facts:
   accumulate until written with 1, and 0 means power-on or brownout (general
   knowledge). The `embassy-nrf` `reset` module is built only for nRF5340, so
   the PAC is the path until `Softdevice::enable`, after which POWER belongs to
-  the SoftDevice (`sd_power_reset_reason_get`). `embassy_nrf::init` resets once
+  the SoftDevice (`sd_power_reset_reason_get`); `main` already reads it there. `embassy_nrf::init` resets once
   after writing UICR ([security](../security.md#physical-access-and-debug-port))
   and probe-rs resets the same way (general knowledge), so SREQ is common.
 - **SoftDevice.** The WDT interrupt is not in the vendored `RESERVED_IRQS`
@@ -77,10 +82,12 @@ Platform facts:
   priority 0 and a page erase halts the CPU for at most about 85 ms (NVMC
   electrical specification; general knowledge), far below seconds.
 - **Retained RAM.** `cortex-m-rt` places a `NOLOAD` `.uninit` above `.bss` and
-  below the painted stack (`link.x.in` lines 179 to 186). It holds only
-  `defmt-rtt`'s 1,024-byte buffer ([validation record](../testing.md#validation-record--2026-10-10)),
-  and with no stack guard ([ADR 0010](0010-static-memory-layout.md)) an overflow
-  reaches it first.
+  below the painted stack (`link.x.in` lines 179 to 186). It holds
+  `defmt-rtt`'s 1,024-byte buffer ([validation record](../testing.md#validation-record--2026-10-10))
+  and the 24-byte stack overflow record, `OVERFLOW_RECORD` in
+  [stack.rs](../../src/stack.rs) ([ADR 0026](0026-mpu-stack-guard.md)). The
+  MPU stack guard sits between them and the stack, so an overflow faults
+  before it reaches them, unless one frame steps over the guard.
 - **Logging and simulation.** `defmt-rtt` 1.3.0 says logging can block forever
   once probe-rs, which selects blocking mode, disconnects. Renode 1.16.1's
   `nrf52840.repl` maps `Timers.NRF52840_Watchdog`, whose upstream source resets
@@ -144,12 +151,16 @@ adopts one still running after a soft or lockup reset through
 inherited handle count other than one is reloaded through the PAC.
 
 **Reset causes.** Before `Softdevice::enable`, `main` reads and clears
-`POWER.RESETREAS` and decodes it with the pure `ResetCause`, preferring LOCKUP,
-then DOG, RESETPIN and SREQ (a DOG followed by `init`'s UICR reset reads DOG and
-SREQ). A 20-byte record in `.uninit.bt2usb.reset` (magic, saturating
-`watchdog_resets` u16, `early` u8, flags, verdict, fault PC, check word) is used
-only when magic and check word are valid. A new `#[exception] HardFault`
-handler stores the stacked PC and loops until the WDT fires.
+`POWER.RESETREAS`, as it already does for the `reset reason` line, and decodes
+it with the pure `ResetCause`, built on `diagnostics::ResetReasons`, preferring
+LOCKUP, then DOG, RESETPIN and SREQ (a DOG followed by `init`'s UICR reset
+reads DOG and SREQ). A 20-byte record (magic, saturating `watchdog_resets` u16,
+`early` u8, flags, verdict, fault PC, check word) is used only when magic and
+check word are valid; it joins ADR 0026's `OverflowRecord` in one `.uninit`
+static rather than adding a second record beside it. The HardFault handler
+that already exists in `stack.rs` (a second `#[exception] HardFault` would not
+link) also stores the stacked PC when the frame holds one (`frame_stacked`)
+and loops until the WDT fires.
 
 | Boot finds | Log line | OLED notice |
 | --- | --- | --- |
@@ -252,7 +263,7 @@ Negative:
 - Images started by a soft reset inherit a running WDT: one without this code,
   such as an older release, resets once after 8 s, and a reflash the WDT cuts
   off leaves it stopped, so the retry succeeds.
-- The record is best-effort; the `HardFault` handler and `.uninit` static add
+- The record is best-effort, and the `HardFault` handler it extends is
   `unsafe` code. A halted core never resets, and a latched unit runs unwatched
   until power-cycled.
 - Input that crashes the firmware causes up to three resets, then the latch,
@@ -270,7 +281,7 @@ bytes of statics plus a task future under 200 bytes, one wake-up per second.
 | --- | --- |
 | Policy | New `src/watchdog_logic.rs`, in the host library through `#[path]`: `LeaseSlot`, `Checkpoint`, budgets, `Lease`, `LeaseGuard`, `Supervisor`, `ResetCause`, `ResetRecord`, `boot_decision` |
 | Constants | `WDT_TIMEOUT_SECS`, `WDT_SUPERVISOR_PERIOD_MS`, `WDT_STABLE_UPTIME_SECS`, `WDT_MAX_EARLY_RESETS`, `ATT_TRANSACTION_TIMEOUT_MS` in [config.rs](../../src/config.rs) |
-| Shell | New `src/watchdog.rs`: lease statics, `arm`, `start`, `watchdog_task`, reset reason, `.uninit` record; boot steps and `HardFault` in [main.rs](../../src/main.rs) |
+| Shell | New `src/watchdog.rs`: lease statics, `arm`, `start`, `watchdog_task`, reset reason, `.uninit` record joined with the overflow record; boot steps in [main.rs](../../src/main.rs); the fault PC in `HardFault` in [stack.rs](../../src/stack.rs) |
 | Leases | [multi_conn.rs](../../src/ble/multi_conn.rs), [slot_worker.rs](../../src/ble/slot_worker.rs), [slot_link.rs](../../src/ble/slot_link.rs), `run_usb_device` in [hid_device.rs](../../src/usb/hid_device.rs), the `main` tick |
 | UI and images | Notice in [ui_logic.rs](../../src/ui/ui_logic.rs) and [display.rs](../../src/ui/display.rs); [selftest.rs](../../src/selftest.rs); [sim.rs](../../src/sim.rs) and `renode/bt2usb-sim.robot` |
 
@@ -293,12 +304,15 @@ reflashes of a running unit; a reset in BIOS setup and behind the KVM.
 This unblocks "Watchdog and recoverable failures" and the reset reasons of
 "Diagnostics without sensitive input" ([TODO.md](../../TODO.md#platform-memory-and-recovery)),
 supplies the fixture for the first-flash live-bus OLED check, and informs
-"Stack overflow detection" and "Soak and latency measurements".
+"Soak and latency measurements". "Stack overflow detection" is done
+([ADR 0026](0026-mpu-stack-guard.md)); a watchdog would turn its stopped core
+into a reset that reports the overflow at the next boot.
 
 ### Verification Status
 
 - **Implemented:** nothing of this proposal. Today no WDT runs, RESETREAS is
-  never read, panics stop in `HardFault_`, the display isolates I2C stalls,
+  read only for the `reset reason` line, panics stop in the HardFault
+  handler's loop in `stack.rs`, the display isolates I2C stalls,
   endpoint writes are bounded and scans end under `with_timeout`.
 - **Software-verified:** nothing covers leases or reset causes. Related: 2 host
   tests in `display_logic.rs` (display backoff), 4 in `delivery_tests.rs`
@@ -311,5 +325,5 @@ supplies the fixture for the first-flash live-bus OLED check, and informs
 - Operations: [firmware panics](../operations.md#firmware-panics-or-stops-responding), [stuck keys](../operations.md#keys-or-buttons-stay-pressed-on-the-host), [stuck I2C bus](../operations.md#oled-is-dark-or-the-i2c-bus-is-stuck), [recovery and diagnostics](../operations.md#recovery-and-diagnostics)
 - [Hardware: power](../hardware.md#power), [memory layout](../hardware.md#memory-layout), [pin and peripheral usage](../hardware.md#pin-and-peripheral-usage); [security: physical access and debug port](../security.md#physical-access-and-debug-port), [threat model](../security.md#threat-model)
 - [Testing: Renode simulation](../testing.md#renode-simulation), [hardware acceptance evidence](../testing.md#hardware-acceptance-evidence), [known verification gaps](../testing.md#known-verification-gaps); [features: current technical boundaries](../features.md#current-technical-boundaries)
-- [ADR 0003](0003-pure-core-and-task-shell.md), [ADR 0004](0004-layered-verification.md), [ADR 0005](0005-two-slots-and-independent-endpoints.md), [ADR 0006](0006-fail-closed-pairing-store.md), [ADR 0009](0009-isolated-display-task.md), [ADR 0010](0010-static-memory-layout.md), [ADR 0012](0012-bus-powered-no-system-off.md), [ADR 0015](0015-shared-reconnect-scan.md), [ADR 0016](0016-bounded-peer-connection-parameters.md), [ADR 0019](0019-power-loss-safe-persistence.md) (proposed)
+- [ADR 0003](0003-pure-core-and-task-shell.md), [ADR 0004](0004-layered-verification.md), [ADR 0005](0005-two-slots-and-independent-endpoints.md), [ADR 0006](0006-fail-closed-pairing-store.md), [ADR 0009](0009-isolated-display-task.md), [ADR 0010](0010-static-memory-layout.md), [ADR 0012](0012-bus-powered-no-system-off.md), [ADR 0015](0015-shared-reconnect-scan.md), [ADR 0016](0016-bounded-peer-connection-parameters.md), [ADR 0019](0019-power-loss-safe-persistence.md) (proposed), [ADR 0026](0026-mpu-stack-guard.md)
 - TODO.md: [platform, memory and recovery](../../TODO.md#platform-memory-and-recovery), [pairing storage](../../TODO.md#pairing-storage), [UI, display and power](../../TODO.md#ui-display-and-power), [board bring-up and hardware acceptance](../../TODO.md#board-bring-up-and-hardware-acceptance)

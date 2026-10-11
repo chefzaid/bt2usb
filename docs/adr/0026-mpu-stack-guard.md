@@ -53,20 +53,39 @@ Facts that shaped the decision:
   when the stack pointer is already at the guard the push itself violates the
   region: `CFSR.MSTKERR` is set, the stack pointer still moves down, and the
   frame holds whatever the guard held before. The faulting PC is lost; the
-  stack pointer is not.
+  stack pointer is not. The one exception is a push or store that faults in
+  the guard while the stack pointer is still above it with room for the
+  frame, as a store-multiple of 44 bytes or more can: the frame is stored
+  above the guard, and `CFSR.DACCVIOL` with `MMARVALID` and `MMFAR` name the
+  refused address instead.
 - **The MPU can be off inside HardFault.** With `MPU_CTRL.HFNMIENA` clear, the
   MPU is disabled while the core runs at priority -1 or -2 (HardFault, NMI,
   or with `FAULTMASK` set). The MemManage exception is disabled at reset
   (`SHCSR.MEMFAULTENA` clear), so an MPU violation escalates to HardFault, and
-  that handler can use the guard's bytes as its stack.
-- **Frames are under 4 KiB.** A scan of the release images' disassembly for
-  stack adjustments (`sub sp, #n`, `sub.w sp, sp, #n`, and `subw sp, sp, #n`;
-  none subtracts a register) finds the largest single frame at 2,668 bytes in
-  the bridge, the display task's poll, and 3,412 bytes in the self-test, its
-  main task's poll; DWARF names both. A guard of 4 KiB therefore cannot be
-  stepped over by one firmware frame: every byte of a frame that starts above
-  the guard lies above the guard's base. The SoftDevice's handlers run on the
-  same stack; the scan cannot see their frames.
+  that handler can use the guard's bytes as its stack. The MPU is off only
+  once the handler runs: the escalated fault's frame is pushed before, at the
+  interrupted code's priority, with the MPU still on.
+- **Where regions overlap, the highest-numbered one wins.** A region 1 to 7
+  that something else left on over the guard would open it, while region 0
+  still read back as programmed.
+- **Frames entered deep in the stack are under 4 KiB.** A scan of the images
+  `mask` builds (release, `DEFMT_LOG=debug`; the simulation's debug build)
+  for each function's register pushes and stack adjustments (`sub sp, #n`,
+  `sub.w sp, sp, #n`, and `subw sp, sp, #n`; none subtracts a register) finds
+  the largest frame at 2,704 bytes in the bridge (the display task's poll: 36
+  bytes of saved registers and 2,668 of locals), 4,480 bytes in the
+  self-test, and 5,856 in the simulation; DWARF names each. The two above
+  4 KiB are each image's main task, which the executor polls only from its
+  loop at the top of the stack, so they are never entered near the guard.
+  Every other frame is at most 1,540 bytes in the self-test and 3,024 in the
+  simulation. A guard of 4 KiB therefore cannot be stepped over by one
+  firmware frame entered near it: every byte of such a frame that starts
+  above the guard lies above the guard's base. The figures are a 2026-10-11
+  measurement that no build step repeats, and the SoftDevice's handlers run
+  on the same stack where the scan cannot see their frames. (The first
+  version of this ADR gave 3,412 bytes for the self-test: a build at
+  `DEFMT_LOG=info`, with only the first stack adjustment of each function
+  and no saved registers counted.)
 - **Renode 1.16.1 models the PMSAv7 MPU but not every fault rule.** In the
   simulation, an MPU violation enters the MemManage handler even with the
   exception disabled, the stack pointer does not move for a frame that could
@@ -76,7 +95,8 @@ Facts that shaped the decision:
 ## Decision
 
 **Place a no-access MPU region at the bottom of the stack and report a fault
-taken with the stack pointer in or at it as a stack overflow.**
+whose frame lands in or below it, or whose refused access lies in it, as a
+stack overflow.**
 
 - **Placement.** `StackGuard::place` in the pure
   [stack_logic.rs](../../src/stack_logic.rs) puts the guard at the first
@@ -86,27 +106,40 @@ taken with the stack pointer in or at it as a stack overflow.**
   never used: the stack hits the guard first.
 - **Registers.** Region 0 covers the guard with `MPU_RBAR` = its base and
   `MPU_RASR` = execute-never, access permission 0 (no access at any privilege
-  level), normal write-back memory (`TEX` 0, `C` 1, `B` 1, as the default map
-  treats SRAM), `SIZE` = log2(size) - 1, enabled: `0x1003_0017` for 4 KiB.
+  level), normal memory (`TEX` 0, `C` 1, `B` 1: write-back, no write-allocate;
+  with no access allowed and no cache on the Cortex-M4 the attributes never
+  take effect), `SIZE` = log2(size) - 1, enabled: `0x1003_0017` for 4 KiB.
+  Every other region the MPU reports (`MPU_TYPE.DREGION`, eight on the
+  nRF52840) is turned off with `MPU_RASR` = 0, so none can open the guard.
   `MPU_CTRL` = `ENABLE | PRIVDEFENA` (`0b101`): the default memory map for every
   other address, so no access the firmware or the SoftDevice makes elsewhere
-  changes meaning, and `HFNMIENA` clear, so the MPU is off in HardFault.
+  changes meaning, and `HFNMIENA` clear, so the MPU is off while the
+  HardFault handler runs.
 - **Enable early.** `stack::enable_guard` checks that the stack pointer is
-  above the guard and that the MPU reports regions, then programs region 0 with
-  the MPU off and turns it on, followed by `dsb` and `isb`. The bridge calls it
+  above the guard and that the MPU reports regions, then, with the MPU off,
+  turns regions 1 and up off and programs region 0, and turns the MPU on,
+  followed by `dsb` and `isb`. The bridge calls it
   first thing in `main`, before the reset-reason read and before the SoftDevice
   starts, and logs `stack guard: 4096 bytes at 0x2000d000..0x2000e000` (the
   addresses of the current release build), or `stack guard off: <reason>`
   (`BadSize`, `StackInUse`, `NoMpu`) and carries on unguarded. The self-test
   and the simulation do the same.
-- **Report.** `stack.rs` replaces cortex-m-rt's default HardFault handler. When
-  the stack pointer at the fault is at or below the guard's top
-  (`!StackGuard::below`), it logs
+- **Report.** `stack.rs` replaces cortex-m-rt's default HardFault handler. It
+  counts a fault as a stack overflow (`StackGuard::is_overflow`) when the
+  fault's frame is at or below the guard's top, or when `CFSR` shows a data
+  access the MPU refused (`DACCVIOL` with `MMARVALID`) at an `MMFAR` inside
+  the guard, and then logs
   `stack overflow: stack pointer 0x2000dfc8, guard 0x2000d000..0x2000e000,
-  PC not stacked`. It names the PC only when `CFSR.MSTKERR` is clear; a real
-  overflow always sets it, because the frame could not be stacked. Then, as the default handler did, the core
-  spins until it is reset. Any other HardFault, including the one panic-probe
-  raises after printing a panic, also spins as before.
+  PC not stacked`, where the stack pointer is the frame's address. It names
+  the PC only when the frame was stored (`frame_stacked`: neither
+  `CFSR.MSTKERR` nor `CFSR.STKERR` set); an overflow whose frame lands in the
+  guard sets `MSTKERR`. A frame exactly at the guard's top lies wholly above
+  it on the core; it counts for Renode, which leaves the stack pointer there.
+  Then, as the default handler did, the core spins until it is reset. Any
+  other HardFault, including the one panic-probe raises after printing a
+  panic, also spins as before. (The refused-access rule, `STKERR`, and
+  turning regions 1 and up off were added the same day, after a review of
+  the first version.)
 - **Keep the report across a reset** (added the same day, after the logging
   failure under Consequences was found). Before it logs, the handler stores
   the report as an `OverflowRecord` ([stack_logic.rs](../../src/stack_logic.rs)):
@@ -138,8 +171,15 @@ taken with the stack pointer in or at it as a stack overflow.**
   then resets the machine, which keeps RAM, and expects the next boot's
   `previous boot: stack overflow` line with the same guard.
   The self-test reads the MPU registers back after its SoftDevice, USB, and BLE
-  stages (`[PASS] stack guard: ...`), and, if SELECT is held within 10 s at the
-  end, recurses until the guard faults so a tester can see the board's report.
+  stages, `MPU_CTRL`, region 0, and every other region still off
+  (`[PASS] stack guard: ...`). When that stage and the SELECT button stage
+  passed, it offers a deliberate overflow: if SELECT, released at the offer,
+  is held within 10 s, it recurses until the guard faults so a tester can see
+  the board's report. Each recursion checks its own frame's address, so if
+  the guard did not fault the recursion returns as soon as a frame is written
+  below the guard's top (a frame is 536 bytes, the guard 4 KiB), and the
+  self-test logs `the deliberate overflow returned without a fault` without
+  reaching the statics.
 
 ## Alternatives Considered
 
@@ -167,7 +207,8 @@ taken with the stack pointer in or at it as a stack overflow.**
 - **A guard of 32 bytes, the smallest region.** It costs nothing but is
   stepped over by any frame larger than what is left above it, and a fault
   handler running inside 32 bytes would overwrite the statics below. 4 KiB
-  is larger than any firmware frame found, gives the handler room to run
+  is larger than every firmware frame entered near the guard, gives the
+  handler room to run
   inside the guard, and costs at most 8 KiB with the alignment gap out of about
   200 KiB of stack.
 - **Watchdog only.** A watchdog would reset a hung bridge but not say why, and
@@ -192,7 +233,9 @@ Positive:
 
 - An overflow now stops the bridge with
   `stack overflow: stack pointer ..., guard ..., PC not stacked` instead of
-  corrupting statics; the statics below the guard are intact when it stops.
+  corrupting statics. When the reported stack pointer is at or above the
+  guard's base, the statics below the guard are intact when it stops; one
+  below the base means a frame stepped over the guard.
 - The self-test shows on each board that the region is still programmed after
   the SoftDevice has run, and can show a real overflow on demand.
 - `stack high-water: X of Y bytes` reports the usable stack (above the guard)
@@ -203,14 +246,15 @@ Positive:
 
 Negative:
 
-- The PC of the overflowing code is lost: the frame could not be stacked. The
-  stack pointer and the guard's address are all the line carries; the
-  high-water mark and the log before the fault narrow it down.
+- The PC of the overflowing code is usually lost: the frame could not be
+  stacked. The stack pointer and the guard's address are then all the line
+  carries; the high-water mark and the log before the fault narrow it down.
 - A frame larger than the guard plus the stack left above it can step over the
-  guard into the statics without faulting. The self-test's main task frame is
-  684 bytes under the guard's size and the bridge's largest 1,428 bytes under
-  it, but nothing checks that a change keeps every frame under 4 KiB, and the
-  SoftDevice's frames are not visible.
+  guard into the statics without faulting. The bridge's largest frame is
+  1,392 bytes under the guard's size, and the self-test's and simulation's
+  larger main task frames are entered only at the top of the stack, but
+  nothing checks that a change keeps every frame entered deep in the stack
+  under 4 KiB, and the SoftDevice's frames are not visible.
 - The HardFault handler runs on the guard's bytes with the MPU off. If the
   stack pointer went deeper than the handler's own frame (about 300 bytes in
   the simulation, less with defmt) can absorb, the handler's frame lands in
@@ -228,8 +272,9 @@ Negative:
 - The record takes 24 bytes of `.uninit`, which moves `_stack_end` up by as
   much; the guard stays at the same 4 KiB boundary while the gap allows.
 - A debug session that catches HardFaults does not show the line. `probe-rs run`,
-  the Cargo runner, sets the core's HardFault vector catch by default and
-  halts at the handler's first instruction, printing
+  the Cargo runner, and `probe-rs attach`, behind `mask rtt`, set the core's
+  HardFault vector catch by default and halt at the handler's first
+  instruction, printing
   `Firmware exited unexpectedly: Exception` and a backtrace that starts from
   the frame the overflow could not stack. `mask selftest` passes
   `--no-catch-hardfault`, so the deliberate overflow logs the firmware's line.
@@ -247,22 +292,23 @@ Negative:
 
 | Concern | Where |
 | --- | --- |
-| Placement and register values | `StackGuard` and `MPU_CTRL` in [stack_logic.rs](../../src/stack_logic.rs), with six host tests |
+| Placement, register values, and which faults are overflows | `StackGuard` (with `is_overflow`), `MPU_CTRL`, `mpu_regions`, `region_enabled`, and `frame_stacked` in [stack_logic.rs](../../src/stack_logic.rs), with thirteen host tests |
 | Report kept across a reset | `OverflowRecord` in [stack_logic.rs](../../src/stack_logic.rs), with five host tests; `OVERFLOW_RECORD`, `take_previous_overflow`, `log_previous_overflow`, and `describe_overflow` (simulation) in [stack.rs](../../src/stack.rs) |
 | Size | `STACK_GUARD_BYTES` in [config.rs](../../src/config.rs) |
-| Programming, read-back, high-water | `enable_guard`, `enable_guard_logged`, `guard_is_on`, and `high_water` in [stack.rs](../../src/stack.rs) |
+| Programming, read-back, high-water | `enable_guard`, `enable_guard_logged`, `guard_is_on` (with `select_region`), and `high_water` in [stack.rs](../../src/stack.rs) |
 | Fault report | `HardFault`, the assembly `MemoryManagement` handler, and `report_overflow` in [stack.rs](../../src/stack.rs) |
-| Callers | `main` in [main.rs](../../src/main.rs), [selftest.rs](../../src/selftest.rs) (with stage 7's read-back and the optional `offer_overflow`), and [sim.rs](../../src/sim.rs) with `uart_write_blocking` |
+| Callers | `main` in [main.rs](../../src/main.rs), [selftest.rs](../../src/selftest.rs) (with stage 7's read-back and the optional `offer_overflow` and `overflow_stack`), and [sim.rs](../../src/sim.rs) with `uart_write_blocking` |
 | Debug session | `mask selftest` in [maskfile.md](../../maskfile.md) passes `--no-catch-hardfault` to `probe-rs run` |
 | Renode test | "A Stack Overflow Faults In The Guard And Is Reported" in [bt2usb-sim.robot](../../renode/bt2usb-sim.robot) |
 
 ### Verification Status
 
 - **Implemented:** everything above, on 2026-10-11.
-- **Software-verified:** the eleven `stack_logic` host tests pin the
-  placement, the register values, the read-back comparison, and the
-  record's layout, round trip, and rejection of a cleared, corrupted, or
-  swapped record. The Renode scenario checks the boot line, that a stack
+- **Software-verified:** the eighteen `stack_logic` host tests pin the
+  placement, the register values, the read-back comparison, the region
+  count and enable bit, which faults count as overflows and when the frame
+  holds a PC, and the record's layout, round trip, and rejection of a
+  cleared, corrupted, or swapped record. The Renode scenario checks the boot line, that a stack
   pointer moved into the guard ends in the `stack overflow` line and a
   halted core, and that the boot after a machine reset logs the record;
   with the MPU left off it fails (checked by a run with `MPU_CTRL` written

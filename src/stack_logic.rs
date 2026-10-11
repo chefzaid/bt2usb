@@ -1,30 +1,65 @@
-//! Where the stack guard goes and what the Cortex-M4 MPU is programmed with.
+//! Where the stack guard goes, what the Cortex-M4 MPU is programmed with, and
+//! which faults are stack overflows.
 //!
 //! The stack grows down from the top of RAM towards the statics, so an
 //! overflow would run into `.bss` and corrupt it without a trace. The board
-//! shell (`src/stack.rs`) makes the lowest bytes of the stack region a
-//! no-access MPU region instead: the first push into it faults, and the
-//! HardFault handler reports the overflow while every static is still intact.
-//! This module decides the region and the register values and is
-//! hardware-free, so the host tests cover it; ADR 0026 records the design.
+//! shell (`src/stack.rs`) puts a no-access MPU region at the bottom of the
+//! stack region instead, on the first guard-sized boundary at or above
+//! `_stack_end` (the bytes below it are never used): the first push into it
+//! faults, and the HardFault handler reports the overflow while the statics
+//! are still intact. This module decides the region, the register values,
+//! and which faults are overflows, and is hardware-free, so the host tests
+//! cover it; ADR 0026 records the design.
 
 /// The ARMv7-M MPU's smallest region (bytes).
 const MIN_REGION: u32 = 32;
 
 /// `MPU_RASR.XN`: no instruction fetch from the region.
 const RASR_XN: u32 = 1 << 28;
-/// `MPU_RASR.C` and `MPU_RASR.B` with `TEX = 0`: normal, write-back memory,
-/// as the default map treats SRAM. `MPU_RASR.AP` stays 0: no access at any
-/// privilege level.
+/// `MPU_RASR.C` and `MPU_RASR.B` with `TEX = 0`: normal memory, write-back
+/// with no write-allocate. The attributes never take effect: `MPU_RASR.AP`
+/// stays 0, so no access is allowed at any privilege level, and the
+/// Cortex-M4 has no cache.
 const RASR_NORMAL_MEMORY: u32 = (1 << 17) | (1 << 16);
 /// `MPU_RASR.ENABLE`.
 const RASR_ENABLE: u32 = 1;
 
 /// `MPU_CTRL`: the MPU on (`ENABLE`), the default memory map for every
-/// address outside the guard (`PRIVDEFENA`), and the MPU off inside the
-/// HardFault handler (`HFNMIENA` clear), so the handler can stack its frame
-/// and run on the guard's bytes.
+/// address outside the guard (`PRIVDEFENA`), and the MPU off while the
+/// HardFault handler runs (`HFNMIENA` clear), so the handler's own pushes and
+/// calls can use the guard's bytes. The fault's frame is pushed before the
+/// handler runs, with the MPU still on, so a frame that lands in the guard is
+/// not stored (`CFSR.MSTKERR`).
 pub const MPU_CTRL: u32 = (1 << 2) | 1;
+
+/// `CFSR.DACCVIOL`: the MPU refused a data access.
+const CFSR_DACCVIOL: u32 = 1 << 1;
+/// `CFSR.MSTKERR`: the MPU refused the push of an exception's frame.
+const CFSR_MSTKERR: u32 = 1 << 4;
+/// `CFSR.MMARVALID`: `MMFAR` holds the address of the refused data access.
+const CFSR_MMARVALID: u32 = 1 << 7;
+/// `CFSR.STKERR`: a bus error refused the push of an exception's frame.
+const CFSR_STKERR: u32 = 1 << 12;
+
+/// The number of regions an `MPU_TYPE` value reports (`DREGION`); 0 means
+/// the core has no MPU.
+pub const fn mpu_regions(mpu_type: u32) -> u32 {
+    (mpu_type >> 8) & 0xFF
+}
+
+/// Whether an `MPU_RASR` value turns its region on.
+pub const fn region_enabled(rasr: u32) -> bool {
+    rasr & RASR_ENABLE != 0
+}
+
+/// Whether a fault's frame holds the registers of the code that faulted,
+/// from the `CFSR` value. When pushing the frame itself faulted (`MSTKERR`
+/// in the guard, `STKERR` off the end of RAM), the processor still moved the
+/// stack pointer but stored nothing, so the frame's words, the PC among them,
+/// are whatever that RAM held before.
+pub const fn frame_stacked(cfsr: u32) -> bool {
+    cfsr & (CFSR_MSTKERR | CFSR_STKERR) == 0
+}
 
 /// A no-access MPU region at the bottom of the stack.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -61,14 +96,34 @@ impl StackGuard {
         self.size
     }
 
-    /// Whether the guard lies below the stack in use, with stack left before
-    /// it: the stack pointer is above the guard's top. A fault taken with the
-    /// stack pointer at or below the top is an overflow: on the core, the
-    /// frame the fault stacks always lands in the guard then, and an emulator
-    /// that does not move the stack pointer for a frame it could not stack
-    /// leaves it at the top.
-    pub const fn below(&self, stack_pointer: u32) -> bool {
-        self.top() < stack_pointer
+    /// Whether `address` is one of the guard's bytes.
+    pub const fn contains(&self, address: u32) -> bool {
+        self.base <= address && address < self.top()
+    }
+
+    /// Whether the guard lies below `address` with stack left before it:
+    /// `address` is above the guard's top. `stack::enable_guard` passes the
+    /// stack pointer; [`is_overflow`](Self::is_overflow) passes a fault's
+    /// frame.
+    pub const fn below(&self, address: u32) -> bool {
+        self.top() < address
+    }
+
+    /// Whether a fault is a stack overflow, from the address of its frame and
+    /// the fault status registers (`CFSR`, `MMFAR`): the frame is at or below
+    /// the guard's top, or the MPU refused a data access inside the guard.
+    ///
+    /// On the core, a frame pushed into the guard lies below its top (and was
+    /// not stored, `MSTKERR`), and one below the base means a single frame
+    /// stepped over the guard. A frame exactly at the top lies wholly above
+    /// the guard; it counts for an emulator that leaves the stack pointer
+    /// where it was when it cannot push a frame. The refused access catches a
+    /// push or store that faults in the guard while the fault's own frame,
+    /// 32 bytes below the stack pointer before it, still fits above the
+    /// guard, as a store-multiple of 44 bytes or more can.
+    pub const fn is_overflow(&self, frame: u32, cfsr: u32, mmfar: u32) -> bool {
+        let refused = CFSR_DACCVIOL | CFSR_MMARVALID;
+        !self.below(frame) || (cfsr & refused == refused && self.contains(mmfar))
     }
 
     /// The `MPU_RBAR` value for the region number already in `MPU_RNR`.
@@ -283,18 +338,99 @@ mod tests {
     }
 
     #[test]
-    fn a_stack_pointer_under_the_guard_top_has_overflowed() {
+    fn the_guard_holds_its_own_bytes_only() {
+        let guard = StackGuard::place(0x2000_7000, 4096).unwrap();
+        assert!(guard.contains(0x2000_7000));
+        assert!(guard.contains(0x2000_7FFF));
+        assert!(!guard.contains(0x2000_8000));
+        assert!(!guard.contains(0x2000_6FFF));
+    }
+
+    #[test]
+    fn the_guard_is_below_only_addresses_above_its_top() {
         let guard = StackGuard::place(0x2000_7000, 4096).unwrap();
         assert!(guard.below(0x2003_FFF0));
         assert!(guard.below(0x2000_8004));
-        assert!(
-            !guard.below(0x2000_8000),
-            "no stack left: the next push faults"
-        );
-        assert!(!guard.below(0x2000_7FFC), "a frame stacked in the guard");
-        assert!(!guard.below(0x2000_7000));
-        // A frame larger than what was left can skip past the guard.
+        assert!(!guard.below(0x2000_8000));
+        assert!(!guard.below(0x2000_7FE0));
         assert!(!guard.below(0x2000_6F00));
+    }
+
+    /// `CFSR` of a refused data access with `MMFAR` valid.
+    const REFUSED_ACCESS: u32 = CFSR_DACCVIOL | CFSR_MMARVALID;
+
+    #[test]
+    fn a_frame_at_or_under_the_guard_top_is_an_overflow() {
+        let guard = StackGuard::place(0x2000_7000, 4096).unwrap();
+        assert!(
+            guard.is_overflow(0x2000_7FE0, CFSR_MSTKERR, 0),
+            "a frame pushed into the guard"
+        );
+        assert!(
+            guard.is_overflow(0x2000_8000, 0, 0),
+            "an emulator that left the stack pointer at the top"
+        );
+        assert!(
+            guard.is_overflow(0x2000_6F00, 0, 0),
+            "a frame that stepped over the guard"
+        );
+    }
+
+    #[test]
+    fn a_refused_access_in_the_guard_is_an_overflow_wherever_the_frame_is() {
+        let guard = StackGuard::place(0x2000_7000, 4096).unwrap();
+        // A 44-byte push from 0x2000_8028 faults at 0x2000_7FFC while its
+        // fault's frame fits at 0x2000_8008.
+        assert!(guard.is_overflow(0x2000_8008, REFUSED_ACCESS, 0x2000_7FFC));
+        assert!(guard.is_overflow(0x2000_8008, REFUSED_ACCESS, 0x2000_7000));
+        assert!(
+            !guard.is_overflow(0x2000_8008, REFUSED_ACCESS, 0x2000_8000),
+            "refused above the guard"
+        );
+        assert!(
+            !guard.is_overflow(0x2000_8008, CFSR_DACCVIOL, 0x2000_7FFC),
+            "MMFAR not valid"
+        );
+        assert!(
+            !guard.is_overflow(0x2000_8008, CFSR_MMARVALID, 0x2000_7FFC),
+            "not a data access"
+        );
+    }
+
+    #[test]
+    fn other_faults_above_the_guard_are_not_overflows() {
+        let guard = StackGuard::place(0x2000_7000, 4096).unwrap();
+        // panic-probe's `udf` (CFSR.UNDEFINSTR) with stack to spare.
+        assert!(!guard.is_overflow(0x2003_F000, 1 << 16, 0));
+        assert!(!guard.is_overflow(0x2000_8008, 0, 0x2000_7FFC));
+    }
+
+    #[test]
+    fn a_frame_whose_push_faulted_holds_no_pc() {
+        assert!(frame_stacked(0));
+        assert!(frame_stacked(REFUSED_ACCESS));
+        assert!(frame_stacked(1 << 16));
+        assert!(!frame_stacked(CFSR_MSTKERR));
+        assert!(!frame_stacked(CFSR_STKERR));
+        assert!(!frame_stacked(CFSR_MSTKERR | REFUSED_ACCESS));
+    }
+
+    #[test]
+    fn the_type_register_gives_the_region_count() {
+        // The nRF52840's MPU_TYPE: eight regions, unified.
+        assert_eq!(mpu_regions(0x0000_0800), 8);
+        assert_eq!(mpu_regions(0), 0);
+        assert_eq!(mpu_regions(0xFFFF_00FF), 0);
+        assert_eq!(mpu_regions(0x00FF_FF00), 0xFF);
+    }
+
+    #[test]
+    fn only_the_enable_bit_turns_a_region_on() {
+        let guard = StackGuard::place(0x2000_7000, 4096).unwrap();
+        assert!(region_enabled(guard.rasr()));
+        assert!(region_enabled(1));
+        assert!(!region_enabled(0));
+        assert!(!region_enabled(guard.rasr() & !1));
     }
 
     #[test]

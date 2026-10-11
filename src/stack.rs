@@ -7,17 +7,22 @@
 //! thread executor runs every task on this one stack (plus interrupt frames),
 //! so this is the number that has to stay well below the region size.
 //!
-//! [`enable_guard`] makes the lowest [`STACK_GUARD_BYTES`] of the region a
-//! no-access MPU region (placed by [`StackGuard`]), so an overflow faults
-//! before it reaches the statics below, and this module's HardFault handler
-//! reports it. The MPU is off inside that handler (`MPU_CTRL.HFNMIENA` clear),
-//! so the processor can stack the fault's frame in the guard and the handler
-//! can run there (docs/adr/0026-mpu-stack-guard.md).
+//! [`enable_guard`] makes [`STACK_GUARD_BYTES`] at the bottom of the region,
+//! on the first boundary of that size at or above `_stack_end`, a no-access
+//! MPU region (placed by [`StackGuard`]), so an overflow faults before it
+//! reaches the statics below, and this module's HardFault handler reports it.
+//! The fault's own frame cannot be stored in the guard (`CFSR.MSTKERR`), so
+//! the faulting PC is usually lost; the MPU is off only once the handler runs
+//! (`MPU_CTRL.HFNMIENA` clear), so the handler can run on the guard's bytes
+//! (docs/adr/0026-mpu-stack-guard.md).
 
 use crate::config::STACK_GUARD_BYTES;
-use crate::stack_logic::{OverflowRecord, StackGuard, MPU_CTRL, OVERFLOW_RECORD_WORDS};
+use crate::stack_logic::{
+    frame_stacked, mpu_regions, region_enabled, OverflowRecord, StackGuard, MPU_CTRL,
+    OVERFLOW_RECORD_WORDS,
+};
 use core::sync::atomic::{AtomicU32, Ordering};
-use cortex_m::peripheral::MPU;
+use cortex_m::peripheral::{mpu, MPU, SCB};
 
 const PAINT: u32 = 0xCCCC_CCCC;
 
@@ -71,8 +76,9 @@ pub enum GuardError {
     NoMpu,
 }
 
-/// Turn the guard on: MPU region 0 covers it with no access, and the default
-/// memory map covers everything else. Call it once, early in `main`.
+/// Turn the guard on: MPU region 0 covers it with no access, every other
+/// region is off, and the default memory map covers everything else. Call it
+/// once, early in `main`.
 pub fn enable_guard() -> Result<StackGuard, GuardError> {
     let guard = guard().ok_or(GuardError::BadSize)?;
     if !guard.below(cortex_m::register::msp::read()) {
@@ -81,16 +87,23 @@ pub fn enable_guard() -> Result<StackGuard, GuardError> {
     // SAFETY: the MPU's register block is always mapped on this core; this
     // only reads its TYPE register.
     let mpu = unsafe { &*MPU::PTR };
-    if (mpu._type.read() >> 8) & 0xFF == 0 {
+    let regions = mpu_regions(mpu._type.read());
+    if regions == 0 {
         return Err(GuardError::NoMpu);
     }
     // SAFETY: the region covers only the guard, which nothing uses (the stack
-    // pointer is above it, checked above, and no static lies in it), and
-    // `PRIVDEFENA` keeps the default map for every other address, so no
-    // access the firmware makes changes meaning. The MPU is off while it is
-    // reprogrammed.
+    // pointer is above it, checked above, and no static lies in it), and with
+    // every other region off `PRIVDEFENA` keeps the default map for every
+    // other address, so no access the firmware makes changes meaning. The
+    // MPU is off while it is reprogrammed.
     unsafe {
         mpu.ctrl.write(0);
+        // Where regions overlap the highest-numbered one wins, so a region
+        // left on by code that ran before could open the guard.
+        for region in 1..regions {
+            mpu.rnr.write(region);
+            mpu.rasr.write(0);
+        }
         mpu.rnr.write(0);
         mpu.rbar.write(guard.rbar());
         mpu.rasr.write(guard.rasr());
@@ -121,15 +134,27 @@ pub fn enable_guard_logged() -> Option<StackGuard> {
     }
 }
 
-/// Whether the MPU still holds `guard`, as [`enable_guard`] programmed it.
+/// Whether the MPU still holds `guard` as [`enable_guard`] programmed it:
+/// `MPU_CTRL` and region 0 as written, and every other region still off.
 #[allow(dead_code)] // used by the self-test binary
 pub fn guard_is_on(guard: &StackGuard) -> bool {
     // SAFETY: the MPU's register block is always mapped on this core.
     let mpu = unsafe { &*MPU::PTR };
-    // SAFETY: this selects region 0, which only this module programs, so the
-    // reads below see it; no other code depends on the region number.
-    unsafe { mpu.rnr.write(0) };
-    guard.is_programmed(mpu.ctrl.read(), mpu.rbar.read(), mpu.rasr.read())
+    let others_off = (1..mpu_regions(mpu._type.read())).all(|region| {
+        select_region(mpu, region);
+        !region_enabled(mpu.rasr.read())
+    });
+    select_region(mpu, 0);
+    others_off && guard.is_programmed(mpu.ctrl.read(), mpu.rbar.read(), mpu.rasr.read())
+}
+
+/// Point `MPU_RNR` at `region`, so `MPU_RBAR` and `MPU_RASR` read it.
+#[allow(dead_code)] // used by `guard_is_on`, which only the self-test calls
+fn select_region(mpu: &mpu::RegisterBlock, region: u32) {
+    // SAFETY: only this module uses the MPU, and the region number changes
+    // which region the other registers show, not any protection; every use
+    // ends with region 0 selected, as `enable_guard` leaves it.
+    unsafe { mpu.rnr.write(region) };
 }
 
 /// The last overflow's [`OverflowRecord`], encoded. `.uninit` is the part of
@@ -153,31 +178,28 @@ pub fn take_previous_overflow() -> Option<OverflowRecord> {
     OverflowRecord::decode(words)
 }
 
-/// `CFSR.MSTKERR`: stacking the fault's frame faulted, so the frame holds
-/// whatever the guard held before (its reset paint), not the faulting code's
-/// registers. A real overflow always sets it, because the frame goes below a
-/// stack pointer that is already at the guard.
-const CFSR_MSTKERR: u32 = 1 << 4;
-
 /// Every HardFault ends here, including the one panic-probe raises after
-/// printing a panic. A fault taken with the stack pointer at or below the
-/// guard's top ([`StackGuard::below`]) is a stack overflow and is reported;
-/// then, as cortex-m-rt's default handler does, the core spins until it is
-/// reset. The MPU is off in this handler, so it runs on the guard's bytes.
-/// cortex-m-rt requires the HardFault handler to be an `unsafe fn`; only the
-/// exception calls it.
+/// printing a panic. A stack overflow ([`StackGuard::is_overflow`]: the
+/// fault's frame at or below the guard's top, or an access the MPU refused in
+/// the guard) is reported; then, as cortex-m-rt's default handler does, the
+/// core spins until it is reset. The MPU is off in this handler, so it runs
+/// on the guard's bytes. The PC is reported only when the frame holding it
+/// was stored ([`frame_stacked`]); an overflow's frame usually lands in the
+/// guard and is not. cortex-m-rt requires the HardFault handler to be an
+/// `unsafe fn`; only the exception calls it.
 #[cortex_m_rt::exception]
 unsafe fn HardFault(frame: &cortex_m_rt::ExceptionFrame) -> ! {
     let stack_pointer = core::ptr::from_ref(frame) as u32;
-    if let Some(guard) = guard().filter(|guard| !guard.below(stack_pointer)) {
-        // SAFETY: the SCB's register block is always mapped on this core;
-        // this only reads the fault status.
-        let stacked = unsafe { (*cortex_m::peripheral::SCB::PTR).cfsr.read() } & CFSR_MSTKERR == 0;
+    // SAFETY: the SCB's register block is always mapped on this core; this
+    // only reads the fault status and address.
+    let scb = unsafe { &*SCB::PTR };
+    let (cfsr, mmfar) = (scb.cfsr.read(), scb.mmfar.read());
+    if let Some(guard) = guard().filter(|guard| guard.is_overflow(stack_pointer, cfsr, mmfar)) {
         let record = OverflowRecord {
             stack_pointer,
             guard_base: guard.base(),
             guard_top: guard.top(),
-            pc: stacked.then(|| frame.pc()),
+            pc: frame_stacked(cfsr).then(|| frame.pc()),
         };
         // Stored first: logging can fail (a fault inside a log call leaves
         // the logger taken, and its panic locks the core up), and the next

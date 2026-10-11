@@ -67,7 +67,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [power.rs](../src/power.rs) | Board shell | Activity tracking and power state over `embassy-time` |
 | [power_logic.rs](../src/power_logic.rs) | Pure core | Pure power/display policy |
 | [stack.rs](../src/stack.rs) | Board shell | Painted-stack high-water measurement, the MPU stack guard (programming and read-back), and the HardFault and MemManage handlers that report a stack overflow and keep the report in `.uninit` RAM for the next boot |
-| [stack_logic.rs](../src/stack_logic.rs) | Pure core | Where the stack guard goes (`StackGuard::place`), the MPU register values for it, and the encoding of the overflow report kept across a reset (`OverflowRecord`) ([ADR 0026](adr/0026-mpu-stack-guard.md)) |
+| [stack_logic.rs](../src/stack_logic.rs) | Pure core | Where the stack guard goes (`StackGuard::place`), the MPU register values for it, which faults are stack overflows (`StackGuard::is_overflow`) and whether their frame holds a PC, and the encoding of the overflow report kept across a reset (`OverflowRecord`) ([ADR 0026](adr/0026-mpu-stack-guard.md)) |
 | [ble/mod.rs](../src/ble/mod.rs) | Board shell | `BleCommand`, `BleEvent`, and `DiscoveredDevice` over the SoftDevice `Address`, and the GAP procedure lock |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | Pure core | HID service UUID and device-name parsing from advertisements |
 | [ble/bond_table.rs](../src/ble/bond_table.rs) | Pure core | The bonding keys held in RAM, each saved or not: a new pairing never displaces a saved device's keys, and one that is not saved is discarded |
@@ -1333,7 +1333,8 @@ line, as cortex-m-rt's default handler did
 ([ADR 0026](adr/0026-mpu-stack-guard.md)). The handler stores the report in
 `.uninit` RAM before it logs, and the next boot after a reset that keeps RAM
 logs it as `previous boot: stack overflow: ...`. A `probe-rs run` session, which is
-what `mask run` starts, halts the core on entry to the handler before it logs
+what `mask run` starts, and a `probe-rs attach` session, which `mask rtt`
+starts, halt the core on entry to the handler before it logs
 and prints `Firmware exited unexpectedly: Exception` instead; `mask selftest`
 turns that catch off ([the runbook](operations.md#the-stack-overflows)).
 

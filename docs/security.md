@@ -576,15 +576,19 @@ the SoftDevice C API with `unsafe` FFI. No separate audit record exists; rules
 for adding or reviewing `unsafe` are in the same
 [code quality](code-quality.md#unsafe-code-policy) section.
 
-Since 2026-10-11 a stack overflow, whatever drives it, faults in the MPU guard
-at the bottom of the stack before it can overwrite the statics below, which
-hold every task's state, the bonds and saved devices among it; the bridge logs the
-overflow and stops ([ADR 0026](adr/0026-mpu-stack-guard.md)). The report it
-keeps in RAM for the next boot holds only the stack pointer, the guard's
-bounds, and the PC, never input or key material. A frame larger
-than the guard plus the stack left above it can still skip over it; every
-firmware frame is under the 4 KiB guard (the largest, the self-test's main
-task, is 3,412 bytes; the bridge's is 2,668), and no parser recurses.
+Since 2026-10-11 a stack overflow faults in the MPU guard at the bottom of the
+stack before it can overwrite the statics below, which hold every task's
+state, the bonds and saved devices among it; the bridge logs the overflow and
+stops ([ADR 0026](adr/0026-mpu-stack-guard.md)). The report it keeps in RAM
+for the next boot holds only the stack pointer, the guard's bounds, and the
+PC, never input or key material. The guard does not catch a single frame
+larger than the guard plus the stack left above it, which steps over it.
+A 2026-10-11 measurement, which no build step repeats, found every frame
+entered deep in the stack under the 4 KiB guard: the bridge's largest is
+2,704 bytes, and the self-test's and simulation's main task frames (4,480
+and 5,856 bytes) are polled only from the top of the stack. The SoftDevice's
+handlers run on the same stack and their frames are not measured. No parser
+recurses.
 
 ## Security Testing
 

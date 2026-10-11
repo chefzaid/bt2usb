@@ -358,26 +358,32 @@ scripts are executable.
 
 The application has eleven `unsafe` blocks and one `unsafe fn` in five files,
 and one `global_asm!` block. The `unsafe` lines were counted with
-`grep -rnw unsafe src build.rs tests`, which matches these twelve lines and
-the comment in `lib.rs` that states the rule; `build.rs`, `tests/`, and the
-Python and shell scripts contain no `unsafe`. There are no `unsafe impl`,
-`static mut`, `transmute`, `MaybeUninit`, `#[no_mangle]`, or `asm!` in `src/`
-(`grep -rn` for each returns nothing); the one `global_asm!`, in `stack.rs`,
-is row 13, and the one `#[link_section]`, which puts `stack.rs`'s
-`OVERFLOW_RECORD` in `.uninit`, needs no `unsafe` (see the notes below).
-cortex-m-rt's `#[exception]`
-attribute on `HardFault` generates the exported symbol the vector table
-names, so `src/` itself declares none.
+`grep -rnw unsafe src build.rs tests`, which matches fourteen lines: these
+twelve, the comment in `lib.rs` that states the rule, and the doc comment
+above `HardFault` in `stack.rs` that says why it is an `unsafe fn`;
+`build.rs`, `tests/`, and the Python and shell scripts contain no `unsafe`.
+There are no `unsafe impl`, `transmute`, `MaybeUninit`, or `#[no_mangle]` in
+`src/` (`grep -rnw` for each returns nothing). `grep -rn 'static mut' src`
+matches only the `&'static mut` return types of `keyboard_handler` and
+`mouse_handler` in `usb/host_requests.rs`, not a `static mut`, and
+`grep -rn 'asm!' src` matches only the `global_asm!` in `stack.rs`, row 13.
+The one `#[link_section]`, which puts `stack.rs`'s `OVERFLOW_RECORD` in
+`.uninit`, needs no `unsafe` (see the notes below). Two exported symbols
+replace cortex-m-rt's defaults: the `#[exception]` attribute on `HardFault`
+exports `_HardFault`, which cortex-m-rt's trampoline calls, and row 13's
+assembly exports `MemoryManagement`, which overrides the
+`PROVIDE(MemoryManagement = DefaultHandler)` in cortex-m-rt's linker script
+as the vector table's MemManage entry.
 
 | # | Location | Operation | Purpose | Invariant the code relies on | `SAFETY` comment | Compiled into |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | [stack.rs](../src/stack.rs) `high_water` | `core::ptr::read_volatile` of a `u32` | Find the first overwritten word of the painted stack | Each address is word-aligned and lies between the guard's top and the linker symbol `_stack_start`, which is RAM owned by the program; the scan starts above the guard, which faults while it is on; the read is volatile so the compiler cannot assume the contents | Yes | Bridge, self-test |
+| 1 | [stack.rs](../src/stack.rs) `high_water` | `core::ptr::read_volatile` of a `u32` | Find the first overwritten word of the painted stack | Each address is word-aligned and lies between the guard's top and the linker symbol `_stack_start`, which is RAM owned by the program; the scan starts above the guard, which faults while it is on; the read is volatile so the compiler cannot assume the contents | Yes | Bridge, self-test (compiled unused into the simulation) |
 | 2 | [stack.rs](../src/stack.rs) `enable_guard`, first block | `&*MPU::PTR` | Read the MPU's `TYPE` register to check that the core has regions | `MPU::PTR` is the fixed address of the MPU's register block, which every Cortex-M4 with an MPU maps; the reference is shared and the registers are volatile cells | Yes | Bridge, self-test, simulation |
-| 3 | [stack.rs](../src/stack.rs) `enable_guard`, second block | Writes to `MPU_CTRL`, `MPU_RNR`, `MPU_RBAR`, and `MPU_RASR` | Make the guard a no-access, execute-never region 0 and turn the MPU on | The region covers only the guard: the stack pointer is above it (checked first), and no static lies in it, because it starts at or above `_stack_end`. `PRIVDEFENA` keeps the default memory map for every other address, so no other access the firmware makes changes meaning. The MPU is off while it is reprogrammed, and `dsb` and `isb` follow. No dependency programs the MPU | Yes | Bridge, self-test, simulation |
+| 3 | [stack.rs](../src/stack.rs) `enable_guard`, second block | Writes to `MPU_CTRL`, `MPU_RNR`, `MPU_RBAR`, and `MPU_RASR` | Turn every region but 0 off (where regions overlap the highest-numbered wins), make the guard a no-access, execute-never region 0, and turn the MPU on | The region covers only the guard: the stack pointer is above it (checked first), and no static lies in it, because it starts at or above `_stack_end`. Every other region is off, so `PRIVDEFENA` keeps the default memory map for every other address, so no other access the firmware makes changes meaning. The MPU is off while it is reprogrammed, and `dsb` and `isb` follow. No dependency programs the MPU | Yes | Bridge, self-test, simulation |
 | 4 | [stack.rs](../src/stack.rs) `guard_is_on`, first block | `&*MPU::PTR` | Read the MPU back for the self-test's `stack guard` stage | Same as 2 | Yes | Self-test (compiled unused into the bridge and the simulation) |
-| 5 | [stack.rs](../src/stack.rs) `guard_is_on`, second block | Write 0 to `MPU_RNR` | Select region 0 so `RBAR` and `RASR` read it | Only `enable_guard` programs the MPU, and it uses region 0, so selecting it changes nothing another user depends on | Yes | Same as 4 |
+| 5 | [stack.rs](../src/stack.rs) `select_region` | Write a region number to `MPU_RNR` | Let `guard_is_on` read each region in turn (regions 1 and up must be off) and then region 0 | Only `stack.rs` uses the MPU; the region number changes which region the other registers show, not any protection, and every use ends with region 0 selected, as `enable_guard` leaves it | Yes | Same as 4 |
 | 6 | [stack.rs](../src/stack.rs) `HardFault` | `unsafe fn` | The HardFault handler | cortex-m-rt's `#[exception]` requires the HardFault handler to be an `unsafe fn` and exports it as `_HardFault`, which its trampoline calls with the frame's address; nothing in `src/` calls it, and only the exception and row 13 enter it | Doc comment (no `# Safety` section: no caller) | Bridge, self-test, simulation |
-| 7 | [stack.rs](../src/stack.rs) `HardFault` | Read `SCB_CFSR` through `SCB::PTR` | Tell whether the fault's frame was stacked (`MSTKERR` clear) before reporting its PC | The SCB's register block is always mapped on a Cortex-M core; the read has no side effect | Yes | Bridge, self-test, simulation |
+| 7 | [stack.rs](../src/stack.rs) `HardFault` | `&*SCB::PTR`, then reads of `SCB_CFSR` and `SCB_MMFAR` | Tell an overflow from another fault (`StackGuard::is_overflow`: a frame at or below the guard's top, or a data access the MPU refused inside the guard) and whether the fault's frame was stored (`MSTKERR` and `STKERR` clear) before reporting its PC | The SCB's register block is always mapped on a Cortex-M core; the reads have no side effect | Yes | Bridge, self-test, simulation |
 | 8 | [scanner.rs](../src/ble/scanner.rs) `scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | View advertisement bytes from a SoftDevice scan report | `p_data` and `len` describe the report inside the scan buffer, and the slice does not outlive the callback | Yes | Bridge |
 | 9 | [bonder.rs](../src/ble/bonder.rs) `bonder`, first branch | `&*ptr` | Return the shared `&'static Bonder` | The pointer came from `StaticCell::try_init`, so it is non-null, aligned, initialized, and lives forever; after initialization the `Bonder` is only reached through shared references | Yes | Bridge |
 | 10 | [bonder.rs](../src/ble/bonder.rs) `bonder`, spin fallback | `&*ptr` | Same as 9, after waiting for another caller's initialization | Same as 9 | Yes ("as above") | Bridge |
@@ -387,11 +393,12 @@ names, so `src/` itself declares none.
 
 The host library contains none of these blocks: `stack.rs`, `sd_setup.rs`,
 `scanner.rs`, and `bonder.rs` are not compiled into it, and neither is
-`selftest.rs`; its `stack_logic.rs` computes the register values without
-touching a register. The simulation binary contains only the `stack.rs`
-blocks other than row 1: `src/ble/mod.rs` compiles `scanner` and `bonder`
-only with the `embedded` feature, `sim.rs` does not declare `sd_setup`, and
-the simulation never calls `high_water`, because it has no painted stack.
+`selftest.rs`; its `stack_logic.rs` computes the register values and
+classifies faults without touching a register. The simulation binary
+contains only the `stack.rs` blocks: `src/ble/mod.rs` compiles `scanner` and
+`bonder` only with the `embedded` feature, and `sim.rs` does not declare
+`sd_setup`. Of those, it never calls rows 1, 4, and 5: it has no painted
+stack for `high_water` and no self-test stage for `guard_is_on`.
 
 ### Notes On Each Block
 
@@ -427,7 +434,8 @@ the simulation never calls `high_water`, because it has no painted stack.
   and the invariant that makes that sound is that `stack.rs` is the only code
   that writes the MPU: the vendored crate, Embassy, and the SoftDevice do not
   ([ADR 0026](adr/0026-mpu-stack-guard.md)), and the self-test's
-  `stack guard` stage fails if anything changed the registers after boot.
+  `stack guard` stage fails if anything changed `MPU_CTRL` or region 0
+  after boot, or turned another region on.
 - **`OVERFLOW_RECORD`.** The fault handler stores the overflow report in six
   `AtomicU32`s placed in `.uninit` with `#[link_section]`, the placement
   defmt-rtt uses for its buffer. The section is `NOLOAD`, so the `0`
@@ -943,10 +951,14 @@ assert. The [hardware guide](hardware.md#memory-layout) and
   its bottom makes an overflow fault and log `stack overflow: ...` before it
   reaches static data ([ADR 0026](adr/0026-mpu-stack-guard.md)); a single
   frame larger than the guard plus the stack left above it could still step
-  over it. Scanning the release disassembly for immediate stack adjustments on
-  2026-10-11 found the largest single frame at 2,668 bytes in the bridge (the
-  display task's poll) and 3,412 bytes in the self-test (its main task's
-  poll); no check keeps every frame under the guard's 4 KiB.
+  over it. Scanning the images `mask` builds for each function's saved
+  registers and immediate stack adjustments on 2026-10-11 found the largest
+  frame at 2,704 bytes in the bridge (the display task's poll). The
+  self-test's main task frame (4,480 bytes) and the simulation's (5,856) are
+  larger than the guard, but the executor polls them only from the top of
+  the stack; every other frame is at most 1,540 bytes in the self-test and
+  3,024 in the simulation. No check keeps frames entered deep in the stack
+  under the guard's 4 KiB, and the SoftDevice's frames are not visible.
 - **SoftDevice RAM.** The 24 KiB reservation is not derived from a
   measurement. `Softdevice::enable` panics at boot if it is too small.
 - **Size growth.** No CI step records `mask size` or compares it with a

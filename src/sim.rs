@@ -115,6 +115,10 @@ pub fn uart_write_blocking(bytes: &[u8]) {
     uarte.events_endtx().write_value(0);
     uarte.txd().ptr().write_value(buffer.as_ptr() as u32);
     uarte.txd().maxcnt().write(|w| w.set_maxcnt(len as u16));
+    // The register writes are volatile but the copy is not: without a fence
+    // the compiler may move the copy past the start of the DMA, as
+    // embassy-nrf's own blocking write guards against.
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
     uarte.tasks_starttx().write_value(1);
     // Bounded, so a UART that never finishes cannot hang the report forever.
     for _ in 0..1_000_000 {
@@ -122,6 +126,7 @@ pub fn uart_write_blocking(bytes: &[u8]) {
             break;
         }
     }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
 /// Format a line and write it to the console.

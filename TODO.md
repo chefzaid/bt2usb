@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 53 | 0 | 0 |
+| [FIXME](#fixme) | 54 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **142** | **69** | **21** |
+| **Total** | **143** | **69** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -835,6 +835,42 @@ checklist on 2026-10-10; each was confirmed by a second, independent check.
   overflow case now resets the machine and expects that line, failing when
   the store is removed. The board evidence is an optional first-flash check
   after the deliberate overflow *(hardware evidence pending)*.
+- [x] **P2** **The stack guard's first version missed cases and overstated
+  others.** A four-part review of the MPU stack guard commit (`ba13354`,
+  ADR 0026) on 2026-10-11 upheld 24 findings, every one confirmed against the
+  code, a build, or the Arm architecture manual. In the code: the self-test's
+  `stack guard` stage checked only `MPU_CTRL` and region 0, though a
+  higher-numbered region left on over the guard would open it; the handler
+  missed an overflow whose push faulted in the guard while the fault's own
+  frame still fitted above it (a store-multiple of 44 bytes or more), and
+  would read a PC from a frame whose push hit a bus error (`STKERR`); the
+  self-test offered its deliberate overflow even with the guard off or
+  SELECT stuck low, and then ran it at once, while its `returned without a
+  fault` warning could never print (the recursion was bounded at a depth
+  needing 50 MB of stack); and the simulation's UART report started DMA with
+  no compiler fence after filling the buffer. In the docs: the HardFault
+  module comment said the fault's frame could be stacked in the guard; the
+  `RASR` attributes were said to match the default SRAM map; the runbook
+  blamed only `mask run` for probe-rs's HardFault catch, promised intact
+  statics for a stack pointer below the guard, and still said the first two
+  boot lines carry the reset reason; ADR 0020 still told the watchdog work
+  to add a second HardFault handler, which cannot link; ADR 0010 said
+  `high_water` scans from `_stack_end`; the unsafe inventory's grep counts
+  were wrong; and the frame sizes left out saved registers and were measured
+  at `DEFMT_LOG=info`, though `mask selftest` builds at `debug`, where the
+  self-test's main task frame is 4,480 bytes, above the guard's 4 KiB.
+  Fixed: `enable_guard` turns regions 1 and up off and `guard_is_on` checks
+  they stay off; `StackGuard::is_overflow` also counts a data access refused
+  inside the guard (`CFSR.DACCVIOL` with `MMARVALID` and `MMFAR`), and
+  `frame_stacked` drops the PC for `STKERR` as for `MSTKERR`, with seven new
+  host tests; the self-test offers the overflow only when the SELECT and
+  guard stages passed, cancels it when SELECT already reads pressed, and
+  bounds the recursion by the guard's address, so a guard that is off stops
+  it before the statics; the simulation fences the copy before the DMA
+  starts; and every statement above now matches the code and a re-measured
+  frame table, which records that the two frames above 4 KiB are main tasks
+  polled only from the top of the stack. The self-test changes still need a
+  board run *(hardware evidence pending)*.
 
 ## Needs Your Input
 
@@ -1400,10 +1436,12 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   handler runs with the MPU off and logs
   `stack overflow: stack pointer ..., guard ..., PC not stacked`, then stops
   the core ([ADR 0026](docs/adr/0026-mpu-stack-guard.md)). The placement and
-  register values are pure and host-tested (six tests), a Renode case moves
+  register values, and since the review fixes which faults count as
+  overflows, are pure and host-tested (thirteen tests), a Renode case moves
   the stack pointer into the guard and expects the report and a stopped core,
-  and the self-test checks the MPU still holds the region after the
-  SoftDevice, USB, and BLE stages and offers a deliberate overflow on SELECT,
+  and the self-test checks the MPU still holds the region, with every other
+  region off, after the SoftDevice, USB, and BLE stages and, when its SELECT
+  and guard stages passed, offers a deliberate overflow on SELECT,
   with `mask selftest` turning off probe-rs's HardFault catch so the line
   prints ([stack overflow incident](docs/operations.md#the-stack-overflows)).
   *(hardware evidence pending)*

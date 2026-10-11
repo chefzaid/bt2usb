@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that keeps the stack overflow report across a
-reset. The tree holds 426 `#[test]` functions: 415 in
+2026-10-11, in the commit that applies the stack guard review's fixes. The
+tree holds 433 `#[test]` functions: 422 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -228,7 +228,7 @@ protect.
 | [ui/layout_tests.rs](../src/ui/layout_tests.rs), for [layout.rs](../src/ui/layout.rs) | 12 | Every screen's lines and baselines: Home's title and hints, the scan's dots cycling, the one-line waiting screens, a device list that marks the selection with `> ` and scrolls to keep it among four rows, an empty list, the saved list ending with Factory reset and its footer, the Forget confirmation naming the device (or "Device unavailable") with Cancel as the default, the reset confirmation, and the name or message under each status title. Every fixed label fits the 21 columns of the panel, lines stay on the panel and never overlap, and a name wider than the panel is kept whole for the panel to cut. |
 | [diagnostics_tests.rs](../src/diagnostics_tests.rs), for [diagnostics.rs](../src/diagnostics.rs) | 14 | The build identity `build.rs` supplies: the crate version, a 40-digit commit with an optional `-dirty` or `unknown`, a `debug` or `release` profile, and a log filter. `POWER.RESETREAS` decoding: no defined bit reads as power-on or brown-out, each defined bit maps to its cause, accumulated causes list in bit order, undefined bits are kept for the report, the defined mask equals the cause bits, and every cause has a distinct name. Event counters: each counter has its own slot in log order and a distinct name, counts start at zero and stop at `u32::MAX`, and `CounterReport` never logs unchanged counts, logs the first change at once, then waits out `DIAGNOSTICS_REPORT_INTERVAL_SECS` and logs the latest counts, without its clock wrapping. |
 | [power_logic.rs](../src/power_logic.rs) | 5 | Active, Idle, and LowPower decisions: USB suspend forces LowPower at once, idle beyond twice the timeout without a BLE link is LowPower while a link keeps Idle, and very large timeouts do not overflow. |
-| [stack_logic.rs](../src/stack_logic.rs) | 11 | The MPU stack guard ([ADR 0026](adr/0026-mpu-stack-guard.md)): it starts at the first multiple of its size at or above `_stack_end`, so no static is inside it, and an aligned `_stack_end` is used as is; only powers of two of at least 32 bytes make a region, and a region that would pass the end of the address space is refused; a stack pointer above the guard's top has stack left, and one at the top, inside the guard, or below it (a frame larger than the stack left can skip past the guard) has overflowed; `RBAR` is the base, with the region number left to `RNR`, `RASR` is no access, execute-never, normal write-back memory, the size field, and ENABLE (`0x1003_0017` for 4 KiB, `0x1003_0009` for 32 bytes), and `MPU_CTRL` is `0b101`; the read-back accepts only the exact `CTRL` and `RASR` and the address bits of `RBAR`, whose low five bits are not address bits, so an MPU turned off, an MPU left on in HardFault, a moved region, or a disabled region fails it. The overflow record kept across a reset: it decodes to what was encoded, with or without a PC (a PC of 0 included); its six words are a tag that says whether a PC is present (`0x5354_4B4E` without, `0x5354_4B50` with), the stack pointer, the guard's base and top, the PC or 0, and a check word; a cleared or all-ones slot, a single flipped bit in any word, two swapped words, a PC stored in a record tagged without one, and an empty guard all decode to nothing. |
+| [stack_logic.rs](../src/stack_logic.rs) | 18 | The MPU stack guard ([ADR 0026](adr/0026-mpu-stack-guard.md)): it starts at the first multiple of its size at or above `_stack_end`, so no static is inside it, and an aligned `_stack_end` is used as is; only powers of two of at least 32 bytes make a region, and a region that would pass the end of the address space is refused; it holds its own bytes only, and is below only addresses above its top; a fault is an overflow when its frame is at the top (an emulator that does not move the stack pointer), inside the guard, or below it (a frame that stepped over the guard), or when `CFSR` shows a data access refused at an `MMFAR` inside the guard wherever the frame is (a 44-byte push whose fault's frame still fits above it), but not when `MMFAR` is outside the guard or not valid, nor for another fault, such as panic-probe's `udf`, with stack to spare; the frame holds a PC unless `MSTKERR` or `STKERR` is set; `MPU_TYPE` gives the region count (8 on the nRF52840) and only `RASR`'s ENABLE bit turns a region on; `RBAR` is the base, with the region number left to `RNR`, `RASR` is no access, execute-never, normal write-back memory with no write-allocate, the size field, and ENABLE (`0x1003_0017` for 4 KiB, `0x1003_0009` for 32 bytes), and `MPU_CTRL` is `0b101`; the read-back accepts only the exact `CTRL` and `RASR` and the address bits of `RBAR`, whose low five bits are not address bits, so an MPU turned off, an MPU left on in HardFault, a moved region, or a disabled region fails it. The overflow record kept across a reset: it decodes to what was encoded, with or without a PC (a PC of 0 included); its six words are a tag that says whether a PC is present (`0x5354_4B4E` without, `0x5354_4B50` with), the stack pointer, the guard's base and top, the PC or 0, and a check word; a cleared or all-ones slot, a single flipped bit in any word, two swapped words, a PC stored in a record tagged without one, and an empty guard all decode to nothing. |
 
 ### Integration Tests
 
@@ -926,6 +926,39 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Stack Guard Review Fixes
+
+This record covers the commit that fixes the P2 FIXME "The stack guard's
+first version missed cases and overstated others" in
+[TODO.md](../TODO.md#fixme): the 24 findings a four-part review upheld
+against the MPU stack guard commit `ba13354`
+([ADR 0026](adr/0026-mpu-stack-guard.md)). `enable_guard` now turns MPU
+regions 1 and up off and the self-test's `stack guard` stage checks they stay
+off; the HardFault handler also counts a data access the MPU refused inside
+the guard as an overflow (`StackGuard::is_overflow`) and drops the PC when
+the frame's push hit a bus error (`frame_stacked`); the self-test offers its
+deliberate overflow only when the SELECT and guard stages passed, never
+takes it from a SELECT already held, and stops the recursion by the guard's
+address; the simulation fences its UART buffer before the DMA starts; and
+the docs the review named now match the code. The checks ran locally on
+Linux in a container, on the working tree just before that commit; nothing
+ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 422 unit tests (7 new in `stack_logic.rs`, 18 there in all), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.94% of lines (from 98.92%), 98.95% of regions, 99.18% of functions; `stack_logic.rs` 100% of lines, regions, and functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge `.text` 125,156 bytes with `DEFMT_LOG=debug` and 124,144 with `DEFMT_LOG=info` (+48 each since `a51cec1`); `.bss` 25,380 and `.uninit` 1,048 unchanged, so `_stack_end` stays `0x2000CDA4` and the guard `0x2000D000`–`0x2000E000` |
+| Largest frames | `llvm-objdump -d` of the images `mask` builds (release at `DEFMT_LOG=debug`; the simulation's debug build), each function's saved registers plus every prologue `sub sp` immediate, cross-checked against the sum of every `sub sp` in the function, functions named from DWARF | Bridge 2,704 bytes (the display task's poll: 36 saved, 2,668 locals); self-test 4,480 (its main task's poll, whose prologue has two `sub sp`), next largest at most 1,540; simulation 5,856 (its main task's poll), next 3,024 (`apply`). The two frames above the 4 KiB guard are main tasks the executor polls only from the top of the stack. `overflow_stack` is 536 bytes (24 saved, 512 locals) and compares its copy's address, the frame's lowest, with the guard's top before recursing. The `ba13354` record's 2,668 and 3,412 counted only one `sub sp` per function, no saved registers, and a `DEFMT_LOG=info` self-test |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 46 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed: the scenario in 17.54 s, the stack overflow case in 7.62 s (Renode reported `stack pointer 0x20004000`, the guard's top, and `PC not stacked`), and the model checks in 0.63 s, with the local platform copy without `ApplySVD` described in an earlier record |
+| Hosted CI | GitHub Actions | Push run 38115627401 (`a51cec1`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed; the regions check, the refused-access rule, and the self-test's new offer conditions and address bound are unrun on a board |
 
 ## Validation Record — 2026-10-11, Overflow Report Kept Across A Reset
 

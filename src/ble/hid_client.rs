@@ -15,7 +15,7 @@
 //! so this uses a hand-rolled [`gatt_client::Client`] implementation instead.
 
 use super::long_read::{EndOfValue, LongRead, ReadFailure, MAX_ATTRIBUTE_LEN};
-use crate::ble::BleErrorTag;
+use crate::ble::{device_info, BleErrorTag};
 use crate::diagnostics::{Counter, COUNTERS};
 use crate::hid;
 use crate::hid::coalesce::ReportCoalescer;
@@ -26,7 +26,7 @@ use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, Re
 use crate::usb::host_requests::LedReceiver;
 use core::cell::RefCell;
 use defmt::{info, warn};
-use embassy_futures::select::{select, select3};
+use embassy_futures::select::select3;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Sender;
 use embassy_sync::signal::Signal;
@@ -410,20 +410,19 @@ pub async fn run_notification_loop(
         }
     };
 
-    // If this slot holds an LED receiver, also forward the host's LED state to
-    // the peer: the current state first, because a keyboard that reconnects
-    // starts with its LEDs off, then every change. `write_leds` is a no-op for
-    // a peer without a keyboard LED output report. Otherwise just run
-    // producer+consumer.
-    match led_rx {
-        Some(rx) => {
-            let led_fut = forward_host_leds(rx, move |leds| client.write_leds(conn, leds));
-            let _ = select3(gatt_fut, drain_fut, led_fut).await;
+    // The link's GATT client procedures, one at a time: log the peer's PnP ID
+    // now that input flows, then, if this slot holds an LED receiver, forward
+    // the host's LED state to the peer: the current state first, because a
+    // keyboard that reconnects starts with its LEDs off, then every change.
+    // `write_leds` is a no-op for a peer without a keyboard LED output report.
+    let gatt_procedures_fut = async {
+        device_info::log_pnp_id(conn, source).await;
+        match led_rx {
+            Some(rx) => forward_host_leds(rx, move |leds| client.write_leds(conn, leds)).await,
+            None => core::future::pending().await,
         }
-        None => {
-            let _ = select(gatt_fut, drain_fut).await;
-        }
-    }
+    };
+    let _ = select3(gatt_fut, drain_fut, gatt_procedures_fut).await;
 
     info!("HID notification loop ended (connection closed)");
 }

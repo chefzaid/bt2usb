@@ -21,7 +21,7 @@ Describe the observed behavior and its impact.
 - Build: local `mask`/`cargo` or a release package:
 - Board and revision, pin changes, power arrangement:
 - SoftDevice version:
-- BLE peripheral make, model, and firmware:
+- BLE peripheral make, model, and firmware, and its `slot N PnP ID: ...` line from the log:
 - Host OS and version; monitor/hub model if used:
 
 ## Reproduction

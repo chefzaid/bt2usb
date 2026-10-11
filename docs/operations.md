@@ -203,6 +203,7 @@ Complete report map (N bytes): keyboard=<bool> mouse=<bool> consumer=<bool>
 Found keyboard LED output report
 Subscribed to N of M HID report characteristics
 HID notification loop started
+slot 0 PnP ID: USB-IF vendor 0x1234, product 0x5678, version 0x0123
 ```
 
 The same sequence follows for slot 1. Scans, reconnect scans, and connection
@@ -217,7 +218,10 @@ lock is released before security and HID discovery, so the two slots'
 discovery lines can interleave.
 `Set HID protocol to Report mode` appears only when the peer has a Protocol Mode
 characteristic, and `Found keyboard LED output report` only for keyboards with
-an LED output report. A reconnect of a known peer whose record did not change
+an LED output report. The PnP ID values above are an example; a peripheral
+without one logs `PnP ID: no Device Information Service` or
+`PnP ID: not offered` instead
+([PnP ID](#peripheral-pnp-id)). A reconnect of a known peer whose record did not change
 writes nothing to flash and logs no storage line at the info level.
 
 A first pairing adds `Added paired device - now storing N` and
@@ -343,6 +347,9 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `No HID report characteristics could be subscribed` | Nothing to listen to; the OLED shows `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
 | info | `Subscribed to {} of {} HID report characteristics` | Subscription result | None |
 | info | `HID notification loop started` / `HID notification loop ended (connection closed)` | Input flowing / link closed by the peer or radio | None |
+| info | `slot {} PnP ID: {}` | The peripheral's Device Information Service PnP ID, read once per link after input flows: who assigned the vendor ID (`Bluetooth SIG` or `USB-IF`), then the vendor ID, product ID, and product version in hexadecimal | Quote it in a report to name the peripheral's model and firmware release; see [PnP ID](#peripheral-pnp-id) |
+| info | `slot {} PnP ID: no Device Information Service`, `slot {} PnP ID: not offered` | The peripheral has no Device Information Service, or one without a PnP ID | None; record the make and model by hand |
+| warn | `slot {} PnP ID: discovery failed: {:?}`, `slot {} PnP ID: read failed: {:?}`, `slot {} PnP ID: malformed, {} bytes` | Reading the PnP ID failed, or its value was not the 7 bytes the specification defines (`Truncated` for a longer one). Input is unaffected | Record the line with the peripheral's make and model |
 | warn | `Failed to write LED state to BLE keyboard` | LED write rejected | Cosmetic |
 | warn | `Unknown HID report length: {}` | In the length-based fallback (no Report Map, or a map without report IDs and an unresolved report), a report of an unexpected length was dropped | Unsupported layout; report with the Report Map line |
 
@@ -969,6 +976,31 @@ whose `DEFMT_LOG` is `warn` or stricter does not print it. The Renode
 simulation build does not run the BLE, USB, or flash shells that count, so
 it never prints the line.
 
+### Peripheral PnP ID
+
+Once a link's notification loop has started, the bridge reads the
+peripheral's PnP ID (Device Information Service `0x180A`, characteristic
+`0x2A50`) once and logs it as `slot N PnP ID: <source> vendor 0x...,
+product 0x..., version 0x...` ([`device_info.rs`](../src/ble/device_info.rs),
+parsed by [`pnp_id.rs`](../src/ble/pnp_id.rs)). It names the peripheral's
+model and firmware release from the device itself, so a report does not rely
+on the label on its box:
+
+| Field | Meaning |
+| --- | --- |
+| Source | `Bluetooth SIG` when the vendor ID is a Bluetooth company identifier, `USB-IF` when it is a USB vendor ID, as in a USB device descriptor, and `reserved source N` for any other value |
+| Vendor | The vendor ID from that registry |
+| Product | The vendor's own product ID |
+| Version | The vendor's product version, by the specification's convention `0xJJMN` for release JJ.M.N; vendors do not all follow it |
+
+The value identifies a product, not a person or a unit: every keyboard of the
+same model and firmware reports the same one. A takeover of a link that is
+already up does not read it again. The read shares the link's one GATT client
+procedure with the host LED writes, so the first LED write waits for it; a
+peripheral that answered HID discovery normally answers within a few
+connection intervals. Nothing depends on the value: a missing service, a
+failed read, or a malformed value only logs a line.
+
 ## Stack And Memory Checks
 
 The memory map is fixed at link time ([hardware](hardware.md#memory-layout),
@@ -1056,7 +1088,8 @@ first two boot lines carry the version, the source commit, the profile, the
 `DEFMT_LOG` filter, and the reset reason ([boot sequence](#boot-sequence)), so
 quote them rather than retyping the build details. Add the last
 `diagnostics:` line logged before the failure or after reproducing it
-([event counters](#event-counters)). Sanitize device
+([event counters](#event-counters)), and each involved peripheral's
+`slot N PnP ID:` line ([PnP ID](#peripheral-pnp-id)). Sanitize device
 identifiers and never share bond keys or private input captures publicly.
 Suspected vulnerabilities follow the [security policy](../SECURITY.md) instead.
 

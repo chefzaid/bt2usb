@@ -55,6 +55,8 @@ mod ble_long_read_impl;
 mod ble_management_impl;
 #[path = "ble/messages.rs"]
 mod ble_messages_impl;
+#[path = "ble/pnp_id.rs"]
+mod ble_pnp_id_impl;
 
 // The pure parts of the paired-device store: the device list, its record
 // codec, and the flash-item framing (host-tested independently of the embedded
@@ -85,6 +87,10 @@ mod ui_ui_logic_impl;
 pub mod ble {
     pub mod long_read {
         pub use crate::ble_long_read_impl::*;
+    }
+    /// The Device Information Service PnP ID the firmware logs per link.
+    pub mod pnp_id {
+        pub use crate::ble_pnp_id_impl::*;
     }
     pub mod management {
         pub use crate::ble_management_impl::*;

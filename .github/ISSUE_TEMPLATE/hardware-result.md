@@ -23,7 +23,7 @@ measurement that supports each result in Notes.
 ## Setup
 
 - Board and revision, pin changes, supply, debug probe:
-- Peripherals (make, model, firmware):
+- Peripherals (make, model, firmware, and each one's `slot N PnP ID: ...` line):
 - Host OS and version, BIOS/UEFI, monitor and hub:
 
 ## Measurements
@@ -84,6 +84,7 @@ measurement that supports each result in Notes.
 | Pair a keyboard | | |
 | Pair a mouse; both work and the OLED shows "2 devices" | | |
 | Media keys | | |
+| PnP ID logged for each peripheral, or a line saying it has none | | |
 | Five-button mouse / horizontal scroll | | |
 | Caps Lock LED follows the host | | |
 | Reboot reconnect | | |

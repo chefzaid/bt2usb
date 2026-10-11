@@ -31,7 +31,7 @@ probe, or USB host to close.
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
 | [UI, Display And Power](#ui-display-and-power) | 9 | 2 | 1 |
-| [Platform, Memory And Recovery](#platform-memory-and-recovery) | 7 | 5 | 3 |
+| [Platform, Memory And Recovery](#platform-memory-and-recovery) | 8 | 4 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 13 | 3 | 0 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **137** | **71** | **21** |
+| **Total** | **138** | **70** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1328,14 +1328,14 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   Evaluate a guard compatible with the SoftDevice RAM layout. Accept when a
   deliberate overflow in a test build faults with a diagnosable message instead
   of corrupting memory ([ADR 0010](docs/adr/0010-static-memory-layout.md)).
-- [ ] **P1** **Diagnostics without sensitive input.** Add firmware/build
+- [x] **P1** **Diagnostics without sensitive input.** Add firmware/build
   identification, reset reasons, bounded counters for reconnect/queue/write
   failures, and a documented collection method. Log each peripheral's Device
   Information Service PnP ID (characteristic `0x2A50`) after HID input is
   flowing, and have the hardware-result template ask for it. Accept when
   reports support reproduction without logging key material or keystroke
   content
-  ([operations](docs/operations.md#reporting-a-defect)). Progress
+  ([operations](docs/operations.md#reporting-a-defect)). Done
   (2026-10-11): every image logs its version, source commit (`-dirty` for a
   modified checkout), profile, and `DEFMT_LOG` filter at boot, which
   `build.rs` supplies and `src/diagnostics.rs` holds; the firmware also logs
@@ -1350,8 +1350,15 @@ subsystems. Context: [hardware](docs/hardware.md#memory-layout),
   most once a minute (`DIAGNOSTICS_REPORT_INTERVAL_SECS`); the runbook gives
   the collection method and what each count means, and the first-flash
   checklist and both templates ask for the latest line
-  ([event counters](docs/operations.md#event-counters)). Still open: the PnP
-  ID.
+  ([event counters](docs/operations.md#event-counters)). Once a link's
+  notification loop runs, the bridge reads the peripheral's PnP ID in the
+  same future as the host LED writes, since the GATT client allows one
+  procedure per link, and logs its vendor ID source, vendor, product, and
+  version, or why there is none; the hardware-result template, the bug
+  template, and the first-flash pairing checks ask for it
+  ([PnP ID](docs/operations.md#peripheral-pnp-id)). No line carries an
+  address, key, or report content. The board evidence for all of it is the
+  first-flash run ([pairing and daily use](docs/first-flash.md#4-pairing-and-daily-use)).
 
 ## Device Security And Provisioning
 
@@ -2133,7 +2140,10 @@ in by cable or paired directly.
   keystroke is never delayed. Accept when host tests cover quirk lookup and
   default behavior for an unknown peripheral, and each quirk names the
   hardware-result issue that justifies it
-  ([features](docs/features.md#translation)).
+  ([features](docs/features.md#translation)). Since 2026-10-11 the bridge
+  reads, parses, and logs the PnP ID once per link after input flows
+  (`PnpId` in `src/ble/pnp_id.rs`, read by `src/ble/device_info.rs`), so a
+  quirk table can key on that value.
 - [ ] **P2** **ADR: HID passthrough for other device classes.** Decide whether
   a BLE HID peripheral whose reports the fixed keyboard, mouse, and consumer
   translation cannot represent (for example a touchpad or a vendor-defined

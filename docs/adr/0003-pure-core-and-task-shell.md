@@ -58,12 +58,13 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [messages.rs](../../src/ble/messages.rs) | The commands and events between the UI and the BLE side, and the per-request management IDs they carry | The channels in [main.rs](../../src/main.rs) and `ble_task` in `multi_conn.rs` |
+| [pnp_id.rs](../../src/ble/pnp_id.rs) | What a Device Information Service PnP ID value says, and which values are malformed | `log_pnp_id` in [device_info.rs](../../src/ble/device_info.rs) |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
 | [bond_table.rs](../../src/ble/bond_table.rs) | Which bonding keys the security handler holds: saved devices' keys beside unsaved pairings, which a new pairing never displaces, and which an unsaved connection's end or a store eviction drops | `Bonder` in [bonder.rs](../../src/ble/bonder.rs), and `execute_action` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
 | [devices.rs](../../src/storage/devices.rs), [codec.rs](../../src/storage/codec.rs), [framing.rs](../../src/storage/framing.rs), [record.rs](../../src/storage/record.rs) | The paired-device list (fail-closed load, legacy format, identity merge, eviction, Forget and reset candidates), the record codec, and frame and record validation, on SoftDevice-free types; IRK resolution is passed in as a function | `DeviceStore` in `storage.rs`, which converts SoftDevice types and does the flash I/O |
 | [ui_logic.rs](../../src/ui/ui_logic.rs), [controller.rs](../../src/ui/controller.rs), [input_logic.rs](../../src/ui/input_logic.rs), [layout.rs](../../src/ui/layout.rs), [display_logic.rs](../../src/ui/display_logic.rs) | Screen transitions; the UI loop's decisions (the command each button sends, management request tracking and its deadline); list windowing; each screen's text and where it sits; display retry policy | UI loop in [main.rs](../../src/main.rs) and [sim.rs](../../src/sim.rs), [display.rs](../../src/ui/display.rs), [buttons.rs](../../src/ui/buttons.rs) |
 | [power_logic.rs](../../src/power_logic.rs) | Display power state | [power.rs](../../src/power.rs) |
-| [diagnostics.rs](../../src/diagnostics.rs) | The build identity the boot line reports, and which causes a `POWER.RESETREAS` value names | `main` in [main.rs](../../src/main.rs), which reads and clears the register; `selftest.rs` and `sim.rs`, which log the identity |
+| [diagnostics.rs](../../src/diagnostics.rs) | The build identity the boot line reports, which causes a `POWER.RESETREAS` value names, the event counters, and when the counts are logged | `main` in [main.rs](../../src/main.rs), which reads and clears the register and logs the counters; the shells that bump them; `selftest.rs` and `sim.rs`, which log the identity |
 
 Rules for the core:
 
@@ -169,9 +170,10 @@ Follow-up obligations:
 ## Implementation
 
 - [lib.rs](../../src/lib.rs) is `#![cfg_attr(not(test), no_std)]`. It exports
-  `hid` verbatim, includes `ble/adv_parser.rs`, `ble/conn_params.rs`,
-  `ble/coordinator.rs`, `ble/reconnect.rs`, `ble/long_read.rs`,
-  `ble/management.rs`, `ble/messages.rs`, `power_logic.rs`, and the five pure
+  `hid` verbatim, includes `ble/adv_parser.rs`, `ble/bond_table.rs`,
+  `ble/conn_params.rs`, `ble/coordinator.rs`, `ble/reconnect.rs`,
+  `ble/scan_list.rs`, `ble/long_read.rs`, `ble/management.rs`,
+  `ble/messages.rs`, `ble/pnp_id.rs`, `power_logic.rs`, and the five pure
   `ui` files (`controller.rs`, `display_logic.rs`, `input_logic.rs`,
   `layout.rs`, `ui_logic.rs`) through `#[path]`, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only

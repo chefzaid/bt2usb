@@ -693,7 +693,8 @@ Coverage measures only the code that host tests compile:
 
 - the host library as built for tests: `src/hid/`, the BLE advertisement
   parser, bond table, connection-parameter bounds, coordinator, scan result
-  list, reconnect table, long-read assembler, and management logic, `src/power_logic.rs`, `src/diagnostics.rs`, and the UI display, input, and state-machine
+  list, reconnect table, long-read assembler, management logic, and PnP ID
+  parser, `src/power_logic.rs`, `src/diagnostics.rs`, and the UI display, input, and state-machine
   logic
 - `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
   `lib.rs` includes only under `cfg(test)`

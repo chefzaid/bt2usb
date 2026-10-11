@@ -829,7 +829,9 @@ physical erasure; see [security](security.md#key-storage-and-deletion).
 Factory reset of a readable store appends an empty item rather than erasing
 pages. The event counters hold only numbers of occurrences, live in RAM, and
 start at zero at every boot; nothing writes them to flash or sends them to a
-host ([event counters](operations.md#event-counters)).
+host ([event counters](operations.md#event-counters)). Each peripheral's PnP
+ID is read once per link and only logged, never stored
+([PnP ID](operations.md#peripheral-pnp-id)).
 
 Which logs may contain this data, and at which level, is defined in
 [security: logging and privacy](security.md#logging-and-privacy). In short,

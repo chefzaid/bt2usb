@@ -77,11 +77,13 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives |
 | [ble/messages.rs](../src/ble/messages.rs) | Pure core | UI-to-coordinator commands and coordinator-to-UI events, generic over the address type |
+| [ble/pnp_id.rs](../src/ble/pnp_id.rs) | Pure core | Parsing of the Device Information Service PnP ID the bridge logs per link |
 | [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator task, slot command and event types, user scans, saved-device management |
 | [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | Connection worker run once per slot: serves the coordinator's commands, reports slot events, retries in the background |
 | [ble/slot_link.rs](../src/ble/slot_link.rs) | Board shell | One attempt of a slot worker: connect, secure, discover HID, and run the notification loop, racing each phase against the slot's commands |
 | [ble/bonder.rs](../src/ble/bonder.rs) | Board shell | SoftDevice security handler: bond storage and the answer to connection-parameter requests |
 | [ble/hid_client.rs](../src/ble/hid_client.rs) | Board shell | GATT discovery, subscriptions, HID classification, notification loop |
+| [ble/device_info.rs](../src/ble/device_info.rs) | Board shell | Device Information Service discovery and the PnP ID read and log line, once per link |
 | [ble/scanner.rs](../src/ble/scanner.rs) | Board shell | User scan with HID advertisement filtering, and the shared reconnect scan |
 | [hid/mod.rs](../src/hid/mod.rs) | Pure core | Internal report type and notification classification |
 | [hid/report_protocol.rs](../src/hid/report_protocol.rs) | Pure core | Report Map parser and Report Reference descriptor |
@@ -459,7 +461,13 @@ which can be too late for a firmware setup key.
     `Bonder::on_bonded`: no keys are kept, nothing is stored for the device,
     and the UI shows "Pairing not saved" ([write rules](data-model.md#write-rules)).
 11. The worker enters the notification loop (`"HID notification loop started"`),
-    described in [one input report](#one-input-report-from-ble-to-usb).
+    described in [one input report](#one-input-report-from-ble-to-usb). Its
+    third future runs the link's GATT client procedures one at a time,
+    because the vendored client allows one per link: `device_info::log_pnp_id`
+    discovers the Device Information Service and reads and logs its PnP ID
+    (`"slot {} PnP ID: {}"`, or a line saying there is none), then the LED
+    writer below starts. Input already flows meanwhile, since notifications
+    use their own portal.
 
 ```mermaid
 sequenceDiagram
@@ -822,7 +830,8 @@ touching the other source. The policy is host-tested in
    `"Host LEDs: num={} caps={} scroll={}"`, and sends the value to the
    `KEYBOARD_LEDS` watch.
 2. Each connection worker holds one of the watch's two receivers for its
-   whole life, across links. When a link's notification loop starts,
+   whole life, across links. When a link's notification loop has read the
+   peer's PnP ID (step 11 of the [connect sequence](#user-scan-connect-pairing-and-hid-discovery)),
    `host_leds::forward_host_leds` writes the host's latest LED state, if the
    host has sent one since enumeration, to the peer's keyboard LED output
    report, then writes each later change. Taking the latest state marks it
@@ -1143,7 +1152,7 @@ The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
 | `main` | Setup, then the UI loop: owns the `UiController` (view model, management request, saved-device addresses) and the `PowerManager` | Suspend signal, 1 s ticker, `BUTTON_CHANNEL`, `BLE_EVENT_CHANNEL` |
 | `softdevice_task` | Pulls SoftDevice BLE and SoC events and dispatches them; forwards USB power events to the VBUS detector; scan and GATT callbacks run inside it | SWI2/EGU2 wake-ups |
 | `ble_task` | Coordinator: owns the `ConnManager`, flash handle, scan snapshot, and management token; runs scans itself | `BLE_CMD_CHANNEL`, `BLE_SLOT_EVENT_CHANNEL` |
-| `ble_slot_task` (one per link, slots 0 and 1) | Connection workers: connect, secure, discover, then the notification loop, coalescer drain, and LED writer | Slot command channel, SoftDevice, `HID_REPORT_CHANNEL` space |
+| `ble_slot_task` (one per link, slots 0 and 1) | Connection workers: connect, secure, discover, then the notification loop, coalescer drain, and GATT procedures (the PnP ID read, then the LED writer) | Slot command channel, SoftDevice, `HID_REPORT_CHANNEL` space |
 | `usb_device_task` | `run_usb_device`: enumeration, control requests, suspend, resume, remote wakeup | USB bus events, `REMOTE_WAKE` |
 | `hid_writer_task` | `join4` of the dispatcher and the keyboard, mouse, and consumer endpoint workers | `HID_REPORT_CHANNEL`, endpoint signals, host polling |
 | `ui::display::task` | Sole owner of TWIM0 and the OLED | `FRAMES`, I2C DMA, retry timer |

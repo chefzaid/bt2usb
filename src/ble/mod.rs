@@ -31,11 +31,14 @@ pub mod coordinator;
 pub mod long_read;
 pub mod management;
 pub mod messages;
+pub mod pnp_id;
 pub mod reconnect;
 pub mod scan_list;
 
 #[cfg(feature = "embedded")]
 pub mod bonder;
+#[cfg(feature = "embedded")]
+pub mod device_info;
 #[cfg(feature = "embedded")]
 pub mod hid_client;
 #[cfg(feature = "embedded")]

@@ -114,7 +114,7 @@ modules, so firmware and tests compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |
-| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `src/power_logic.rs`, `src/diagnostics.rs` (with `diagnostics_tests.rs`), `src/ui/controller.rs` (with `controller_tests.rs`), `display_logic.rs`, `input_logic.rs`, `layout.rs` (with `layout_tests.rs`), `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
+| `src/hid/` (all submodules), `src/ble/adv_parser.rs`, `conn_params.rs`, `bond_table.rs` (with `bond_table_tests.rs`), `coordinator.rs` and its child `coordinator_events.rs` (with `coordinator_tests.rs` and `coordinator_attempt_tests.rs`), `scan_list.rs` (with `scan_list_tests.rs`), `reconnect.rs` (with `reconnect_tests.rs`), `long_read.rs`, `management.rs`, `messages.rs`, `pnp_id.rs`, `src/power_logic.rs`, `src/diagnostics.rs` (with `diagnostics_tests.rs`), `src/ui/controller.rs` (with `controller_tests.rs`), `display_logic.rs`, `input_logic.rs`, `layout.rs` (with `layout_tests.rs`), `ui_logic.rs` (with `ui_logic_tests.rs`), `src/config.rs`, and, under `cfg(test)` only, `src/storage/codec.rs`, `devices.rs` (with `devices_tests.rs` and `devices_format_tests.rs`), `framing.rs`, and `record.rs` | `src/ble/mod.rs`, `multi_conn.rs`, `slot_worker.rs`, `slot_link.rs`, `bonder.rs`, `device_info.rs`, `hid_client.rs`, `scanner.rs`; `src/storage.rs`; `src/usb/`; `src/ui/mod.rs`, `display.rs`, `buttons.rs`; `src/power.rs`, `src/stack.rs`, `src/sd_setup.rs`; the `main.rs`, `selftest.rs`, and `sim.rs` entry points |
 
 Apart from `ui/mod.rs`, which only declares modules, everything in the
 right-hand column depends on
@@ -148,8 +148,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-11, in the commit that adds the event counters. The tree holds 411
-`#[test]` functions: 400 in
+2026-10-11, in the commit that logs each peripheral's PnP ID. The tree holds
+414 `#[test]` functions: 403 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
@@ -197,6 +197,7 @@ and the 384 passed the same day. There are no `#[ignore]` or
 | [ble/scan_list_tests.rs](../src/ble/scan_list_tests.rs), for [scan_list.rs](../src/ble/scan_list.rs) | 8 | `merge_advertisement` lets a name-only scan response update a known HID peer even when the list is full, and never enrolls a device without the HID UUID. In a crowded scan it keeps the strongest HID advertisers: a keyboard heard at -40 dBm after twenty advertisers at -70 to -89 dBm filled the eight-entry list is listed and stays listed while they keep advertising; only a strictly stronger newcomer replaces the weakest entry, judged by each entry's latest RSSI; an unavailable RSSI (127) ranks below every measurement; a replaced device cannot return through a name-only response; and a zero-capacity list stays empty. |
 | [ble/bond_table_tests.rs](../src/ble/bond_table_tests.rs), for [bond_table.rs](../src/ble/bond_table.rs) | 8 | The bonding keys held in RAM: loading the store marks every bond saved and merges one peer's bonds; a new pairing is added unsaved beside the four saved devices' keys, and one more fits for each link; discarding drops only unsaved pairings, never a saved bond that matches; saving a fifth device and forgetting the evicted one leaves exactly the store's four, all saved; re-pairing replaces the keys and keeps the saved mark, saved or not; a full table drops the oldest unsaved pairing first, and a table of saved bonds only the oldest; marking saved needs the exact keys. |
 | [ble/adv_parser.rs](../src/ble/adv_parser.rs) | 8 | Advertised names keep valid UTF-8 and truncate at a character boundary; a complete name beats a shortened one, and a shortened one is used when it is the only name; a missing, empty, or invalid name does not replace a known one. A zero-length or overrunning structure ends the walk, keeping the structures before it. The HID UUID is found among other 16-bit UUIDs and in an incomplete UUID list, and an empty advertisement has neither the UUID nor a name. |
+| [ble/pnp_id.rs](../src/ble/pnp_id.rs) | 3 | Device Information Service PnP ID parsing: a 7-byte value decodes little-endian, each source byte maps to its registry (Bluetooth SIG, USB-IF, or reserved), and a value of any other length is rejected. |
 | [ble/long_read.rs](../src/ble/long_read.rs) | 4 | Bounded ATT Read/Read Blob assembly: no value until a short final fragment, an exact-MTU value needs an end response, a 512-byte value completes while an oversized one fails, and malformed termination never exposes a partial value. |
 | [ble/management.rs](../src/ble/management.rs) | 6 | `commit` publishes only persisted state: a failed write keeps the store and bonds, and cancelled persistence never publishes the candidate. `forget_targets` picks the connected or reconnecting slots of the forgotten peer only. The `Quiescence` barrier suppresses reconnect events until the matching token is acknowledged, waits for both sources on reset, and ignores invalid slots. |
 | [ble/messages.rs](../src/ble/messages.rs) | 3 | Only management commands carry a request ID, only `Connected` and `Disconnected` report link state, and each coordinator `UiEvent` converts to the matching UI event. |
@@ -895,6 +896,38 @@ dependencies in a separate, reviewed change. If release-helper tests fail with
 `mask coverage` prints `No coverage tool found.` when neither `cargo-llvm-cov`
 nor `cargo-tarpaulin` is installed. Run `mask coverage-install`, which installs
 `cargo-llvm-cov` and the `llvm-tools-preview` component.
+
+## Validation Record — 2026-10-11, Peripheral PnP ID
+
+This record covers the commit that completes P1 "Diagnostics without
+sensitive input" in [TODO.md](../TODO.md#platform-memory-and-recovery). The
+new pure `src/ble/pnp_id.rs` parses a Device Information Service PnP ID, and
+the new shell `src/ble/device_info.rs` discovers the service and reads and
+logs the value once per link. `run_notification_loop` runs it in the future
+that writes host LED state, before the first write, because the vendored GATT
+client allows one client procedure per link while notifications use their
+own portal. The runbook's [PnP ID](operations.md#peripheral-pnp-id) section,
+the log reference, the first-flash pairing checks, and both issue templates
+describe or ask for the line. The ADR 0003 implementation list and the host
+library composition row, which lacked `bond_table.rs`, `scan_list.rs`, and
+`messages.rs`, now list every pure BLE module. The checks ran locally on
+Linux in a container, on the working tree just before that commit; nothing
+ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 403 unit tests (3 new in `ble/pnp_id.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only` | 98.81% of lines (from 98.80%), 98.80% of regions, 99.12% of functions; `ble/pnp_id.rs` 100% of lines, regions, and functions |
+| Clippy with warnings denied | Host tests, embedded, embedded with `log-sensitive-data`, simulation | Passed |
+| Formatting | `cargo fmt --package bt2usb -- --check` | Passed |
+| Rustdoc with private items, warnings denied | Host library, embedded library, `bt2usb`, `bt2usb-selftest`, `bt2usb-sim` | Passed for all five |
+| Release bridge, self-test, and simulation builds | Rust 1.95.0, ARM target | Passed. Bridge sections from `llvm-size -A`: with `DEFMT_LOG=debug`, `.text` 124,184 bytes (+3,128 since `78471e8`, most of it a second instance of the vendored generic `gatt_client::discover`), `.rodata` 12,380 (+56), `.data` 1,640, `.bss` 25,380 (+656: `ble_slot_task::POOL` grows from 5,760 to 6,416 bytes for the two workers, since the discovery and read futures sit beside the notification and drain futures, measured with `llvm-nm -S`), `.uninit` 1,024; with `DEFMT_LOG=info`, `.text` 123,172 bytes |
+| Script tests | `python3 -m unittest discover -s scripts -p '*_test.py'` | Passed: 52 tests, 2 skipped |
+| Documentation checker | `python3 scripts/check_docs.py` | Passed: 45 Markdown files |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` | Passed, with the local platform copy without `ApplySVD` described in an earlier record; the simulation has no GATT client, so it does not read a PnP ID |
+| PnP ID on the target | Review | Built and reviewed, not tested: no host test or Renode scenario runs the GATT discovery and read; the first-flash [pairing and daily use](first-flash.md#4-pairing-and-daily-use) check records each peripheral's line |
+| Hosted CI | GitHub Actions | Push run 38110033129 (`ccd4a1c`), the commit before this one, passed every job |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
 
 ## Validation Record — 2026-10-11, Bond And Portal Doc Corrections
 

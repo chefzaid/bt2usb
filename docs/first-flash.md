@@ -201,6 +201,10 @@ currently unauthenticated Just Works bonding; see
 - [ ] **Pair a mouse** the same way (SELECT on the Connected screen starts
       another scan). Both keep working at once, and the OLED shows "2 devices".
 - [ ] **Media keys** (volume, play/pause) work, if the keyboard has them.
+- [ ] **PnP ID:** for each peripheral, record its `slot N PnP ID: …` line,
+      which follows `HID notification loop started`, or the line saying it
+      has none ([PnP ID](operations.md#peripheral-pnp-id)). Compare the
+      vendor and product IDs with the make and model you recorded.
 - [ ] **ATT MTU and Report Map length:** in a `debug` build, record each
       peripheral's `att mtu exchange: server offers N, using M` line (vendor)
       and its `HID service discovered (N report characteristics)` line. M is

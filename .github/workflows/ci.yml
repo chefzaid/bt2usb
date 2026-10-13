@@ -168,7 +168,7 @@ jobs:
           cargo llvm-cov report --lcov --output-path "$RUNNER_TEMP/coverage/lcov.info"
           cargo llvm-cov report --html --output-dir "$RUNNER_TEMP/coverage"
       - name: Upload coverage report
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: coverage-report-${{ github.run_attempt }}
           path: ${{ runner.temp }}/coverage
@@ -238,7 +238,7 @@ jobs:
             --objcopy "$llvm_bin/llvm-objcopy"
       - name: Upload checked firmware and build manifest
         id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bt2usb-checked-firmware-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-input/*
@@ -275,7 +275,7 @@ jobs:
           renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot
       - name: Upload simulation diagnostics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: renode-results-${{ github.run_attempt }}
           path: ${{ runner.temp }}/renode-results
@@ -336,7 +336,7 @@ jobs:
         run: cp "$ATTESTATION_BUNDLE" dist/provenance.sigstore.json
       - name: Upload attested release package
         id: upload
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bt2usb-attested-release-${{ github.run_attempt }}
           path: dist/*
@@ -351,7 +351,7 @@ jobs:
             --output "$RUNNER_TEMP/release-notes/RELEASE-NOTES.md"
       - name: Upload release notes
         id: notes
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bt2usb-release-notes-${{ github.run_attempt }}
           path: ${{ runner.temp }}/release-notes/RELEASE-NOTES.md

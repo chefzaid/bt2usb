@@ -267,6 +267,28 @@ fn on_slot_error_emits_error_then_status() {
 }
 
 #[test]
+fn a_reconnect_given_up_for_its_keys_frees_the_slot_and_tells_the_user() {
+    for tag in [ErrorTag::KeysMissing, ErrorTag::KeysRejected] {
+        let mut m = mgr();
+        let kb = dev(1, "kb");
+        let attempt = m.reserve_retry(0, &kb);
+        let acts = on_slot_error(&mut m, 0, attempt, tag, false);
+        assert_eq!(
+            acts.as_slice(),
+            &[
+                Action::DiscardUnsavedBond(1),
+                Action::Emit(UiEvent::Error(tag)),
+                Action::Emit(UiEvent::Disconnected),
+            ]
+        );
+        assert!(!m.is_slot_occupied(0));
+        // The slot can take another device, and the user's selection of this
+        // one connects it afresh.
+        assert_eq!(m.find_empty_slot(), Some(0));
+    }
+}
+
+#[test]
 fn on_slot_error_with_surviving_link_reports_summary() {
     let mut m = mgr();
     let attempt = m.connect_slot(0, &dev(1, "kb"));
@@ -342,22 +364,26 @@ fn disconnect_while_reconnecting_targets_the_slot() {
 
 #[test]
 fn a_link_that_drops_during_setup_failed_to_connect() {
-    let tags = [
-        ErrorTag::ScanFailed,
-        ErrorTag::ConnectFailed,
-        ErrorTag::HidNotFound,
-        ErrorTag::NotifyFailed,
-        ErrorTag::StorageFailed,
-        ErrorTag::BondRefused,
-        ErrorTag::ManagementFailed,
-        ErrorTag::ReportMapReadFailed,
-        ErrorTag::ReportMapTooLarge,
-        ErrorTag::ReportMapInvalid,
-    ];
-    for tag in tags {
+    for tag in ErrorTag::ALL {
         // A discovery failure on a link still up keeps its own error...
         assert_eq!(tag.for_failed_setup(true), tag);
-        // ...while one whose link dropped is retried like a failed connect.
-        assert_eq!(tag.for_failed_setup(false), ErrorTag::ConnectFailed);
+        // ...while one whose link dropped is retried like a failed connect,
+        // unless the keys were found wanting: a peer may drop the link once
+        // it refuses them.
+        let dropped = if tag.needs_new_pairing() {
+            tag
+        } else {
+            ErrorTag::ConnectFailed
+        };
+        assert_eq!(tag.for_failed_setup(false), dropped, "{tag:?}");
     }
+}
+
+#[test]
+fn only_a_verdict_on_the_keys_needs_a_new_pairing() {
+    let needing: std::vec::Vec<ErrorTag> = ErrorTag::ALL
+        .into_iter()
+        .filter(|tag| tag.needs_new_pairing())
+        .collect();
+    assert_eq!(needing, [ErrorTag::KeysRejected, ErrorTag::KeysMissing]);
 }

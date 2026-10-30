@@ -39,20 +39,60 @@ pub enum ErrorTag {
     ReportMapReadFailed,
     ReportMapTooLarge,
     ReportMapInvalid,
+    /// A connection the user chose had no keys for the device, and pairing
+    /// with it did not encrypt the link, which stayed up.
+    PairingFailed,
+    /// The link would not encrypt with the keys the bridge holds for the
+    /// device, so the device no longer has them: it was reset or paired
+    /// again elsewhere. Retrying with the same keys cannot succeed.
+    KeysRejected,
+    /// The bridge holds no keys for a device it was reconnecting: a newer
+    /// pairing evicted them, its pairing was not saved, or it paired without
+    /// bonding. A background reconnect never pairs, so it cannot succeed.
+    KeysMissing,
+    /// A device that connected was new or changed, and saving it to flash
+    /// failed: the bridge keeps it, with its keys, only until power-off.
+    NotPersisted,
 }
 
 impl ErrorTag {
     /// The error a slot reports when securing a new link or discovering its
     /// HID service fails. A link that dropped meanwhile failed to connect, as
     /// if it had never come up, which a background reconnect retries; on a
-    /// link still up the step's own error stands.
+    /// link still up the step's own error stands. A verdict on the keys
+    /// stands either way: a peer often drops the link once it refuses them.
     pub fn for_failed_setup(self, link_up: bool) -> Self {
-        if link_up {
-            self
-        } else {
-            Self::ConnectFailed
+        match self {
+            Self::KeysRejected | Self::KeysMissing => self,
+            _ if link_up => self,
+            _ => Self::ConnectFailed,
         }
     }
+
+    /// Whether another attempt with the same keys cannot succeed, so a slot
+    /// that fails with this error stops reconnecting to the device.
+    pub fn needs_new_pairing(self) -> bool {
+        matches!(self, Self::KeysRejected | Self::KeysMissing)
+    }
+
+    /// Every tag, for tests that check each one.
+    #[cfg(test)]
+    pub(crate) const ALL: [Self; 14] = [
+        Self::ScanFailed,
+        Self::ConnectFailed,
+        Self::HidNotFound,
+        Self::NotifyFailed,
+        Self::StorageFailed,
+        Self::BondRefused,
+        Self::ManagementFailed,
+        Self::ReportMapReadFailed,
+        Self::ReportMapTooLarge,
+        Self::ReportMapInvalid,
+        Self::PairingFailed,
+        Self::KeysRejected,
+        Self::KeysMissing,
+        Self::NotPersisted,
+    ];
 }
 
 /// Minimal device identity the coordinator needs.

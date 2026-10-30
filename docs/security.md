@@ -150,7 +150,7 @@ implemented in the source cited; none is hardware-verified.
 | Paired peripheral | Crash, hang, or misroute input with malformed GATT data, Report Maps, report references, or notifications | Bounded vendored discovery, an event buffer sized for the largest discovery response (checked at compile time), 512-byte Report Map limit, bounded descriptor parser, exact-length report decoders (see [Input Validation Boundaries](#input-validation-boundaries)); vendored event portals whose ended waits clear only their own registration, so a peer that drops its link at the moment the other slot connects cannot leave that connect hung with the GAP lock held ([tests/vendor_portal.rs](../tests/vendor_portal.rs), [ADR 0007](adr/0007-vendored-softdevice-patch.md)); Clippy's panic lints and the [panic inventory](code-quality.md#panic-paths-no-lint-flags) ([ADR 0025](adr/0025-panic-lints-and-inventory.md)) | Vendored discovery has no automated tests; no real-peripheral evidence or fuzzing. TODO: [Report Map interoperability and legacy policy](../TODO.md#ble-central-and-pairing), TODO: [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) |
 | Paired peripheral | Flood notifications to starve the other slot or the USB endpoints | Per-link coalescer holds at most one pending report per endpoint ([coalesce.rs](../src/hid/coalesce.rs)); bounded channel with backpressure; independent endpoint workers ([ADR 0005](adr/0005-two-slots-and-independent-endpoints.md)) | Fairness and loss under sustained load not measured. TODO: [Backpressure behavior and bounded recovery](../TODO.md#input-aggregation-and-delivery) |
 | Paired peripheral | Hold keys down, or vanish while holding them | A slot's held state is cleared on disconnect (`HidEvent::Disconnected`); supervision timeout of 4 s, and a peripheral's request for a longer one is bounded to 4 s (`conn_params::bound_request`, [conn_params.rs](../src/ble/conn_params.rs)) | Hardware release timing unmeasured. TODO: [Multi-device aggregation hardware acceptance](../TODO.md#input-aggregation-and-delivery) |
-| Newly paired device | Claim an existing peer's identity address to replace its bond | Requires the user to pair it explicitly | Identity is asserted by the peer; `on_bonded` and `DeviceStore::add` (`DeviceList::add` in [devices.rs](../src/storage/devices.rs)) replace the matching record without telling the user. TODO: [Visible storage/security errors](../TODO.md#ui-display-and-power) |
+| Newly paired device | Claim an existing peer's identity address to replace its bond | Requires the user to pair it explicitly; once saved, the screen shows **Paired** with `Replaced old pairing` (`AddOutcome::BondReplaced` in [devices.rs](../src/storage/devices.rs)) | Identity is asserted by the peer; `on_bonded` and `DeviceStore::add` still replace the matching record, and the notice comes after the fact. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Malicious USB host | Observe or log everything typed | None possible: the host is the input's destination | Inherent; pair only with hosts you trust |
 | Malicious USB host | Send malformed control requests | `set_report` accepts only a one-byte keyboard output report and masks it to defined LED bits; protocol changes only switch report layout ([host_requests.rs](../src/usb/host_requests.rs)) | `GET_REPORT`/`SET_IDLE` behavior comes from `embassy-usb` defaults and is unreviewed. TODO: [HID/USB conformance](../TODO.md#usb-hid-device) |
 | Malicious USB host | Read bonds, change pairings, or reflash over USB | Only keyboard, mouse, and consumer HID interfaces exist; no vendor, CDC, mass-storage, or DFU interface (`hid_device::init`) | A future DFU or host management interface (for a companion app or browser configuration page) would change this; the planned host management ADR requires every change from a host to be confirmed on the bridge, because every host behind a KVM shares it. TODO: [Signed USB/BLE DFU](../TODO.md#updates-and-host-tools), TODO: [ADR: host management interface](../TODO.md#updates-and-host-tools) |
@@ -216,7 +216,8 @@ Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
   (`Action::DiscardUnsavedBond`, `Bonder::discard_unsaved`).
 - The identity address and IRK are asserted by the peer during pairing. A newly
   paired device that claims an existing peer's identity address replaces that
-  peer's bond in memory and, on its first successful connection, in flash.
+  peer's bond in memory and, on its first successful connection, in flash;
+  once saved, the screen shows **Paired** with `Replaced old pairing`.
 - A bond whose identity is not a public or random static address, the only
   types the Core specification allows for an identity, is not kept:
   `on_bonded` keeps no keys for it, `execute_action` stores nothing for the
@@ -235,25 +236,24 @@ Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
   overwrite its stored record, and draw its background reconnects. The
   reconnect scan and Forget's slot selection use the same check.
 - `DeviceStore::add` evicts the oldest record when a fifth device is added,
-  logging only `Paired device store full - evicting oldest entry`.
+  logging `Paired device store full - evicting oldest entry`; once saved,
+  the screen shows **Paired** with `Oldest device removed`.
 
 The application-level `allow_pairing` restriction covers the firmware's own
 `encrypt()` and `request_pairing()` calls. A peer can also send a Security
 Request, which the vendored crate answers by encrypting with stored keys or,
-when it has none, by calling `request_pairing()`
-(`vendor/nrf-softdevice/src/ble/gap.rs`). Since 2026-10-11 a background
-reconnect starts an attempt only while `Bonder` holds the device's keys
-(`connection_slot_task` checks before each attempt, and power-up skips a
-stored peer without a bond), so the crate answers such a request by
-encrypting. The keys can still disappear while an attempt is under way or
-while the link it opened is up: saving a fifth device on the other slot
-evicts the oldest record and its keys, which may be this device's (a pairing
-that is not saved evicts nothing). During an attempt the firmware's own `encrypt()`
-then finds no keys and closes the link, but whether a peer-requested pairing
-can complete first has not been tested; on a link already up nothing closes
-it, and the crate answers the peer's request by pairing. Closing this path is
-the P0 TODO
-[Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing).
+when it has none, by pairing only on a link the slot worker allowed to pair
+(`PairingPermission` in
+[pairing_gate.rs](../vendor/nrf-softdevice/src/ble/pairing_gate.rs), a
+bt2usb patch). A background reconnect starts an attempt only while `Bonder`
+holds the device's keys (`connection_slot_task` checks before each attempt,
+and power-up skips a stored peer without a bond), so the crate answers such
+a request by encrypting. If saving a fifth device on the other slot evicts
+this device's keys while its attempt is under way or its link is up, the
+request is left unanswered, and `Bonder::on_bonded` would refuse a bond on
+that link anyway. A peer that refuses the stored keys ends its background
+reconnect with `Forget, pair again` instead of being retried: it lost its
+keys, or it is a different device at that address.
 
 ## USB Host Interface
 
@@ -338,8 +338,8 @@ not be treated as successful deletion or enrollment.
 
 Enrollment differs from deletion: a new bond enters the in-memory bonder when
 pairing completes, and the device record enters the in-memory store before the
-flash write. A failed save shows `Storage failed` while the link keeps working;
-the record survives a reboot only if a later save succeeds. A full-chip erase
+flash write. A failed save shows `Kept until power-off` while the link keeps
+working; the record survives a reboot only if a later save succeeds. A full-chip erase
 with the debug probe removes the pairing region together with SoftDevice; see
 [operations](operations.md#saved-devices-and-storage).
 

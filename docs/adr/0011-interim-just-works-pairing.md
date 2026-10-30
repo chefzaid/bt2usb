@@ -60,16 +60,19 @@ protects.
   25 times, 200 ms apart (about 5 s), for an encrypted mode: `JustWorks`,
   `Mitm`, or `LescMitm`. Signed-only modes are rejected because they do not
   encrypt notifications. Only an encrypted link proceeds to GATT discovery and
-  HID subscription; otherwise the slot logs `slot {} failed to secure BLE link`
-  and closes the link.
+  HID subscription; otherwise the slot logs `slot {} failed to secure BLE link:
+  {}` with the reason and closes the link. A security update that leaves the
+  link unencrypted after the stored keys were sent is the peer refusing them
+  (`Bonder::on_security_update`), which since 2026-10-30 ends a background
+  reconnect with `Forget, pair again` instead of retrying it.
 - **New pairing only on an explicit user connection.** A connection request
   carries `allow_pairing`. It is `true` only for `SlotCommand::Connect`, which
   the coordinator issues when the user selects a device from the scan list.
   Boot-time auto-reconnect and link-loss retries use `SlotCommand::Reconnect`,
   where it is `false`. When no keys are stored for the peer
   (`EncryptError::PeerKeysNotFound`), the slot calls `conn.request_pairing()`
-  only if pairing is allowed; a background reconnect fails instead and retries
-  later.
+  only if pairing is allowed; a background reconnect stops instead and shows
+  `Pair device again`.
 - **Identity-scoped bonds.** A stored bond holds the peer's encryption info,
   `MasterId`, and `IdentityKey`. Key lookup (`get_key`,
   `get_peripheral_key`) matches the connecting peer by identity, resolving a
@@ -83,7 +86,9 @@ protects.
   identity address rather than the advertised private address. The store
   holds at most `MAX_PAIRED_DEVICES` (4) peers and evicts its oldest entry
   when a new peer is saved while full, logging
-  `Paired device store full - evicting oldest entry`. Since 2026-10-11 the
+  `Paired device store full - evicting oldest entry` and, since 2026-10-30,
+  showing `Oldest device removed`; a new pairing that replaces a saved peer's
+  keys shows `Replaced old pairing`. Since 2026-10-11 the
   handler follows it: it holds the saved peers' keys plus one unsaved pairing
   per link, drops the evicted peer's keys when the store evicts it, and
   discards a pairing whose connection ended before it was saved
@@ -189,7 +194,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   state; test downgrade, unsolicited pairing, timeout, and reconnect cases, and
   collect representative real-device evidence.
 - "Visible storage/security errors" (P1): show security failures with useful
-  user actions.
+  user actions. Done 2026-10-30: `Pairing failed`, `Forget, pair again`,
+  `Pair device again`, and the **Paired** notices; on-air evidence is still
+  pending.
 - "Provisioning and physical key protection" (P0): protect stored keys on
   production units.
 
@@ -206,8 +213,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | SoftDevice security contexts | `central_sec_count`, one per link (`BLE_MAX_CONNECTIONS`), in `softdevice_config()` ([sd_setup.rs](../../src/sd_setup.rs)) |
 
 Useful log lines: `Loaded {} BLE bonds into security handler` at startup,
-`BLE security mode updated: {}` whenever a link's security mode changes, and
-`slot {} failed to secure BLE link` when the encryption gate fails.
+`BLE security mode updated: {}` whenever a link's security mode changes,
+`peer refused the stored keys` when that update leaves a link sent stored
+keys unencrypted, and `slot {} failed to secure BLE link: {}` when the
+encryption gate fails.
 
 ### Verification Status
 

@@ -51,6 +51,22 @@ const FLASH_RETRY_BACKOFF_MS: u64 = 20;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BondRefused;
 
+/// What [`DeviceStore::add`] did with a device it stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stored {
+    /// Already saved as given.
+    Unchanged,
+    /// Saved as a new device, or over a saved one's address, name, or missing
+    /// keys.
+    Saved,
+    /// Saved over the different keys held for the same identity.
+    ReplacedBond,
+    /// Saved after removing the oldest device to make room. Holds that
+    /// device's identity address when it had keys, which the bonder must drop
+    /// as well.
+    RemovedOldest(Option<Address>),
+}
+
 fn refuse_bond<T>() -> Result<T, BondRefused> {
     warn!("Device store refused a bond whose identity is not public or random static");
     Err(BondRefused)
@@ -343,13 +359,12 @@ impl DeviceStore {
         .await
     }
 
-    /// Add a newly paired device, returning the identity address of a device
-    /// evicted to make room when that device had keys, which the bonder must
-    /// drop as well. A device whose bond names an identity that is not a
-    /// public or random static address is not stored, and `Err(BondRefused)`
+    /// Add a newly paired device, returning what that did to the other saved
+    /// devices ([`Stored`]). A device whose bond names an identity that is not
+    /// a public or random static address is not stored, and `Err(BondRefused)`
     /// returned (see [`DeviceList::add`]). `Bonder` refuses such a bond when it
     /// is made, so this is a second line of defense.
-    pub fn add(&mut self, device: PairedDevice) -> Result<Option<Address>, BondRefused> {
+    pub fn add(&mut self, device: PairedDevice) -> Result<Stored, BondRefused> {
         let Some(address) = to_peer(device.address) else {
             // The SoftDevice gives every link and advertiser a defined type,
             // so this does not happen; storing nothing is still safer than a
@@ -368,19 +383,23 @@ impl DeviceStore {
             bond,
         };
         match self.list.add(stored, &resolve) {
-            AddOutcome::Unchanged => {}
+            AddOutcome::Unchanged => return Ok(Stored::Unchanged),
             AddOutcome::Updated => info!("Updated existing paired device"),
+            AddOutcome::BondReplaced => {
+                warn!("New keys replaced the bond of a saved device with the same identity");
+                return Ok(Stored::ReplacedBond);
+            }
             AddOutcome::Added => {
                 info!("Added paired device - now storing {}", self.list.len());
             }
             AddOutcome::AddedAfterEviction(identity) => {
                 warn!("Paired device store full - evicting oldest entry");
                 info!("Added paired device - now storing {}", self.list.len());
-                return Ok(identity.map(to_address));
+                return Ok(Stored::RemovedOldest(identity.map(to_address)));
             }
             AddOutcome::BondRefused => return refuse_bond(),
         }
-        Ok(None)
+        Ok(Stored::Saved)
     }
 
     /// Iterate paired devices most-recently-added first, for auto-reconnect of

@@ -170,13 +170,16 @@ pub enum StoreError {
     NotFound,
 }
 
-/// What [`DeviceList::add`] did, for the shell's log line.
+/// What [`DeviceList::add`] did, for the shell's log line and the user.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum AddOutcome {
     /// Already stored with the same address, name, and keys (RSSI may differ).
     Unchanged,
-    /// Already stored; the address, name, or keys changed.
+    /// Already stored; the address or name changed, or keys were added to a
+    /// record saved without any.
     Updated,
+    /// Already stored with other keys, which the new ones replaced.
+    BondReplaced,
     /// Appended to a list with room.
     Added,
     /// Appended after evicting the oldest-added device from a full list. Holds
@@ -343,6 +346,7 @@ impl DeviceList {
             let address_changed = existing.address != device.address;
             let name_changed = existing.name != device.name;
             let bond_changed = device.bond.is_some() && existing.bond != device.bond;
+            let bond_replaced = bond_changed && existing.bond.is_some();
             existing.last_rssi = device.last_rssi;
             existing.address = device.address;
             if name_changed {
@@ -353,7 +357,11 @@ impl DeviceList {
             }
             if address_changed || name_changed || bond_changed {
                 self.dirty = true;
-                return AddOutcome::Updated;
+                return if bond_replaced {
+                    AddOutcome::BondReplaced
+                } else {
+                    AddOutcome::Updated
+                };
             }
             return AddOutcome::Unchanged;
         }

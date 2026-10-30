@@ -43,6 +43,7 @@ fn every_screen() -> std::vec::Vec<UiState> {
         Screen::Managing,
         Screen::Notice,
         Screen::NoReply,
+        Screen::Paired,
     ] {
         for selected in 0..2 {
             let mut state = state(screen);
@@ -218,6 +219,17 @@ fn status_screens_show_the_name_or_message_under_the_title() {
     assert_eq!(
         texts(&notice),
         ["Complete", "Device forgotten", "SELECT: back"]
+    );
+    let mut paired = state(Screen::Connecting);
+    paired.paired("Oldest device removed");
+    assert_eq!(
+        texts(&paired),
+        [
+            "Paired",
+            "Oldest device removed",
+            "SELECT: back",
+            "UP:saved devices"
+        ]
     );
     let mut no_reply = state(Screen::NoReply);
     let _ = no_reply.message.push_str("Reset result unknown");

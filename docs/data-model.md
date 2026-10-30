@@ -253,8 +253,13 @@ that builds a private address from it cannot pass for such a peer. A merge marks
 changed. A new record appended to a full store evicts the oldest entry.
 Updating an existing record does not move it. `add` returns an `AddOutcome`,
 and `DeviceStore::add` logs it: `"Updated existing paired device"`,
+`"New keys replaced the bond of a saved device with the same identity"` for
+`BondReplaced` (keys that differ from the record's own; keys added to a
+record saved without any are an update),
 `"Added paired device - now storing {}"`, or, for an eviction,
-`"Paired device store full - evicting oldest entry"` first. For a bond whose
+`"Paired device store full - evicting oldest entry"` first; it returns the
+outcome to `execute_action` as `Stored`, which names the evicted device's
+identity for the bonder to drop. For a bond whose
 identity is not public or random static it returns `AddOutcome::BondRefused`
 and changes nothing; `DeviceStore::add` then logs
 `"Device store refused a bond whose identity is not public or random static"`
@@ -677,10 +682,14 @@ display line holds. How errors propagate is in
 | Tag | Raised by | OLED message |
 | --- | --- | --- |
 | `ScanFailed` | The SoftDevice refused a user scan or ended it with an error (`scanner::scan`) | `Scan failed` |
-| `ConnectFailed` | `Connect` with an index outside the coordinator's last scan result (for example after Factory reset cleared it) or with no free slot (`plan_connect`); the whitelist connect timed out after 6 seconds or failed, including the MTU exchange; the link was not encrypted within 25 polls 200 ms apart, the pairing request failed, or the link dropped while securing; no keys during a background reconnect, which may not start pairing. A silent attempt that fails this way is retried, not shown | `Connect failed` |
+| `ConnectFailed` | `Connect` with an index outside the coordinator's last scan result (for example after Factory reset cleared it) or with no free slot (`plan_connect`); the whitelist connect timed out after 6 seconds or failed, including the MTU exchange; the stored keys were sent but the link was neither encrypted within 25 polls 200 ms apart nor reported refused; a pairing or HID discovery whose link dropped first (`ErrorTag::for_failed_setup`). A silent attempt that fails this way is retried, not shown | `Connect failed` |
+| `PairingFailed` | A connection the user chose held no keys for the device, and the pairing request failed or the link, still up, was not encrypted within the 25 polls (`secure_and_discover` in [slot_link.rs](../src/ble/slot_link.rs)) | `Pairing failed` |
+| `KeysRejected` | The stored keys were sent and the SoftDevice then updated the link's security without encryption, which `Bonder::on_security_update` notes as `peer refused the stored keys`; it stands even if the link then dropped. Ends a background reconnect | `Forget, pair again` |
+| `KeysMissing` | A background reconnect found no keys for its device, before an attempt (`slot {} has no keys to reconnect`), when the established link dropped (`slot {} link lost; no keys to reconnect`), or when encrypting (`EncryptError::PeerKeysNotFound`); the slot is freed ([slot_worker.rs](../src/ble/slot_worker.rs)) | `Pair device again` |
 | `HidNotFound` | GATT discovery of the HID service failed or found no Report characteristic (`discover_and_subscribe`) | `No HID service` |
 | `NotifyFailed` | No input report characteristic could be subscribed | `Notify failed` |
-| `StorageFailed` | The store was unreadable or invalid at boot; saving a device after a connection failed, including every save while the store is read-only; a Forget or Factory reset could not be persisted. Every `StoreError` maps here | `Storage failed` |
+| `StorageFailed` | The store was unreadable or invalid at boot; a save after a connection that changed nothing in the store, or after a refused bond, failed (an earlier failed save left changes pending); a Forget or Factory reset could not be persisted. Every `StoreError` except a failed save of a new or changed device maps here | `Storage failed` |
+| `NotPersisted` | The device that connected was new or changed (`Stored` other than `Unchanged`), and saving it failed, including while the store is read-only; RAM keeps it until power-off ([multi_conn.rs](../src/ble/multi_conn.rs)) | `Kept until power-off` |
 | `BondRefused` | A pairing's bond names an identity that is not a public or random static address, so neither the device nor its new keys were stored; or (which the SoftDevice does not cause) the connected device's own address has a reserved type and nothing was stored ([write rules](#write-rules)) | `Pairing not saved` |
 | `ManagementFailed` | Forget named an identity that `DeviceStore::find` no longer matches | `Action failed; retry` |
 | `ReportMapReadFailed` | The Report Map read returned an error, the ATT MTU is outside the 23–517 bytes the long-read assembler accepts, or a fragment or the end of the value was malformed | `HID map read failed` |
@@ -695,6 +704,16 @@ empty list ([ui/ui_logic.rs](../src/ui/ui_logic.rs)). The completion notices
 `Device forgotten` and `Pairings reset`, and the timeout messages
 `Forget result unknown`, `Reset result unknown`, and `List not loaded`, also
 come from `ui_logic.rs`.
+
+After a save succeeds, `execute_action` also sends `Event::Notice` with a
+`PairingNotice` ([messages.rs](../src/ble/messages.rs)) when the device list's
+`add` changed another saved device. The UI shows it on the **Paired** screen
+unless an error is showing (`controller::notice_message`):
+
+| Notice | Raised by | OLED message |
+| --- | --- | --- |
+| `ReplacedBond` | `AddOutcome::BondReplaced`: the new pairing's identity matched a record saved with other keys, which it replaced | `Replaced old pairing` |
+| `RemovedOldest` | `AddOutcome::AddedAfterEviction`: the store was full, so its oldest-added record and that record's keys were removed | `Oldest device removed` |
 
 ### Management Request Lifecycle
 
@@ -760,7 +779,7 @@ the loop keeps the `PowerManager`. RSSI and addresses are never rendered.
 
 `Screen` has the variants `Home`, `Scanning`, `DeviceList`, `Connecting`,
 `Connected`, `Error`, `SavedDevices`, `ConfirmForget(usize)`, `ConfirmReset`,
-`Managing`, `Notice`, and `NoReply`. The text each one shows and what UP, DOWN, and
+`Managing`, `Notice`, `NoReply`, and `Paired`. The text each one shows and what UP, DOWN, and
 SELECT do on it are listed once, in
 [features: screens and buttons](features.md#screens-and-buttons).
 
@@ -775,6 +794,7 @@ message. Events change screens as follows:
 | `ScanComplete` | From `Scanning`: `DeviceList`, or `Error` with `No devices found` |
 | `Connected` / `Disconnected` | Update `connected_name`; `Home`, `Connecting` and `Connected` follow the link state; a scan's `Scanning` or `DeviceList`, dialogs, and errors are kept |
 | `Error(tag)` | `Error` with the tag's message |
+| `Notice(notice)` | `Paired` with the notice's message unless an error is showing |
 | `PairedDevices` (matching ID) | Store names; enter `SavedDevices` unless an error is showing |
 | `ManagementResult` (matching ID) | `Ok`: `Notice` with `Device forgotten` or `Pairings reset` unless an error is showing; `Err`: `Error` |
 

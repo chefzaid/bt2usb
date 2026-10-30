@@ -40,6 +40,19 @@ impl<A> Command<A> {
     }
 }
 
+/// What saving a new pairing did to the other saved devices, which the UI
+/// tells the user once the pairing is stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum PairingNotice {
+    /// The new keys replaced the bond saved for a device with the same
+    /// identity, which can no longer connect with its old keys.
+    ReplacedBond,
+    /// The store was full, so its oldest device and that device's keys were
+    /// removed to make room.
+    RemovedOldest,
+}
+
 /// An event from the BLE coordinator (and the scanner) for the UI.
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -56,6 +69,8 @@ pub enum Event<A> {
     Disconnected,
     /// An error the UI shows until the user acknowledges it.
     Error(ErrorTag),
+    /// A pairing was saved with a side effect the user should know about.
+    Notice(PairingNotice),
     /// The saved devices, newest first, in reply to `ListPaired { id }`.
     PairedDevices {
         id: u32,
@@ -132,6 +147,7 @@ mod tests {
             Event::<u8>::ScanStarted,
             Event::ScanComplete,
             Event::Error(ErrorTag::ConnectFailed),
+            Event::Notice(PairingNotice::RemovedOldest),
             Event::ManagementResult {
                 id: 1,
                 result: Ok(()),

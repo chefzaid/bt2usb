@@ -431,8 +431,15 @@ which can be too late for a firmware setup key.
    requests no MITM protection, so pairing is unauthenticated LE legacy Just
    Works ([ADR 0011](adr/0011-interim-just-works-pairing.md)). The worker
    polls the security mode every 200 ms, up to 25 times, and accepts only an
-   encrypted mode (`JustWorks`, `Mitm`, or `LescMitm`); otherwise it logs
-   `"slot {} failed to secure BLE link"` and fails with `ConnectFailed`. New
+   encrypted mode (`JustWorks`, `Mitm`, or `LescMitm`, `bonder::encrypts`);
+   otherwise it logs `"slot {} failed to secure BLE link: {}"` with the error.
+   `sd_ble_gap_encrypt` reports its result only as a security update, so an
+   update that leaves the link unencrypted after the stored keys were sent is
+   the peer refusing them: `Bonder::on_security_update` notes it, and the
+   attempt fails with `KeysRejected` even if the peer dropped the link after.
+   A new pairing that does not encrypt a link still up fails with
+   `PairingFailed`, a background attempt that finds no keys with
+   `KeysMissing`, and anything else with `ConnectFailed`. New
    keys land in the in-RAM `Bonder` through `on_bonded`, replacing that peer's
    previous keys or, for a new peer, held as unsaved beside every saved
    device's keys until step 10 saves them
@@ -465,7 +472,10 @@ which can be too late for a firmware setup key.
     connection summary. Persisting marks the bond saved in `Bonder`, and when
     the store evicts its oldest record to make room, drops that record's keys
     too (`Bonder::forget_identity`), so the keys in RAM follow the store. The UI shows Connected after the flash write finishes;
-    a failed write shows "Storage failed" while the link stays up. A pairing
+    a failed write shows "Kept until power-off" for a new or changed device
+    (otherwise "Storage failed") while the link stays up. A save that replaced
+    another saved device's keys or evicted the oldest device shows **Paired**
+    with "Replaced old pairing" or "Oldest device removed". A pairing
     whose identity is not a public or random static address is refused in
     `Bonder::on_bonded`: no keys are kept, nothing is stored for the device,
     and the UI shows "Pairing not saved" ([write rules](data-model.md#write-rules)).
@@ -516,10 +526,12 @@ it `Reconnect` at power-up; an established link closes (`"slot {} link lost;
 reconnecting"`), including one that the user connected, unless `Bonder` holds
 no keys for the device; a silent attempt fails with `ConnectFailed`; or a user
 connection that took over a retry fails while `Bonder` still holds the
-device's keys ([takeover](#attempt-numbers-and-retry-takeover)). A
+device's keys and the device did not refuse them
+([takeover](#attempt-numbers-and-retry-takeover)). A
 silent attempt never pairs, so the retry runs only while `Bonder` holds the
-device's keys: power-up skips a saved device without a bond, and every
-attempt checks the keys first.
+device's keys: power-up skips a saved device without a bond, every attempt
+checks the keys first, and a slot that finds them missing or refused stops
+with an error that tells the user to pair the device again.
 
 ```mermaid
 flowchart TD
@@ -529,7 +541,7 @@ flowchart TD
     B -->|Connect for the same device| N[Takeover: connect allowing pairing]
     B -->|Other command| O[Drop target, handle the command]
     B -->|Pause ends, or the other slot saw the device| K{Bonder holds the device's keys}
-    K -->|No: report Disconnected| F[Slot released, retries stop]
+    K -->|No: KeysMissing error| F[Slot released, retries stop]
     K -->|Yes| S{Fresh sighting for this slot}
     S -->|Yes| C[Whitelist connect to the seen address, up to 6 s]
     S -->|No| R[Shared reconnect scan under GAP lock, up to 6 s]
@@ -540,17 +552,17 @@ flowchart TD
     R -->|Other command: report Disconnected| O
     C -->|Secured and HID ready| L[Drop target, Connected event, notification loop]
     C -->|ConnectFailed: hide device from other slot's scans 6.5 s| T
-    C -->|HID or Report Map error| E[Drop target, error event, slot released, retries stop]
+    C -->|KeysRejected, HID or Report Map error| E[Drop target, error event, slot released, retries stop]
     L -->|Peer closes link| D[HidEvent Disconnected]
     D -->|Bonder holds keys: LinkLost| T
-    D -->|No keys: Disconnected| F
+    D -->|No keys: KeysMissing error| F
 ```
 
 - Before each silent attempt the worker asks `Bonder::bond_for_address` for
   the device's keys. Without them (saving a newer device evicted its record and
-  keys) it clears the target, sends `SlotEvent::Disconnected`, and logs
-  `"slot {} has no keys to reconnect"`; the attempt could never secure the
-  link and would hold the slot for good. Power-up reserves slots only for the
+  keys) it clears the target, sends `SlotEvent::Error` with `KeysMissing`
+  (`Pair device again`), and logs `"slot {} has no keys to reconnect"`; the
+  attempt could never secure the link and would hold the slot for good. Power-up reserves slots only for the
   two most recently added saved devices that have a bond, so a record without
   one (a device that paired without bonding, or one loaded from the legacy
   format) connects only when selected from a scan.
@@ -612,12 +624,12 @@ flowchart TD
 - Between attempts the worker waits `BLE_RECONNECT_BACKOFF_MS` (500 ms) while
   listening for commands and for the other slot's wake, which leaves the radio
   free for a user scan.
-- Background attempts never start pairing. A peer that has lost its keys fails
-  encryption with `ConnectFailed`, which a silent attempt retries
-  indefinitely; only the RTT log shows `"slot {} failed to secure BLE link"`.
-  Selecting the device from a scan ends the wait on Connecting with
-  `Connect failed` (see the takeover below); forgetting it and pairing again
-  recovers it.
+- Background attempts never start pairing. A peer that has lost its keys
+  refuses the stored ones, which the SoftDevice reports as a security update
+  without encryption; the attempt fails with `KeysRejected`, the slot is
+  released, and the screen shows `Forget, pair again`. Forgetting the device
+  and pairing it again recovers it. A peer that neither encrypts nor reports
+  a refusal within the 25 polls fails with `ConnectFailed` and is retried.
 - A link that drops while its HID service is discovered or subscribed, for
   example a keyboard going back to sleep right after the key press that woke
   it, fails as `ConnectFailed` (`"slot {} link dropped during HID
@@ -627,9 +639,10 @@ flowchart TD
   handle after the failure (`ErrorTag::for_failed_setup`). A peer that fails
   discovery on a link that stays up and then disconnects at once can be
   taken for a dropped link and retried.
-- Any other error during a silent attempt (`HidNotFound`, `NotifyFailed`, or a
-  Report Map error on a link that is still up) is reported to the coordinator,
-  which releases the slot and shows the error; that slot stops retrying.
+- Any other error during a silent attempt (`KeysRejected`, `KeysMissing`,
+  `HidNotFound`, `NotifyFailed`, or a Report Map error on a link that is still
+  up) is reported to the coordinator, which releases the slot and shows the
+  error; that slot stops retrying.
 - On link loss the worker first sends `HidEvent::Disconnected` so the
   aggregator releases that source's held input, then `SlotEvent::LinkLost`.
   `on_slot_link_lost` keeps the slot reserved in the connecting state, under
@@ -639,7 +652,8 @@ flowchart TD
   that are up. When `Bonder::bond_for_address` finds no keys for the device
   (its pairing was refused, the peripheral paired without bonding, or saving a
   newer device evicted its record and keys), the worker sends
-  `SlotEvent::Disconnected` instead and logs
+  `SlotEvent::Error` with `KeysMissing` instead, which frees the slot and
+  shows `Pair device again`, and logs
   `"slot {} link lost; no keys to reconnect"`: a silent attempt never pairs,
   so it could never secure the link, and would hold the slot until the user
   disconnected.
@@ -680,9 +694,9 @@ numbers keep those late reports from undoing the newer decision.
 - When the takeover's connection fails and `Bonder` still holds the replaced
   target's keys, the worker sends `SlotEvent::Error` with `retrying` set and
   resumes the retry under the same number. `on_slot_error` then keeps the
-  slot reserved and retrying, emits the error (`Connect failed` for a peer
-  that rejects its keys), and a later selection can take the retry over
-  again. Without the keys the error frees the slot.
+  slot reserved and retrying, emits the error, and a later selection can take
+  the retry over again. Without the keys, or when the peer refused them
+  (`Forget, pair again`), the error frees the slot.
 - Any other command that arrives during an attempt supersedes it: the worker
   closes the link, reports `Disconnected` under the old number, and handles
   the command next (a `Disconnect` needs nothing more).
@@ -1279,10 +1293,14 @@ from `coordinator::ErrorTag`), carried by `BleEvent::Error` or a
 `ManagementResult`; the UI controller maps each tag to one fixed OLED message
 in `controller::error_message`, and the UI adds a few messages of its own. `DeviceStore`
 returns `StoreError::{Unreadable, Serialization, Flash, NotFound}`, and the
-coordinator collapses every one of them into `StorageFailed`; a load failure
+coordinator collapses every one of them into `StorageFailed`, except a failed
+save of a new or changed device, which is `NotPersisted`; a load failure
 produces no `StoreError` but disables writes and raises `StorageFailed` once at
 boot. A silent reconnect attempt that fails with `ConnectFailed` is retried
-without telling the UI. Display faults never become tags: the display task logs
+without telling the UI; one that fails because the keys are missing or were
+refused ends with `KeysMissing` or `KeysRejected`, which another attempt
+could not fix (`ErrorTag::needs_new_pairing`). A save that changed another
+saved device is reported as a `PairingNotice` instead of an error. Display faults never become tags: the display task logs
 them and retries with backoff while the rest of the bridge keeps running.
 Lost links, background reconnect attempts and failures, coalesced and
 overflowed reports, and failed USB, LED, and flash writes are also counted in
@@ -1301,9 +1319,9 @@ should do about each message is in
 | User scan | 8 s window, 10 s backstop | Results so far are used; a SoftDevice error shows "Scan failed" | [scanner.rs](../src/ble/scanner.rs) |
 | Connect attempt | 6 s whitelist scan | User connect: error, and a connection that took over a background retry goes back to it while the device's keys remain. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs), [slot_link.rs](../src/ble/slot_link.rs) |
 | Reconnect scan | 6 s; fast duty cycle for 30 s after power-up or a lost link | Retry after 500 ms, or at once when the other slot's scan sees the device | [scanner.rs](../src/ble/scanner.rs), [reconnect.rs](../src/ble/reconnect.rs) |
-| Encryption | 25 polls, 200 ms apart | `ConnectFailed` | [slot_link.rs](../src/ble/slot_link.rs) |
+| Encryption | 25 polls, 200 ms apart | `KeysRejected` when the SoftDevice reported the link unencrypted after the stored keys were sent; `PairingFailed` for a new pairing on a link still up; otherwise `ConnectFailed` | [slot_link.rs](../src/ble/slot_link.rs), [bonder.rs](../src/ble/bonder.rs) |
 | GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. When the link itself dropped, any discovery failure becomes `ConnectFailed`, which a background reconnect retries. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |
-| Flash write | 3 attempts, 20 ms apart | `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
+| Flash write | 3 attempts, 20 ms apart | `NotPersisted` for a new or changed device, otherwise `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
 | USB endpoint write | 100 ms deadline | Replay current state; back off 20 ms doubling to 1 s | [delivery.rs](../src/hid/delivery.rs) |
 | OLED operation | 500 ms, then STOP and keep waiting | Re-initialize after 1 s doubling to 30 s | [display.rs](../src/ui/display.rs), [display_logic.rs](../src/ui/display_logic.rs) |
 | Management request | `UI_MANAGEMENT_TIMEOUT_SECS` (30 s), checked on the 1 s tick | The UI stops waiting and shows No reply; a late reply carries the abandoned ID and is ignored | [controller.rs](../src/ui/controller.rs) |

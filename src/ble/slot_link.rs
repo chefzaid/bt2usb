@@ -9,9 +9,10 @@
 //! ending it (see [`take_over`]). A link that drops while it is being secured
 //! or while its HID service is discovered fails as `ConnectFailed`, like a
 //! peer that never connected, so a background reconnect retries it; a
-//! discovery failure on a link that is still up keeps its own error.
+//! discovery failure on a link that is still up keeps its own error, and so
+//! does a peer that refused the stored keys before it dropped the link.
 
-use crate::ble::bonder::bonder;
+use crate::ble::bonder::{bonder, encrypts};
 use crate::ble::multi_conn::{SlotCommand, SlotEvent};
 use crate::ble::{hid_client, scanner, BleErrorTag, DiscoveredDevice};
 use crate::config;
@@ -23,7 +24,7 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 use embassy_time::{Duration, Timer};
-use nrf_softdevice::ble::{central, Connection, EncryptError, SecurityMode};
+use nrf_softdevice::ble::{central, Connection, EncryptError};
 use nrf_softdevice::raw;
 use nrf_softdevice::Softdevice;
 
@@ -85,12 +86,10 @@ async fn wait_for_secure_link(conn: &Connection) -> bool {
         if conn.handle().is_none() {
             return false;
         }
-        match conn.security_mode() {
-            SecurityMode::JustWorks | SecurityMode::Mitm | SecurityMode::LescMitm => return true,
-            // Signed modes authenticate individual writes but do not encrypt
-            // the link, so they cannot protect incoming HID notifications.
-            _ => Timer::after(Duration::from_millis(200)).await,
+        if encrypts(conn.security_mode()) {
+            return true;
         }
+        Timer::after(Duration::from_millis(200)).await;
     }
     false
 }
@@ -98,25 +97,33 @@ async fn wait_for_secure_link(conn: &Connection) -> bool {
 /// Secure a new link and discover its HID reports. A background reconnect
 /// (`allow_pairing` false) never initiates a replacement pairing; fresh
 /// pairing is restricted to an explicit user connection.
+///
+/// A link that does not encrypt fails with what the user must do about it:
+/// `KeysRejected` when the peer refused the stored keys, `PairingFailed` when
+/// a new pairing did not complete, `KeysMissing` when a background reconnect
+/// finds no keys, and otherwise `ConnectFailed`, which a background
+/// reconnect retries.
 async fn secure_and_discover(
     conn: &Connection,
     allow_pairing: bool,
     slot: usize,
 ) -> Result<(hid_client::HidServiceClient, Option<HidDescriptor>), BleErrorTag> {
-    let secure_ok = match conn.encrypt() {
-        Ok(()) => wait_for_secure_link(conn).await,
+    let peer = conn.peer_address();
+    // A refusal noted on an earlier link from this address is not this one's.
+    bonder().take_keys_rejected(peer);
+    let failure = match conn.encrypt() {
+        Ok(()) if wait_for_secure_link(conn).await => None,
+        Ok(()) if bonder().take_keys_rejected(peer) => Some(BleErrorTag::KeysRejected),
         Err(EncryptError::PeerKeysNotFound) if allow_pairing => {
-            if conn.request_pairing().is_ok() {
-                wait_for_secure_link(conn).await
-            } else {
-                false
-            }
+            let paired = conn.request_pairing().is_ok() && wait_for_secure_link(conn).await;
+            (!paired).then_some(BleErrorTag::PairingFailed)
         }
-        Err(_) => false,
+        Err(EncryptError::PeerKeysNotFound) => Some(BleErrorTag::KeysMissing),
+        Ok(()) | Err(_) => Some(BleErrorTag::ConnectFailed),
     };
-    if !secure_ok {
-        warn!("slot {} failed to secure BLE link", slot);
-        return Err(BleErrorTag::ConnectFailed);
+    if let Some(tag) = failure {
+        warn!("slot {} failed to secure BLE link: {}", slot, tag);
+        return Err(tag);
     }
     hid_client::discover_and_subscribe(conn).await
 }

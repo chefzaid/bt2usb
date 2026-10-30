@@ -111,7 +111,7 @@ fn new_keys_replace_the_bond_of_the_same_identity() {
     list.add(bonded(1, 0, "Keyboard"), &resolve);
     let mut repaired = bonded(1, 5, "Keyboard");
     repaired.bond.as_mut().unwrap().ltk = [0x99; 16];
-    assert_eq!(list.add(repaired, &resolve), AddOutcome::Updated);
+    assert_eq!(list.add(repaired, &resolve), AddOutcome::BondReplaced);
     assert_eq!(list.len(), 1);
     assert_eq!(list.bonds().next().unwrap().ltk, [0x99; 16]);
 }

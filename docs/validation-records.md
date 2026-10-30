@@ -8,6 +8,29 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Storage And Security Errors On The OLED
+
+This record covers the commit that checks off the P1 item "Visible
+storage/security errors" in [TODO.md](../TODO.md#ui-display-and-power): the
+**Paired** notices `Replaced old pairing` and `Oldest device removed`, the
+errors `Pairing failed`, `Forget, pair again`, `Pair device again`, and
+`Kept until power-off`, a background reconnect that stops when its keys are
+missing or refused, and the split-out item for unsupported reports. The same
+commit corrects the security guide's paragraph on peer Security Requests,
+which still described the path the pairing permission closed. The checks ran
+locally on Linux in a container on the working tree just before that commit;
+nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 431 unit tests (8 new in `coordinator_tests.rs`, `controller_tests.rs`, and `ui_logic_tests.rs`), 3 integration tests, 3 glyph-table tests, 2 pairing-permission tests, and 5 vendored-portal tests. With a replaced bond counted for keys added to a record saved without any, `keys_merge_with_an_entry_stored_under_the_identity_or_a_private_address` fails |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only`, cargo-llvm-cov 0.9.1 | 98.95% of lines, 98.96% of regions, 99.19% of functions |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed |
+| Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` with Ruff 0.16.9 and ShellCheck 0.9.0 | Passed; lint clean |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` with the platform copy without `ApplySVD` | Passed, all three cases. The simulation has two HID advertisers and pairs nothing, so it reaches none of the new screens; the layout tests cover their text |
+| A peer refusing stored keys on air | A peripheral reset or paired elsewhere after bonding | Not performed: that `sd_ble_gap_encrypt` reports a refusal as a security update without encryption is read from the S140 API, whose only documented event for it is `BLE_GAP_EVT_CONN_SEC_UPDATE` |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-30, Pairing Permission
 
 This record covers the commit that fixes the P0 item "Refuse peer-initiated

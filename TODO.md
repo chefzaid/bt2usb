@@ -30,7 +30,7 @@ probe, or USB host to close.
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
 | [Pairing Storage](#pairing-storage) | 5 | 4 | 3 |
-| [UI, Display And Power](#ui-display-and-power) | 9 | 2 | 1 |
+| [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **146** | **67** | **20** |
+| **Total** | **147** | **67** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -661,34 +661,33 @@ The OLED, three buttons, UI state machine, and display power policy. Context:
   margins are recorded and either meet those limits or a reviewed exception
   updates [ADR 0012](docs/adr/0012-bus-powered-no-system-off.md)
   ([release gates](docs/deployment.md#release-gates)).
-- [ ] **P1** **Visible storage/security errors.** Surface pairing persistence
-  failure, bond replacement, full-store eviction, unsupported reports, and
-  security failures with useful user actions. Today a failed save shows only
-  the generic `Storage failed` error, and a link that cannot be secured shows
-  `Connect failed` (`controller::error_message` in `src/ui/controller.rs`). Three cases do not
-  reach the user at all. A newly paired device whose identity address matches
-  a stored peer replaces that peer's record and bond (`DeviceStore::add` in
-  `src/storage.rs`, `Bonder::on_bonded` in `src/ble/bonder.rs`), leaving
-  only the `Updated existing paired device` log line. A full store evicts its
-  oldest peer with only the
-  `Paired device store full - evicting oldest entry` log line, and its keys
-  go with it, so a slot retrying that peer stops with only
-  `slot {} has no keys to reconnect` in the log. A background
-  reconnect whose link cannot be secured because the peer lost its keys fails
-  with `ConnectFailed`, which a silent reconnect treats as "try again"
-  (`connection_slot_task` in `src/ble/slot_worker.rs`); the slot retries after
-  each `BLE_RECONNECT_BACKOFF_MS` pause, with no limit, and the UI shows
-  nothing until the user selects the device, which ends in `Connect failed`.
-  A device the bridge (`Bonder`) holds no keys for is no longer retried:
-  since 2026-10-11 its slot is freed and only the log says why
-  (`slot {} has no keys to reconnect`, `slot {} link lost; no keys to
-  reconnect`). Accept when UI tests cover every state; the user is told, before or
-  when it happens, that a pairing replaced an existing peer's bond or evicted
-  the oldest peer; a reconnect that fails for missing keys on either side ends
-  in a visible state that tells the user to pair the device again instead of
-  retrying silently; and a user can distinguish a temporary link failure from
-  a peer that was not saved
-  ([operations](docs/operations.md#recovery-and-diagnostics)).
+- [x] **P1** **Visible storage/security errors.** Saving a pairing that
+  replaced the keys of a saved device with the same identity, or evicted the
+  oldest device from a full store, shows **Paired** with
+  `Replaced old pairing` or `Oldest device removed` (`AddOutcome::BondReplaced`
+  in `src/storage/devices.rs`, `Stored` in `src/storage.rs`,
+  `PairingNotice` in `src/ble/messages.rs`). A slot that holds no keys for the
+  device it reconnects stops with `Pair device again` (`ErrorTag::KeysMissing`
+  from `src/ble/slot_worker.rs`) instead of freeing itself silently. A link
+  that the SoftDevice reports unencrypted after the stored keys were sent
+  fails with `Forget, pair again` (`KeysRejected`, noted by
+  `Bonder::on_security_update`), even if the peer then drops it, and that
+  ends a background reconnect instead of retrying it. A new pairing that does
+  not complete on a link that stays up shows `Pairing failed`, so only a link
+  that did not come up shows `Connect failed`. Controller, reducer, layout,
+  coordinator, and device-list tests cover each state
+  ([features](docs/features.md#notices-and-errors)). The unsupported-report
+  case moved to its own item below *(hardware evidence pending)*.
+- [ ] **P2** **Tell the user about unsupported reports.** Split from "Visible
+  storage/security errors" on 2026-10-30. A report the bridge cannot
+  translate is dropped with at most a log line
+  (`Skipping unknown or ambiguous HID report reference`), so a peripheral that
+  connects but whose input layout is unsupported looks connected and types
+  nothing. Waits for the answer on
+  [ADR 0022](#needs-your-input), which decides what a map with no translatable
+  input does. Accept when that case shows its own message, covered by
+  controller tests, and a board shows it for a named peripheral
+  ([features](docs/features.md#notices-and-errors)).
 
 ## Platform, Memory And Recovery
 
@@ -1489,9 +1488,8 @@ from its own controls, and frequent actions also from the keyboard.
   whether it delivers keyboard, mouse, or consumer input, and its live signal
   strength, so the bridge can be placed where a monitor stand does not block
   the radio; the stored `last_rssi` is a scan-time hint only. The view also
-  shows the firmware version from "Diagnostics without sensitive input" and the
-  state that "Visible storage/security errors" defines for a slot that keeps
-  retrying. Accept when reducer tests cover connected, retrying, and empty
+  shows the firmware version from "Diagnostics without sensitive input" and
+  whether a slot is retrying in the background. Accept when reducer tests cover connected, retrying, and empty
   slots and a board shows the signal strength change as a peripheral moves
   ([features](docs/features.md#screens-and-buttons)).
 - [ ] **P2** **Peripheral battery level.** *(hardware)* Discover the Battery

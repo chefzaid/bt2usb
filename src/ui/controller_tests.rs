@@ -297,18 +297,7 @@ fn tick_abandons_an_unanswered_request_at_its_deadline() {
 
 #[test]
 fn every_error_has_a_distinct_message_that_fits_the_screen() {
-    let tags = [
-        ErrorTag::ScanFailed,
-        ErrorTag::ConnectFailed,
-        ErrorTag::HidNotFound,
-        ErrorTag::NotifyFailed,
-        ErrorTag::StorageFailed,
-        ErrorTag::BondRefused,
-        ErrorTag::ManagementFailed,
-        ErrorTag::ReportMapReadFailed,
-        ErrorTag::ReportMapTooLarge,
-        ErrorTag::ReportMapInvalid,
-    ];
+    let tags = ErrorTag::ALL;
     for (index, &tag) in tags.iter().enumerate() {
         let message = error_message(tag);
         assert!(!message.is_empty());
@@ -321,4 +310,65 @@ fn every_error_has_a_distinct_message_that_fits_the_screen() {
         assert_eq!(ui.state.screen, Screen::Error);
         assert_eq!(ui.state.message, message);
     }
+}
+
+#[test]
+fn every_pairing_notice_has_a_distinct_message_that_fits_the_screen() {
+    let notices = [PairingNotice::ReplacedBond, PairingNotice::RemovedOldest];
+    let errors = ErrorTag::ALL.map(error_message);
+    for (index, &notice) in notices.iter().enumerate() {
+        let message = notice_message(notice);
+        assert!(!message.is_empty());
+        assert!(message.len() <= SCREEN_COLUMNS, "{message}");
+        assert!(!errors.contains(&message), "{message}");
+        for &other in &notices[index + 1..] {
+            assert_ne!(message, notice_message(other));
+        }
+    }
+}
+
+#[test]
+fn a_saved_pairing_tells_what_it_did_to_another_device() {
+    for notice in [PairingNotice::ReplacedBond, PairingNotice::RemovedOldest] {
+        let mut ui = UiController::<Addr>::new();
+        ui.event(Event::ScanStarted);
+        ui.event(Event::DeviceFound(device(7, "Keyboard")));
+        ui.event(Event::ScanComplete);
+        assert_eq!(ui.button(ButtonEvent::Select, 0), Some(Command::Connect(0)));
+        // The coordinator saves the device before it reports the link.
+        ui.event(Event::Notice(notice));
+        ui.event(Event::Connected(name("Keyboard")));
+        assert_eq!(ui.state.screen, Screen::Paired);
+        assert_eq!(ui.state.message, notice_message(notice));
+        assert_eq!(ui.state.connected_name, "Keyboard");
+        assert_eq!(ui.button(ButtonEvent::Select, 0), None);
+        assert_eq!(ui.state.screen, Screen::Connected);
+        assert!(ui.state.message.is_empty());
+    }
+}
+
+#[test]
+fn a_pairing_notice_does_not_hide_an_error() {
+    let mut ui = UiController::<Addr>::new();
+    ui.event(Event::Error(ErrorTag::KeysMissing));
+    ui.event(Event::Notice(PairingNotice::RemovedOldest));
+    assert_eq!(ui.state.screen, Screen::Error);
+    assert_eq!(ui.state.message, "Pair device again");
+}
+
+#[test]
+fn key_and_pairing_failures_read_apart_from_a_failed_link() {
+    let connect = error_message(ErrorTag::ConnectFailed);
+    for tag in [
+        ErrorTag::PairingFailed,
+        ErrorTag::KeysRejected,
+        ErrorTag::KeysMissing,
+        ErrorTag::BondRefused,
+    ] {
+        assert_ne!(error_message(tag), connect);
+    }
+    // A device the bridge must forget before pairing says so; one it merely
+    // holds no keys for is paired by selecting it again.
+    assert_eq!(error_message(ErrorTag::KeysRejected), "Forget, pair again");
+    assert_eq!(error_message(ErrorTag::KeysMissing), "Pair device again");
 }

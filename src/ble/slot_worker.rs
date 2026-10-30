@@ -6,7 +6,9 @@
 //! [`SlotEvent`]s back, and between commands keeps retrying a saved device
 //! whose link dropped or that has not been seen since power-up, through the
 //! shared reconnect scan in [`scanner`]. A silent retry never pairs, so it
-//! runs only while the bonder holds the device's keys.
+//! runs only while the bonder holds the device's keys and the device accepts
+//! them; once either fails, the slot is freed with an error that tells the
+//! user to pair the device again.
 //!
 //! Every event carries the number of the attempt it reports on (see
 //! [`ConnManager`](crate::ble::coordinator::ConnManager)). A `Connect` for the
@@ -115,16 +117,14 @@ pub async fn connection_slot_task(
             // A background reconnect never pairs, so without the device's
             // keys (a newer pairing evicted them, or it was saved without
             // any) it could never secure the link: free the slot instead of
-            // holding it for good.
+            // holding it for good, and tell the user to pair it again.
             let Some(identity) = bonder()
                 .bond_for_address(device.address)
                 .map(|bond| bond.peer_id)
             else {
                 info!("slot {} has no keys to reconnect", slot);
                 scanner::clear_reconnect(slot);
-                slot_event_tx
-                    .send(SlotEvent::Disconnected { slot, attempt })
-                    .await;
+                keys_missing(slot, attempt, slot_event_tx).await;
                 continue;
             };
             // RPA rotation can happen at any time, not just at boot. A
@@ -185,9 +185,7 @@ pub async fn connection_slot_task(
             // secure the link: free the slot instead.
             SlotOutcome::Closed if bonder().bond_for_address(device.address).is_none() => {
                 info!("slot {} link lost; no keys to reconnect", slot);
-                slot_event_tx
-                    .send(SlotEvent::Disconnected { slot, attempt })
-                    .await;
+                keys_missing(slot, attempt, slot_event_tx).await;
             }
             SlotOutcome::Closed => {
                 // The peer dropped a working link: keep the slot for it and
@@ -222,10 +220,13 @@ pub async fn connection_slot_task(
             }
             // A failed user connection that took over a background retry
             // hands the slot back to that retry while the device's keys
-            // remain, so it still reconnects when it next advertises.
+            // remain, so it still reconnects when it next advertises, unless
+            // the keys were found wanting. Any other failure of a background
+            // reconnect, such as a peer that refused its keys, ends it.
             SlotOutcome::Failed(tag) => {
-                let resume = replaced_retry
-                    .filter(|target| bonder().bond_for_address(target.address).is_some());
+                let resume = replaced_retry.filter(|target| {
+                    !tag.needs_new_pairing() && bonder().bond_for_address(target.address).is_some()
+                });
                 slot_event_tx
                     .send(SlotEvent::Error {
                         slot,
@@ -244,6 +245,23 @@ pub async fn connection_slot_task(
             scanner::clear_reconnect(slot);
         }
     }
+}
+
+/// The slot gave up on a device it holds no keys for: report it free, with
+/// the error that tells the user to pair the device again.
+async fn keys_missing(
+    slot: usize,
+    attempt: u32,
+    slot_event_tx: &Sender<'_, CriticalSectionRawMutex, SlotEvent, 8>,
+) {
+    slot_event_tx
+        .send(SlotEvent::Error {
+            slot,
+            attempt,
+            tag: BleErrorTag::KeysMissing,
+            retrying: false,
+        })
+        .await;
 }
 
 /// A command ended this slot's attempt or background retry; returns the

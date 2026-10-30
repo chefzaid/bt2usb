@@ -336,14 +336,15 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `slot {} connecting to {}` | A connection attempt started (6 s limit) | For a device chosen from a scan it appears at once. For a background reconnect it appears only after a reconnect scan, this slot's or the other slot's, has heard the device, so no line means the device is not being heard ([reconnect incident](#saved-peripheral-does-not-reconnect)) |
 | info | `slot {} scan found slot {}'s device` | This slot's reconnect scan heard the other slot's saved device, recorded the sighting, and woke that slot, which connects to it next; this slot scans again after its 500 ms pause | None; normal while both slots are reconnecting |
 | info | `BLE security mode updated: {}` | Link encryption changed | None |
+| warn | `peer refused the stored keys` | The security update after the bridge sent a device's stored keys left the link unencrypted: the device no longer has them (reset, or paired again elsewhere). The attempt fails with `Forget, pair again` | Forget the device and select it from a scan to pair it again |
 | info | `peer connection parameters granted: {}` | The peripheral asked for connection parameters inside the bridge's limits and got them as asked. Values are in Core units: intervals in 1.25 ms, latency in connection events, timeout in 10 ms | None |
 | info | `peer asked for connection parameters {}; granting {}` | The request was bounded to the [ADR 0016](adr/0016-bounded-peer-connection-parameters.md) limits; the granted interval is still inside the range the peripheral asked for | None |
 | warn | `peer asked for connection parameters {}; granting {}, outside its interval range` | The granted interval is outside the requested range: the peripheral's fastest requested interval is slower than 30 ms, or its whole range is below the Core's 7.5 ms minimum | If the peripheral then disconnects, record its name and this line for the compatibility baseline |
-| warn | `slot {} failed to secure BLE link` | Encryption or pairing failed, the link dropped, or security did not complete within 5 s | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
+| warn | `slot {} failed to secure BLE link: {}` | The link was not encrypted within 5 s. The error names why: `KeysRejected` (the device refused the stored keys), `PairingFailed` (a new pairing did not complete), `KeysMissing` (a background reconnect holds no keys), or `ConnectFailed` (the link dropped first, or neither happened) | [Reconnect incident](#saved-peripheral-does-not-reconnect) |
 | info | `slot {} link dropped during HID discovery` | The link dropped while its HID service was discovered or subscribed, for example a keyboard going back to sleep; the attempt failed as `Connect failed` | None for a background reconnect, which retries; for a selection, select the device again while it is awake |
 | info | `slot {} link lost; reconnecting` | An established link dropped; held input was released | None; retries follow |
-| info | `slot {} link lost; no keys to reconnect` | An established link dropped, and the bridge holds no keys for that device (its pairing showed `Pairing not saved`, the peripheral paired without bonding, or saving a newer device evicted its record and keys); held input was released and the slot was freed | Select the device from a scan to pair it again |
-| info | `slot {} has no keys to reconnect` | A background reconnect stopped before an attempt because the bridge no longer holds the device's keys: saving a newer device evicted its record, and its keys with it; the slot was freed | Select the device from a scan to pair it again |
+| info | `slot {} link lost; no keys to reconnect` | An established link dropped, and the bridge holds no keys for that device (its pairing showed `Pairing not saved`, the peripheral paired without bonding, or saving a newer device evicted its record and keys); held input was released, the slot was freed, and the OLED shows `Pair device again` | Select the device from a scan to pair it again |
+| info | `slot {} has no keys to reconnect` | A background reconnect stopped before an attempt because the bridge no longer holds the device's keys: saving a newer device evicted its record, and its keys with it; the slot was freed and the OLED shows `Pair device again` | Select the device from a scan to pair it again |
 | warn | `Bond table full - dropped the oldest unsaved pairing` | A new pairing found the bond table full (`BOND_SLOTS`, six entries: the saved devices' keys plus unsaved pairings) and dropped the oldest unsaved pairing to make room; unsaved pairings are discarded when their attempt ends, so this is not expected | Report it with the log around it |
 | warn | `sd_ble_gap_connect err {:?}`, `sd_ble_gap_scan_start err {:?}`, `sd_ble_gap_authenticate err {:?}` (vendor) | A SoftDevice GAP call was rejected | Note the error; report if it repeats |
 | warn | `att mtu exchange refused: {:?}; keeping the default mtu` (vendor) | The peripheral answered the bridge's Exchange MTU Request with an ATT error, usually Request Not Supported. The link continues at the default 23-byte MTU, so the Report Map is read in 22-byte pieces | None; record the peripheral for the compatibility baseline |
@@ -386,15 +387,16 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | error | `Device store is unreadable; refusing to overwrite stored bonds` | A save was refused because the store is read-only | [Storage incident](#storage-unreadable-and-writes-disabled) |
 | error | `Device store exceeds serialization capacity; save aborted` | Should be impossible (a compile-time check bounds it) | Report as a defect |
 | info | `Added paired device - now storing {}` | New peer cached | A save follows |
-| info | `Updated existing paired device` | Address, name, or keys changed | A save follows |
-| warn | `Paired device store full - evicting oldest entry` | A fifth peer replaced the oldest-added one | Expected at capacity (4) |
+| info | `Updated existing paired device` | Address or name changed, or keys were added to a record saved without any | A save follows |
+| warn | `New keys replaced the bond of a saved device with the same identity` | A new pairing named the identity of a device saved with other keys; once saved, the OLED shows `Replaced old pairing` | None if that device was paired again; otherwise the device paired claimed another's identity: forget it |
+| warn | `Paired device store full - evicting oldest entry` | A fifth peer replaced the oldest-added one; once saved, the OLED shows `Oldest device removed` | Expected at capacity (4) |
 | warn | `Bond refused: identity address is not public or random static` | The peer named a private, anonymous, or reserved identity address during pairing, or distributed no identity key while connecting from a private address (the vendored crate then uses that address as the identity); the security handler kept no keys, nothing is stored for the device, and the OLED shows `Pairing not saved` | Record the peripheral and report it. Once the link ends, background reconnects cannot bring it back, because they never pair; select the device from a scan to pair it again |
 | warn | `Bond refused: this link was not opened for pairing` | A pairing completed on a link the user did not choose, which the pairing permission should prevent; no keys were kept and nothing was stored | Report it with the log around it |
 | warn | `Device store refused a bond whose identity is not public or random static` | Should be impossible: the security handler refuses such a bond first. The store refused the device and its keys were dropped from the security handler | Report as a defect with the preceding log |
 | error | `Paired device address has a reserved type; not stored` | Should be impossible: the SoftDevice gives every link a defined address type | Report as a defect |
 | info | `Saved {} devices to flash` | The store was written | None |
 | warn | `Flash write busy (attempt {}), retrying` | A write attempt failed; retried after 20 ms | [Flash incident](#flash-writes-report-busy-or-fail) |
-| error | `Flash write failed after {} attempts: {:?}` | All three attempts failed; the OLED shows `Storage failed` | [Flash incident](#flash-writes-report-busy-or-fail) |
+| error | `Flash write failed after {} attempts: {:?}` | All three attempts failed; the OLED shows `Kept until power-off` when the write saved a new or changed device, otherwise `Storage failed` | [Flash incident](#flash-writes-report-busy-or-fail) |
 | warn | `sd_flash_write err {:?}`, `sd_flash_page_erase err {:?}` (vendor) | The SoftDevice flash call failed | Read with the storage lines around it |
 | debug | `DeviceStore: no changes to save` | Nothing to write | None |
 
@@ -419,15 +421,21 @@ message:
 | --- | --- |
 | `Scan failed` | Retry the scan; see [scan incident](#scan-finds-no-devices) |
 | `Connect failed` | Wake the peripheral, put it in pairing mode, retry |
+| `Pairing failed` | Put the peripheral in pairing mode and select it again; record it if it repeats |
+| `Forget, pair again` | The peripheral refused the stored keys: forget it in saved devices, then select it from a scan; see the [reconnect incident](#saved-peripheral-does-not-reconnect) |
+| `Pair device again` | The bridge holds no keys for a device it was reconnecting: select it from a scan |
 | `No HID service`, `Notify failed` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `HID map read failed`, `HID map too large`, `Unsupported HID map` | [HID error incident](#connect-fails-with-an-hid-error) |
 | `Storage failed` | [Storage](#storage-unreadable-and-writes-disabled) and [flash](#flash-writes-report-busy-or-fail) incidents |
+| `Kept until power-off` | The device works now but was not written to flash; see the [flash](#flash-writes-report-busy-or-fail) and [storage](#storage-unreadable-and-writes-disabled) incidents, then select it again so the save is retried, or pair it again after a power-off |
 | `Pairing not saved` | Record the peripheral and the `Bond refused` log line and report it; the device is not saved, keeps working until it disconnects, and then does not reconnect by itself; select it from a scan to pair it again |
 | `Action failed; retry` | Reopen the saved-device list and retry |
 | `Busy; try again` | Wait a few seconds and retry |
 | `Device changed; retry` | Reopen the saved-device list |
 | `No devices found` | [Scan incident](#scan-finds-no-devices) |
 | `Complete` / `Device forgotten` or `Pairings reset` | A management change was stored; SELECT to dismiss |
+| `Paired` / `Oldest device removed` | The store was full, so the oldest-added device and its keys were removed; pair it again if it is still used |
+| `Paired` / `Replaced old pairing` | The new pairing replaced a saved device's keys; if that was not the same device, forget the one just paired |
 | `Please wait...` | A management request is pending; see [pending incident](#a-management-action-stays-pending) |
 | `No reply` / `Forget result unknown`, `Reset result unknown`, or `List not loaded` | The BLE task did not answer within 30 s; see [pending incident](#a-management-action-stays-pending) |
 
@@ -664,21 +672,26 @@ reboot or after it slept.
   reconnecting, then at the slower default
   ([ADR 0015](adr/0015-shared-reconnect-scan.md)).
 - The peripheral no longer has the bond, for example after being reset or paired
-  with another host. Encryption fails and the log repeats
-  `slot N failed to secure BLE link`. The application never starts pairing on
-  a background reconnect ([security](security.md#pairing-and-authentication)),
-  and the bridge still holds keys for this peer, so this does not resolve on
-  its own. Selecting the device from a scan turns the retry into a user
-  connection, which shows `Connect failed` while the slot keeps retrying;
-  forget it and pair it again. A peer's request to pair on such a link is
-  left unanswered (`peer security request ignored: this link may not pair`).
+  with another host. It refuses the stored keys, the log shows
+  `peer refused the stored keys` and
+  `slot N failed to secure BLE link: KeysRejected`, the slot stops retrying,
+  and the OLED shows `Forget, pair again`. The application never starts
+  pairing on a background reconnect
+  ([security](security.md#pairing-and-authentication)), and a peer's request
+  to pair on such a link is left unanswered
+  (`peer security request ignored: this link may not pair`), so forget the
+  device and select it from a scan to pair it again. A peripheral that
+  neither encrypts nor reports the refusal shows only
+  `slot N failed to secure BLE link: ConnectFailed`, repeated, and keeps
+  being retried; forget and pair it the same way, and record it for the
+  compatibility baseline.
 - Only the two most recently added saved peers with a bond get a slot at
   boot. A third or fourth stored peer, or one saved without a bond because it
   paired without bonding, is connected only when selected from a scan.
 - The bridge no longer holds the peer's keys: saving a fifth device evicted
-  its record and keys, and a slot still retrying it stopped with
-  `slot N has no keys to reconnect`. A pairing that was not saved evicts
-  nothing.
+  its record and keys (`Oldest device removed`), and a slot still retrying it
+  stopped with `slot N has no keys to reconnect` and `Pair device again`. A
+  pairing that was not saved evicts nothing.
 - Retries were stopped: DOWN on the Connected screen disconnects every slot; a
   scan started while both slots were occupied disconnects both first; Forget or
   Factory reset stops the affected slots. A background reconnect retries
@@ -687,7 +700,7 @@ reboot or after it slept.
   discovery or subscription on a link that stays up (for example
   `No HID service`) ends that slot's retries and shows the error.
 - The peer was never saved: the store is read-only or the save failed
-  (`Storage failed`), or it was evicted
+  (`Kept until power-off`), or it was evicted
   (`Paired device store full - evicting oldest entry`).
 
 **Confirm:** at boot, look for `Loaded N devices from flash`,
@@ -734,7 +747,8 @@ the full loop.
 ### Storage Unreadable And Writes Disabled
 
 **Symptoms:** the OLED shows `Storage failed` right after boot; saved peers do
-not reconnect; new pairings work until the next reboot and then are forgotten.
+not reconnect; new pairings show `Kept until power-off` and work until the
+next reboot, and then are forgotten.
 
 **Likely causes:** the pairing store failed validation
 (`Invalid or unsupported device store; writes disabled`) or could not be read
@@ -763,7 +777,8 @@ not. Pair the peripherals again afterwards. See the
 ### Flash Writes Report Busy Or Fail
 
 **Symptoms:** `Flash write busy (attempt N), retrying`, possibly followed by
-`Flash write failed after 3 attempts: {:?}` and `Storage failed` on the OLED.
+`Flash write failed after 3 attempts: {:?}` and `Kept until power-off` (a new
+or changed device) or `Storage failed` on the OLED.
 
 **Likely causes:** SoftDevice flash operations wait for gaps in radio activity,
 and saves run right after a connection is established, when two links and a

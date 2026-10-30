@@ -11,10 +11,11 @@
 use crate::ble::bonder::{bonder, key_matches};
 use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
 use crate::ble::management::{self, Quiescence};
+use crate::ble::messages::PairingNotice;
 use crate::ble::scanner::ScanResult;
 use crate::ble::{scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::MAX_PAIRED_DEVICES;
-use crate::storage::{PairedDevice, DEVICE_STORE};
+use crate::storage::{PairedDevice, Stored, DEVICE_STORE};
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
@@ -44,8 +45,9 @@ pub enum SlotCommand {
         attempt: u32,
     },
     /// Keep silently retrying a paired device until it connects (boot-time
-    /// auto-reconnect). Ends on success, on losing the device's keys, on an
-    /// error other than a failed connection (reported), or on a new command.
+    /// auto-reconnect). Ends on success, on an error other than a failed
+    /// connection (reported), including the bridge losing the device's keys
+    /// or the device refusing them, or on a new command.
     Reconnect {
         device: DiscoveredDevice,
         attempt: u32,
@@ -384,16 +386,17 @@ async fn execute_action(
             let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
             let bond = bonder().bond_for_address(device.address);
             paired.bond = bond;
-            match store.add(paired) {
+            let stored = match store.add(paired) {
                 // RAM now holds what the store does: the new keys are saved,
                 // and the keys of a device evicted to make room are gone.
-                Ok(evicted) => {
+                Ok(stored) => {
                     if let Some(bond) = bond {
                         bonder().mark_saved(&bond);
                     }
-                    if let Some(identity) = evicted {
+                    if let Stored::RemovedOldest(Some(identity)) = stored {
                         bonder().forget_identity(identity);
                     }
+                    Some(stored)
                 }
                 // The store refuses what `Bonder` should already have
                 // refused; drop exactly those keys so RAM holds what flash
@@ -405,12 +408,28 @@ async fn execute_action(
                     event_tx
                         .send(BleEvent::Error(BleErrorTag::BondRefused))
                         .await;
+                    None
                 }
-            }
-            if store.save_to_flash(flash).await.is_err() {
-                event_tx
-                    .send(BleEvent::Error(BleErrorTag::StorageFailed))
-                    .await;
+            };
+            let event = match (store.save_to_flash(flash).await, stored) {
+                // What the pairing did to another saved device, told once
+                // saved.
+                (Ok(()), Some(Stored::ReplacedBond)) => {
+                    Some(BleEvent::Notice(PairingNotice::ReplacedBond))
+                }
+                (Ok(()), Some(Stored::RemovedOldest(_))) => {
+                    Some(BleEvent::Notice(PairingNotice::RemovedOldest))
+                }
+                (Ok(()), _) => None,
+                // A new or changed device that is not in flash is lost at
+                // power-off.
+                (Err(_), Some(stored)) if stored != Stored::Unchanged => {
+                    Some(BleEvent::Error(BleErrorTag::NotPersisted))
+                }
+                (Err(_), _) => Some(BleEvent::Error(BleErrorTag::StorageFailed)),
+            };
+            if let Some(event) = event {
+                event_tx.send(event).await;
             }
         }
         Action::DiscardUnsavedBond(address) => bonder().discard_unsaved(address),

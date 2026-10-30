@@ -32,6 +32,9 @@ pub enum Screen {
     Notice,
     /// A management request got no reply in time; its outcome is unknown.
     NoReply,
+    /// A new pairing was saved and changed another saved device: replaced
+    /// its bond or removed it to make room.
+    Paired,
 }
 
 /// Physical button events (after debouncing).
@@ -107,7 +110,12 @@ pub fn on_button(
 
     match (screen, btn) {
         (
-            Screen::Home | Screen::Connected | Screen::Error | Screen::Notice | Screen::NoReply,
+            Screen::Home
+            | Screen::Connected
+            | Screen::Error
+            | Screen::Notice
+            | Screen::NoReply
+            | Screen::Paired,
             ButtonEvent::Up,
         ) => {
             out.screen = Screen::Managing;
@@ -115,7 +123,7 @@ pub fn on_button(
             out.command = Some(UiCommand::ListPaired);
         }
         (Screen::Error, ButtonEvent::Down)
-        | (Screen::Notice | Screen::NoReply, ButtonEvent::Select) => {
+        | (Screen::Notice | Screen::NoReply | Screen::Paired, ButtonEvent::Select) => {
             out.screen = Screen::Home;
             out.command = Some(UiCommand::Dismiss);
         }
@@ -284,6 +292,15 @@ impl UiState {
     pub fn notice(&mut self, message: &str) {
         self.screen = Screen::Notice;
         self.set_message(message);
+    }
+
+    /// Tell the user what saving a pairing did, unless an error is showing:
+    /// the error is what needs acting on.
+    pub fn paired(&mut self, message: &str) {
+        if self.screen != Screen::Error {
+            self.screen = Screen::Paired;
+            self.set_message(message);
+        }
     }
 
     fn set_message(&mut self, message: &str) {

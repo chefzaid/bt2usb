@@ -91,6 +91,12 @@ pub fn lines(state: &UiState) -> Vec<Line, MAX_LINES> {
             push(&mut out, 28, &state.message);
             push(&mut out, 48, "SELECT: back");
         }
+        Screen::Paired => {
+            push(&mut out, 10, "Paired");
+            push(&mut out, 26, &state.message);
+            push(&mut out, 44, "SELECT: back");
+            push(&mut out, 58, "UP:saved devices");
+        }
         Screen::NoReply => {
             push(&mut out, 10, "No reply");
             push(&mut out, 26, &state.message);

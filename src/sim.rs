@@ -166,6 +166,7 @@ fn describe(out: &mut impl core::fmt::Write, event: &Event<SimAddr>) -> core::fm
         Event::Connected(summary) => write!(out, "Connected '{}'", summary),
         Event::Disconnected => write!(out, "Disconnected"),
         Event::Error(tag) => write!(out, "Error {:?}", tag),
+        Event::Notice(notice) => write!(out, "Notice {:?}", notice),
         Event::PairedDevices { id, devices } => {
             write!(out, "PairedDevices id={} [", id)?;
             for (index, device) in devices.iter().enumerate() {

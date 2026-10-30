@@ -112,6 +112,7 @@ state behind these screens is in the
 | Reset all pairings? | `ConfirmReset` | `Disconnect all`, `> Cancel`, `  Reset` | Highlight Cancel | Highlight Reset | Run the highlighted choice |
 | Complete | `Notice` | `Complete`, `Device forgotten` or `Pairings reset`, `SELECT: back` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
 | No reply | `NoReply` | `No reply`, `Forget result unknown`, `Reset result unknown`, or `List not loaded`, `SELECT: back`, `UP:saved devices` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
+| Paired | `Paired` | `Paired`, `Oldest device removed` or `Replaced old pairing`, `SELECT: back`, `UP:saved devices` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
 
 Lists show four rows at a time and scroll to keep the highlighted row visible.
 A highlighted row that a newer list no longer contains is clamped to the last
@@ -147,6 +148,7 @@ stateDiagram-v2
     Scanning --> Error: none found or scan failed
     DeviceList --> Connecting: SELECT
     Connecting --> Connected: link secured, HID ready
+    Connecting --> Paired: saved, and another device changed
     Connecting --> Error: connection failed
     Home --> Connected: saved device reconnects
     Connected --> Home: DOWN, or last link lost
@@ -170,6 +172,8 @@ stateDiagram-v2
     NoReply --> Managing: UP
     NoReply --> Home: SELECT
     Notice --> Home: SELECT
+    Paired --> Managing: UP
+    Paired --> Connected: SELECT
 ```
 
 Where the diagram returns to Home after a list or notice, the bridge shows
@@ -212,11 +216,17 @@ Some details matter in daily use:
   connect them again or restart the bridge.
 - An explicit connection to a device with saved keys uses those keys and does
   not start a new pairing. If the peripheral no longer accepts them, the link is
-  never encrypted and the attempt fails with `Connect failed` (read from the
-  code path; not yet observed on hardware). Forget the device
+  never encrypted and the attempt fails with `Forget, pair again` (read from
+  the code path; not yet observed on hardware). Forget the device
   on the bridge first; the next explicit connection then pairs from scratch.
-- Saving a fifth device evicts the oldest saved record without a prompt. The
-  only trace is the log line `Paired device store full - evicting oldest entry`.
+  A new pairing that does not complete on a link that stays up shows
+  `Pairing failed`.
+- Saving a fifth device evicts the oldest saved record without a prompt, and
+  the screen then shows Paired with `Oldest device removed`. A new pairing
+  that names the identity of a device saved with other keys replaces that
+  device's keys and shows `Replaced old pairing`; if you did not just pair
+  that device again, the one you chose claimed its identity
+  ([security](security.md#threat-model)).
 
 ### Boot And Reconnect
 
@@ -229,8 +239,8 @@ saved: reconnecting or renaming a saved device does not move it
 ([data model](data-model.md#in-memory-cache)).
 
 Each slot then keeps reconnecting in the background until it succeeds, the
-user gives it another command, or the bridge no longer holds the device's
-keys. An attempt listens for up to 6 seconds for the saved device, recognizing
+user gives it another command, or the device can no longer be reached with
+the keys the bridge holds. An attempt listens for up to 6 seconds for the saved device, recognizing
 it by its identity key, so a rotating private address still matches, or by
 the address it last used. One slot's search also looks for the other slot's device and hands it
 over when it hears it, so a mouse that is asleep never keeps the keyboard
@@ -255,7 +265,10 @@ for a background attempt, nor lets the peer start one
 connect, or secure the device is retried silently, as is a link that drops
 while the bridge discovers its HID service. Other failures, such as a peer
 without a usable HID service or an unreadable Report Map on a link that stays
-up, are shown as errors and stop that slot's retries.
+up, are shown as errors and stop that slot's retries. So are the two that
+another attempt could never fix: the device refused the stored keys
+(`Forget, pair again`), or the bridge no longer holds them
+(`Pair device again`).
 
 Background retries also stop when:
 
@@ -264,7 +277,10 @@ Background retries also stop when:
 - you start a scan while both slots are in use, connected or retrying, which
   disconnects both first;
 - the device connects and is secured but its HID discovery then fails while
-  the link stays up, as above.
+  the link stays up, as above;
+- the device refuses the stored keys, which shows `Forget, pair again`: it
+  lost them, for example by pairing with another computer or by a reset, so
+  forget it in saved devices and select it from a scan to pair it again.
 
 In these cases the record stays saved, and the device comes back when you
 connect it again from a scan, or after a restart if it is one of the two most
@@ -273,7 +289,8 @@ retries of the slots they target, and remove the record.
 
 Saving a fifth device evicts the oldest saved one, its record and its keys
 together, and a slot still retrying it stops and is freed, logging
-`slot N has no keys to reconnect`. A pairing that is never saved, because its
+`slot N has no keys to reconnect` and showing `Pair device again`. A pairing
+that is never saved, because its
 HID discovery failed or it was cancelled, evicts nothing: until a device is
 saved, its keys are held beside the saved devices' keys, and they are
 discarded when its connection ends unsaved.
@@ -290,14 +307,14 @@ The log shows `slot N link lost; reconnecting`, with the slot number. A
 device the bridge holds no keys for, such as one that showed
 `Pairing not saved` or one that paired without bonding, could reconnect only
 by pairing, which a background reconnect never does, so its slot is freed
-instead and the log shows `slot N link lost; no keys to reconnect`; select
-the device from a scan to pair it again. Selecting a device from a scan while
+instead, the screen shows `Pair device again`, and the log shows
+`slot N link lost; no keys to reconnect`; select the device from a scan to
+pair it again. Selecting a device from a scan while
 its slot is reconnecting to it in the background makes that slot connect to
 it at once, keeping a link or attempt already under way. If that connection
 fails, the error shows and the slot goes back to reconnecting in the
-background. A device that lost its own keys, for example by pairing with
-another computer, shows `Connect failed` this way: forget it in saved devices
-and pair it again. A link that drops without a disconnect is detected by the supervision timeout, which
+background, unless the device refused the stored keys
+(`Forget, pair again`). A link that drops without a disconnect is detected by the supervision timeout, which
 is never longer than 4 seconds, whatever the peripheral asks for
 ([Connection And Security](#connection-and-security)).
 
@@ -343,18 +360,23 @@ remaining recovery ([operations](operations.md#a-management-action-stays-pending
 
 ### Notices And Errors
 
-Errors and completion notices stay on screen until acknowledged, and background
+Errors and notices stay on screen until acknowledged, and background
 connection updates or scans do not replace them. A newer error replaces
-whatever is showing, including an earlier error or notice; a completion notice
-never replaces an error. DOWN acknowledges an error,
-SELECT acknowledges a notice; both then return to Connected if a link is up,
-otherwise Home. SELECT on an error starts a new scan instead.
+whatever is showing, including an earlier error or notice; a notice never
+replaces an error. Notices are **Complete** after saved-device management and
+**Paired** when saving a new pairing changed another saved device. DOWN
+acknowledges an error, SELECT acknowledges a notice; both then return to
+Connected if a link is up, otherwise Home. SELECT on an error starts a new
+scan instead, and UP on either opens saved devices.
 
 | Message | What to do |
 | --- | --- |
 | `No devices found` | Put the device in pairing mode, move it closer, and scan again |
 | `Scan failed` | Scan again; if it repeats, check the log |
-| `Connect failed` | Wake the device and scan again; for a peripheral that was paired again elsewhere, forget it on the bridge first |
+| `Connect failed` | Wake the device and scan again; the link did not come up, or dropped before it was secured |
+| `Pairing failed` | Put the device in pairing mode and select it again; the link came up but the new pairing did not complete |
+| `Forget, pair again` | The device refused the keys the bridge holds, because it lost them (a reset, or pairing with another computer): forget it in saved devices, then select it from a scan to pair it again |
+| `Pair device again` | The bridge no longer holds keys for a device it was reconnecting (a newer pairing evicted it, its pairing was not saved, or it paired without bonding): select it from a scan to pair it again |
 | `No HID service` | Check that the device is a BLE HID keyboard or mouse |
 | `Notify failed` | Check that the device is supported; see the log |
 | `HID map read failed` | Retry; record the log for [Report Map interoperability](../TODO.md#ble-central-and-pairing) |
@@ -366,6 +388,8 @@ otherwise Home. SELECT on an error starts a new scan instead.
 | `Busy; try again` | Wait a moment and retry |
 | `Device changed; retry` | Reopen saved devices |
 | `Device forgotten`, `Pairings reset` | Press SELECT |
+| `Oldest device removed` | The store held four devices, so saving this one removed the oldest-added one and its keys; pair that one again if you still use it, which removes the next oldest |
+| `Replaced old pairing` | The new pairing named the identity of a saved device and replaced its keys. Expected when you paired the same device again; otherwise the device you chose claimed another's identity, so forget it and check which device you paired |
 | `Forget result unknown`, `Reset result unknown`, `List not loaded` | Press UP to reopen saved devices and check what is stored; if it happens again, reset the board |
 
 Every cause that raises each message, and the error tag behind it, is listed
@@ -456,7 +480,11 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
 - HID discovery starts only on an encrypted link. The bridge waits up to
   5 seconds for Just Works, MITM, or LE Secure Connections MITM security; signed
   modes are refused because they do not encrypt notifications. The log shows
-  `slot N failed to secure BLE link` when this fails.
+  `slot N failed to secure BLE link: <error>` when this fails. When the link
+  was sent saved keys and the SoftDevice then reports it unencrypted, the
+  peripheral refused them (`peer refused the stored keys`), and the attempt
+  fails with `Forget, pair again` even if the peripheral drops the link
+  afterwards.
 - The application requests a fresh pairing only for a connection the user
   chose from a list. Background reconnects use existing keys, run only while
   the bridge holds them, and never request a replacement pairing. A
@@ -992,15 +1020,17 @@ implemented, so do not describe them as features.
   but the loss policy is not measured
   ([backpressure](../TODO.md#input-aggregation-and-delivery)).
 - **Losing power while saving is untested.** What a power cut during a flash
-  write leaves behind is not known, and there is no documented migration or
-  downgrade path between storage versions
-  ([power-loss-safe persistence](../TODO.md#pairing-storage)).
-- **Errors are coarse and some events are silent.** A link that cannot be
-  secured shows only `Connect failed`, a failed save only `Storage failed`, a
-  fifth saved device replaces the oldest without a prompt, and an unsupported
-  report is dropped without a message. After a **No reply** timeout the BLE
-  task may still be stuck; only a board reset recovers it until a watchdog
-  exists ([visible errors](../TODO.md#ui-display-and-power),
+  write leaves behind is not known, and firmware from before the versioned
+  store format overwrites the store if flashed over this one
+  ([wire versions](data-model.md#wire-versions-and-upgrade-paths),
+  [power-loss-safe persistence](../TODO.md#pairing-storage)).
+- **Some events are still silent or after the fact.** An unsupported report
+  is dropped without a message, a fifth saved device replaces the oldest
+  without a prompt (the notice comes once it is done), and a peripheral that
+  neither encrypts with its stored keys nor reports refusing them is retried
+  as a failed link. After a **No reply** timeout the BLE task may still be
+  stuck; only a board reset recovers it until a watchdog exists
+  ([unsupported reports](../TODO.md#ui-display-and-power),
   [watchdog](../TODO.md#platform-memory-and-recovery)).
 - **Power use is not measured.** The bridge keeps its radio and links active
   while the PC sleeps; whether a given hub accepts that current is untested

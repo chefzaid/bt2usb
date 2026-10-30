@@ -373,3 +373,32 @@ fn only_saved_device_commands_are_management_requests() {
         assert!(!command.is_management());
     }
 }
+
+#[test]
+fn a_pairing_notice_is_acknowledged_with_select_or_opens_the_saved_list() {
+    let mut state = UiState::new();
+    state.screen = Screen::Connecting;
+    state.paired("Oldest device removed");
+    assert_eq!(state.screen, Screen::Paired);
+    // A link update does not hide it.
+    state.connection_status(Some(heapless::String::try_from("Keyboard").unwrap()));
+    assert_eq!(state.screen, Screen::Paired);
+    assert_eq!(state.button(ButtonEvent::Down), None);
+    assert_eq!(state.screen, Screen::Paired);
+    assert_eq!(state.button(ButtonEvent::Select), Some(UiCommand::Dismiss));
+    assert_eq!(state.screen, Screen::Connected);
+    assert!(state.message.is_empty());
+
+    state.paired("Replaced old pairing");
+    assert_eq!(state.button(ButtonEvent::Up), Some(UiCommand::ListPaired));
+    assert_eq!(state.screen, Screen::Managing);
+}
+
+#[test]
+fn a_pairing_notice_waits_behind_an_error() {
+    let mut state = UiState::new();
+    state.error("Storage failed");
+    state.paired("Oldest device removed");
+    assert_eq!(state.screen, Screen::Error);
+    assert_eq!(state.message, "Storage failed");
+}

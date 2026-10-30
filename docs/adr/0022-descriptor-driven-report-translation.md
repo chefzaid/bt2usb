@@ -328,8 +328,8 @@ descriptor-driven HID report translation". It unblocks "Descriptor-driven
 report translation", the acceptance of "Report Map interoperability and legacy
 policy", the BLE side of "More than six keys on the USB keyboard" and
 "High-resolution mouse movement and scrolling", a role for "Power, sleep, and
-wake keys", "Per-peripheral quirks" (which would patch the table), and the
-unsupported-report case of "Visible storage/security errors".
+wake keys", "Per-peripheral quirks" (which would patch the table), and "Tell
+the user about unsupported reports".
 
 ### Verification Status
 

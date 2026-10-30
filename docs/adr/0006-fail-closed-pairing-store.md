@@ -158,10 +158,8 @@ Negative:
 - A failed save after a new pairing leaves the bond in the bonder and the
   in-memory store but not in flash. The peer keeps working until the next
   reset or power loss; if no later save succeeds before then, the bond is lost
-  and the peer must be paired again. The UI shows only the generic
-  "Storage failed", which does not say that the new peer was not saved
-  ("Visible storage/security errors" in
-  [TODO.md](../../TODO.md#ui-display-and-power)).
+  and the peer must be paired again. Since 2026-10-30 the UI says so with
+  "Kept until power-off" instead of the generic "Storage failed".
 - A store that is not writable stops new pairings from persisting until the user
   runs Factory reset, and that reset discards every record in the region,
   including any that were intact.
@@ -169,7 +167,8 @@ Negative:
   its worker was stopped before the write.
 - Logical deletion is not physical key erasure; `sequential-storage` appends,
   so older records can remain in flash until garbage collection.
-- A full store evicts the oldest peer with only a log line.
+- A full store evicts the oldest peer without asking first; since 2026-10-30
+  the UI shows "Oldest device removed" once the new peer is saved.
 - The flash I/O, write retries, and SoftDevice type conversion in the
   `storage.rs` shell are not host-tested; the load, legacy parsing, merge, and
   eviction rules are, since 2026-10-10.
@@ -186,7 +185,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   version.
 - ["Visible storage/security errors"](../../TODO.md#ui-display-and-power):
   surface full-store replacement and persistence failures, including a new
-  pairing that was not saved, with useful actions.
+  pairing that was not saved, with useful actions. Done 2026-10-30; on-air
+  evidence is still pending.
 - "Provisioning and physical key protection": readout protection and key
   lifetime for the keys this store holds.
 - ["Host tests for the device store"](../../TODO.md#verification-and-code-quality)

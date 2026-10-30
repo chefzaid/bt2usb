@@ -208,7 +208,7 @@ Do these with the nRF USB port still plugged straight into the PC. Useful log
 lines: `BLE scan starting (8 s window)`, `BLE scan complete - N devices found`,
 `slot N connecting to NAME`, and
 `Subscribed to N of M HID report characteristics`. A peer whose link cannot be
-encrypted logs `slot N failed to secure BLE link` and is not used. Pairing is
+encrypted logs `slot N failed to secure BLE link: <error>` and is not used. Pairing is
 currently unauthenticated Just Works bonding; see
 [ADR 0011](adr/0011-interim-just-works-pairing.md) and the
 [security reference](security.md#pairing-and-authentication).
@@ -263,9 +263,11 @@ currently unauthenticated Just Works bonding; see
 - [ ] **Saved device that will not connect:** pair the saved mouse with
       another computer (or clear its pairings) so it advertises but refuses
       the bridge, switch the keyboard off, reset the board, and switch the
-      keyboard on. The log repeats `slot N failed to secure BLE link` or
-      failed attempts for the mouse, and the keyboard still connects within
-      a few seconds of advertising. Record the time.
+      keyboard on. The log shows `peer refused the stored keys` and
+      `slot N failed to secure BLE link: KeysRejected` for the mouse, whose
+      slot stops retrying with `Forget, pair again` on the OLED (record it if
+      the log repeats `ConnectFailed` instead), and the keyboard still
+      connects within a few seconds of advertising. Record the time.
 - [ ] **No stuck keys:** hold a key down, and while holding it switch the
       keyboard off (or pull its battery). Within about 4 s the key stops
       repeating on the PC. The 4 s is the BLE supervision timeout
@@ -286,8 +288,8 @@ currently unauthenticated Just Works bonding; see
       `slot N connecting to NAME` line per attempt and no second slot used.
       Then pair the keyboard with another computer, switch it off and on so
       the slot retries again, and select it: the screen shows
-      `Connect failed`, and the log keeps showing reconnect attempts for that
-      slot afterwards.
+      `Forget, pair again`, and the log shows no further reconnect attempts
+      for that slot.
 - [ ] **Stack:** after all of the above, the latest `stack high-water` line is
       well under half of the total. Recorded: ______ bytes.
 - [ ] **Counters:** the counts start at zero at every boot, and a slot
@@ -371,11 +373,12 @@ list ends with a "Factory reset" entry, and UP on the first entry goes back.
       afterwards.
 - [ ] **Fifth device:** with four test devices saved, the oldest still
       powered and reconnecting, pair a fifth. The log shows
-      `Paired device store full - evicting oldest entry`; the oldest device
+      `Paired device store full - evicting oldest entry` and the screen
+      shows **Paired** with `Oldest device removed`; the oldest device
       leaves the "Saved devices" list, and when its link next drops or the
       board resets it no longer reconnects (`slot N link lost; no keys to
       reconnect` if its link was up, `slot N has no keys to reconnect` if
-      its slot was retrying). After a reset the two most recently added
+      its slot was retrying, each with `Pair device again` on the OLED). After a reset the two most recently added
       saved devices reconnect, since power-up gives a slot only to those
       ([reconnecting saved peripherals](operations.md#reconnecting-saved-peripherals)),
       and the other two connect when selected from a scan.

@@ -2,8 +2,9 @@
 //! and the answer to a peripheral's connection parameter request.
 //!
 //! [`Bonder`] keeps the bonds loaded from flash and those made since boot,
-//! finds a bonded peer's keys when a link is encrypted again, and replaces only
-//! the bonding peer's own record on a new pairing. The pure
+//! finds a bonded peer's keys when a link is encrypted again, notes a link
+//! whose peer refused them, and replaces only the bonding peer's own record
+//! on a new pairing. The pure
 //! [`bond_table`](crate::ble::bond_table)
 //! keeps a new pairing apart from the saved devices' keys until the store
 //! saves it, so the keys in RAM follow the store's records. Its
@@ -49,19 +50,70 @@ pub(crate) fn key_matches(key: &IdentityKey, address: Address) -> bool {
     key.is_match(address) && (irk_present(&key.as_raw().id_info.irk) || key.addr == address)
 }
 
+/// Whether a security mode encrypts the link. Signed modes authenticate
+/// individual writes but do not encrypt the link, so they cannot protect
+/// incoming HID notifications.
+pub(crate) fn encrypts(mode: SecurityMode) -> bool {
+    matches!(
+        mode,
+        SecurityMode::JustWorks | SecurityMode::Mitm | SecurityMode::LescMitm
+    )
+}
+
+/// Links a security callback flagged, by peer address, until the slot worker
+/// reads the flag. One entry per connection; the oldest goes when full.
+struct LinkFlags(RefCell<Vec<Address, BLE_MAX_CONNECTIONS>>);
+
+impl LinkFlags {
+    fn new() -> Self {
+        Self(RefCell::new(Vec::new()))
+    }
+
+    fn set(&self, link: Address) {
+        let mut links = self.0.borrow_mut();
+        if links.contains(&link) {
+            return;
+        }
+        if links.is_full() {
+            links.remove(0);
+        }
+        let _ = links.push(link);
+    }
+
+    /// Whether `link` was flagged, clearing the flag.
+    fn take(&self, link: Address) -> bool {
+        let mut links = self.0.borrow_mut();
+        match links.iter().position(|flagged| *flagged == link) {
+            Some(index) => {
+                links.remove(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn clear(&self) {
+        self.0.borrow_mut().clear();
+    }
+}
+
 pub(crate) struct Bonder {
     /// The saved devices' keys and those of pairings not saved yet.
     peers: RefCell<BondTable<BondInfo, BOND_SLOTS>>,
-    /// The addresses of links whose pairing named an identity the store
-    /// refuses, until [`Self::take_refused`] reports them.
-    refused: RefCell<Vec<Address, BLE_MAX_CONNECTIONS>>,
+    /// Links whose pairing named an identity the store refuses, until
+    /// [`Self::take_refused`] reports them.
+    refused: LinkFlags,
+    /// Links that stayed unencrypted after the stored keys were sent, until
+    /// [`Self::take_keys_rejected`] reports them.
+    keys_rejected: LinkFlags,
 }
 
 impl Bonder {
     fn new() -> Self {
         Self {
             peers: RefCell::new(BondTable::new()),
-            refused: RefCell::new(Vec::new()),
+            refused: LinkFlags::new(),
+            keys_rejected: LinkFlags::new(),
         }
     }
 
@@ -80,14 +132,13 @@ impl Bonder {
     /// Whether the pairing on the link to `address` was refused, forgetting
     /// the refusal.
     pub(crate) fn take_refused(&self, address: Address) -> bool {
-        let mut refused = self.refused.borrow_mut();
-        match refused.iter().position(|link| *link == address) {
-            Some(index) => {
-                refused.remove(index);
-                true
-            }
-            None => false,
-        }
+        self.refused.take(address)
+    }
+
+    /// Whether the peer at `address` refused the stored keys since the last
+    /// call: the link's security was updated without encryption.
+    pub(crate) fn take_keys_rejected(&self, address: Address) -> bool {
+        self.keys_rejected.take(address)
     }
 
     /// Hold exactly the store's bonds, all saved.
@@ -145,7 +196,8 @@ impl Bonder {
 
     pub(crate) fn clear(&self) {
         self.peers.borrow_mut().clear();
-        self.refused.borrow_mut().clear();
+        self.refused.clear();
+        self.keys_rejected.clear();
     }
 }
 
@@ -172,21 +224,16 @@ impl SecurityHandler for Bonder {
             warn!("Bond refused: this link was not opened for pairing");
             return;
         }
-        let mut refused = self.refused.borrow_mut();
-        refused.retain(|refused_link| *refused_link != link);
+        self.refused.take(link);
         // The peer chose its identity address. The store refuses one that is
         // not public or random static (a reload would refuse the whole store),
         // so keep no such bond: it would only displace a valid one here.
         // `execute_action` reports the refusal when the link is persisted.
         if !is_identity_address(peer_id.addr) {
             warn!("Bond refused: identity address is not public or random static");
-            if refused.is_full() {
-                refused.remove(0);
-            }
-            let _ = refused.push(link);
+            self.refused.set(link);
             return;
         }
-        drop(refused);
         let bond = BondInfo {
             master_id,
             key,
@@ -218,8 +265,15 @@ impl SecurityHandler for Bonder {
         })
     }
 
-    fn on_security_update(&self, _conn: &Connection, mode: SecurityMode) {
+    fn on_security_update(&self, conn: &Connection, mode: SecurityMode) {
         info!("BLE security mode updated: {}", mode);
+        // `sd_ble_gap_encrypt` reports its result only through this update,
+        // so one that leaves the link unencrypted is the peer refusing the
+        // keys sent: it has none for this bridge any more.
+        if !encrypts(mode) {
+            warn!("peer refused the stored keys");
+            self.keys_rejected.set(conn.peer_address());
+        }
     }
 
     fn conn_param_update_request(

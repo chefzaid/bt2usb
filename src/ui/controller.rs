@@ -13,7 +13,7 @@
 use heapless::Vec;
 
 use crate::ble::coordinator::ErrorTag;
-use crate::ble::messages::{Command, Event};
+use crate::ble::messages::{Command, Event, PairingNotice};
 use crate::config::{MAX_PAIRED_DEVICES, UI_MANAGEMENT_TIMEOUT_SECS};
 use crate::ui::input_logic::next_scan_dots;
 use crate::ui::ui_logic::{ButtonEvent, Screen, UiCommand, UiState};
@@ -168,6 +168,7 @@ impl<A: Clone> UiController<A> {
             Event::Connected(name) => self.state.connection_status(Some(name)),
             Event::Disconnected => self.state.connection_status(None),
             Event::Error(tag) => self.state.error(error_message(tag)),
+            Event::Notice(notice) => self.state.paired(notice_message(notice)),
             Event::PairedDevices { id, devices } => {
                 if self.management.complete(id) == Some(UiCommand::ListPaired) {
                     self.paired.clear();
@@ -228,6 +229,21 @@ pub fn error_message(tag: ErrorTag) -> &'static str {
         ErrorTag::ReportMapReadFailed => "HID map read failed",
         ErrorTag::ReportMapTooLarge => "HID map too large",
         ErrorTag::ReportMapInvalid => "Unsupported HID map",
+        ErrorTag::PairingFailed => "Pairing failed",
+        // Its keys on the bridge must go before it can pair again.
+        ErrorTag::KeysRejected => "Forget, pair again",
+        // Selecting it from a scan pairs it again.
+        ErrorTag::KeysMissing => "Pair device again",
+        // It works now; after power-off it must be paired again.
+        ErrorTag::NotPersisted => "Kept until power-off",
+    }
+}
+
+/// The text the UI shows for what saving a pairing did.
+pub fn notice_message(notice: PairingNotice) -> &'static str {
+    match notice {
+        PairingNotice::ReplacedBond => "Replaced old pairing",
+        PairingNotice::RemovedOldest => "Oldest device removed",
     }
 }
 

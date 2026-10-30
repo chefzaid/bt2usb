@@ -122,14 +122,13 @@ module that imports a hardware crate stops `cargo test` from building.
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
 
-`lib.rs` mounts the shared files with `#[path]` attributes and re-exports them
-through `pub mod ble`, `pub mod ui`, and `pub mod power_logic` facades, so a
-path such as `crate::ble::coordinator` resolves the same way in the library and
-the firmware. `hid` is exported whole. `storage::{codec, devices, framing,
-record}` are compiled into the library only under `cfg(test)`, inside an inline
-`storage` module so that they reach each other through `super::` in both
-builds; the `storage` shell is not, because it converts SoftDevice address and
-key types and does the flash I/O.
+`lib.rs` declares the shared files in inline `ble`, `ui`, and `storage`
+modules that list only the pure files of those directories, so a path such as
+`crate::ble::coordinator` resolves the same way in the library and the
+firmware. `hid` is declared whole. `storage::{codec, devices, framing, record}`
+are compiled into the library only under `cfg(test)`; the `storage` shell is
+not, because it converts SoftDevice address and key types and does the flash
+I/O.
 
 ```mermaid
 flowchart TD

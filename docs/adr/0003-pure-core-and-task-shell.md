@@ -38,7 +38,7 @@ The decision recorded here was implemented on 2026-06-22:
   whose "imperative shell" is the task code.
 - `e3bc620` removed the duplicate ("Unify HID classification on the real hid
   module (drop lib.rs duplicate + dead hid/tests.rs)"). `src/lib.rs` became a
-  list of `#[path]` includes of the firmware's own files and is now 179 lines.
+  list of includes of the firmware's own files, 92 lines since 2026-10-30.
 
 The 2026-09-28 hardening (`2479c79`) followed the same pattern for everything
 it added: input aggregation, endpoint delivery, wake policy, long reads,
@@ -80,9 +80,9 @@ Rules for the core:
   [delivery.rs](../../src/hid/delivery.rs) is the production endpoint worker,
   written against `DeliveryQueue`, `ReportSink`, and `RetryClock`, so host
   tests run that exact function against fake endpoints and a fake clock.
-- There is one implementation. `src/lib.rs` includes the firmware's own files
-  through `#[path]`; the bridge, the self-test, and the Renode simulation use
-  the same modules.
+- There is one implementation. `src/lib.rs` declares the firmware's own files
+  in inline module trees; the bridge, the self-test, and the Renode simulation
+  use the same modules.
 
 Rules for the shell:
 
@@ -176,13 +176,14 @@ Follow-up obligations:
   `hid` verbatim, includes `ble/adv_parser.rs`, `ble/bond_table.rs`,
   `ble/conn_params.rs`, `ble/coordinator.rs`, `ble/reconnect.rs`,
   `ble/scan_list.rs`, `ble/long_read.rs`, `ble/management.rs`,
-  `ble/messages.rs`, `ble/pnp_id.rs`, `power_logic.rs`, and the five pure
-  `ui` files (`controller.rs`, `display_logic.rs`, `input_logic.rs`,
-  `layout.rs`, `ui_logic.rs`) through `#[path]`, and
+  `ble/messages.rs`, `ble/pnp_id.rs`, and the five pure `ui` files
+  (`controller.rs`, `display_logic.rs`, `input_logic.rs`, `layout.rs`,
+  `ui_logic.rs`) in inline `ble` and `ui` modules (through `#[path]` re-export
+  facades until 2026-10-30), `power_logic.rs` as an ordinary module, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
   under `#[cfg(test)]`, in an inline `storage` module. It declares `config`
   and, since 2026-10-11, `diagnostics` and `stack_logic` as ordinary modules.
-- The self-test includes `ble/adv_parser.rs` through `#[path]`, and the
+- The self-test declares `ble/adv_parser.rs` in an inline `ble` module, and the
   simulation compiles the same pure modules and the four `storage` files for
   the ARM target and runs the coordinator, management, the device store,
   `ui::controller`, and `ui::layout` there

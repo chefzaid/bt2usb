@@ -294,7 +294,7 @@ The bridge stays bus-powered; provisioning only adds one power cycle.
 
 | Concern | Where |
 | --- | --- |
-| Policy word, record, build-code classes, `boot_plan` | New pure `src/provisioning.rs`, in the host library through `#[path]` like `ble/conn_params.rs`; tests in `src/provisioning_tests.rs` |
+| Policy word, record, build-code classes, `boot_plan` | New pure `src/provisioning.rs`, declared in the host library; tests in `src/provisioning_tests.rs` |
 | Policy selection | `BT2USB_DEBUG_POLICY` and `bt2usb_debug_locked` in [build.rs](../../build.rs); a second build in the `embedded` job of `.github/workflows/ci.yml` |
 | Boot shell | A `debug_port` helper called by `main` ([main.rs](../../src/main.rs)): record and FICR reads, `nrf_config.debug`, the Force write through `embassy_nrf::pac` (`unstable-pac` is enabled), the log line |
 | Reset steps | `DeviceList::reset` in [devices.rs](../../src/storage/devices.rs) returns the ordered steps in place of `erase_first`; tests beside the existing reset cases in `devices_format_tests.rs` |

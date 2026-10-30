@@ -108,9 +108,9 @@ full test name to run one test, and `-- --nocapture` to see its output.
 ### Host Library Composition
 
 [lib.rs](../src/lib.rs) is `no_std` except under `cfg(test)`. It declares
-`hid` as an ordinary module and pulls the other pure modules in by `#[path]`,
-re-exporting them through its own inline `ble`, `ui`, and `power_logic`
-modules, so firmware and tests compile the same files:
+`hid` as an ordinary module and the other pure modules in inline `ble`, `ui`,
+and `storage` modules that name only the pure files, so firmware and tests
+compile the same files:
 
 | Compiled into the host library | Not compiled into the host library |
 | --- | --- |

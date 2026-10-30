@@ -279,7 +279,7 @@ bytes of statics plus a task future under 200 bytes, one wake-up per second.
 
 | Concern | Where |
 | --- | --- |
-| Policy | New `src/watchdog_logic.rs`, in the host library through `#[path]`: `LeaseSlot`, `Checkpoint`, budgets, `Lease`, `LeaseGuard`, `Supervisor`, `ResetCause`, `ResetRecord`, `boot_decision` |
+| Policy | New `src/watchdog_logic.rs`, declared in the host library: `LeaseSlot`, `Checkpoint`, budgets, `Lease`, `LeaseGuard`, `Supervisor`, `ResetCause`, `ResetRecord`, `boot_decision` |
 | Constants | `WDT_TIMEOUT_SECS`, `WDT_SUPERVISOR_PERIOD_MS`, `WDT_STABLE_UPTIME_SECS`, `WDT_MAX_EARLY_RESETS`, `ATT_TRANSACTION_TIMEOUT_MS` in [config.rs](../../src/config.rs) |
 | Shell | New `src/watchdog.rs`: lease statics, `arm`, `start`, `watchdog_task`, reset reason, `.uninit` record joined with the overflow record; boot steps in [main.rs](../../src/main.rs); the fault PC in `HardFault` in [stack.rs](../../src/stack.rs) |
 | Leases | [multi_conn.rs](../../src/ble/multi_conn.rs), [slot_worker.rs](../../src/ble/slot_worker.rs), [slot_link.rs](../../src/ble/slot_link.rs), `run_usb_device` in [hid_device.rs](../../src/usb/hid_device.rs), the `main` tick |

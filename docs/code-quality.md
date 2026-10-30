@@ -135,7 +135,7 @@ component).
 its roots as `build.rs`, `src/lib.rs`, `src/main.rs`, `src/selftest.rs`,
 `src/sim.rs`, `tests/integration.rs`, `tests/oled_font.rs`, and
 `tests/vendor_portal.rs`; rustfmt follows each root's module tree, including
-the `#[path]` modules in `lib.rs`. `tests/vendor_portal.rs` marks its two
+the inline modules in `lib.rs`. `tests/vendor_portal.rs` marks its two
 `#[path]` modules into `vendor/` with `#[rustfmt::skip]`, so rustfmt does not
 follow them.
 

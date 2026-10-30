@@ -8,6 +8,22 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Strongest-First Scan List
+
+This record covers the commit that checks off the P2 item "List scan results
+strongest first" in [TODO.md](../TODO.md#clearer-bridge-screens): a finished
+user scan's list is sorted by signal strength (`strongest_first` in
+`src/ble/scan_list.rs`) before `src/ble/scanner.rs` reports it, so the Select
+device screen and `Command::Connect`'s index share that order. The
+simulation now hears its mouse before its keyboard and sorts the same way.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Local CI script | Format, host and three firmware Clippy configurations, host tests, rustdoc, documentation checks, release and simulation builds | Passed |
+| Scan-list tests | `cargo test --locked --lib scan_list` | 9 passed, 1 new: order, ties, an unavailable reading, an already sorted list, and an empty one |
+| Renode | `renode-test renode/bt2usb-sim.robot` with the local platform copy without `ApplySVD` | 3 of 3 passed; the scan reports `DeviceFound 'Keyboard'` before `'Mouse'` and the panel shows `> Keyboard` first, although the mouse is heard first |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed after the Test Map row (9) and totals (496, 483) were updated |
+
 ## Validation Record — 2026-10-30, Plan Status Check
 
 This record covers the commit that checks off the P2 item "Check the Status

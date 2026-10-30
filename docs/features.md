@@ -42,7 +42,7 @@ are not translated.
 
 | Capability | Status | Source | More detail |
 | --- | --- | --- | --- |
-| BLE scan with HID filtering and name merging | Software-verified (parsing, merging) | [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/adv_parser.rs`](../src/ble/adv_parser.rs), [`ble/scan_list.rs`](../src/ble/scan_list.rs) | [Scanning](#scanning) |
+| BLE scan with HID filtering, name merging, and strongest-first listing | Software-verified (parsing, merging, ordering) | [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/adv_parser.rs`](../src/ble/adv_parser.rs), [`ble/scan_list.rs`](../src/ble/scan_list.rs) | [Scanning](#scanning) |
 | Just Works bonding with encrypted links required | Implemented | [`ble/bonder.rs`](../src/ble/bonder.rs), [`ble/bond_table.rs`](../src/ble/bond_table.rs), [`ble/slot_link.rs`](../src/ble/slot_link.rs) | [Connection And Security](#connection-and-security), [ADR 0011](adr/0011-interim-just-works-pairing.md) |
 | Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/bonder.rs`](../src/ble/bonder.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification, subscription decisions) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`ble/hid_gatt.rs`](../src/ble/hid_gatt.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
@@ -442,6 +442,10 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
 - A device is listed only if its advertisement carries the HID service UUID
   `0x1812` in a complete or incomplete 16-bit UUID list (AD types `0x03` and
   `0x02`). At most eight devices are kept per scan.
+- The Select device list shows them strongest signal first, so a device held
+  next to the bridge is at the top; equal signals keep the order they were
+  first heard in (`strongest_first` in
+  [`ble/scan_list.rs`](../src/ble/scan_list.rs)).
 - Names come from the Complete Local Name (`0x09`), preferred over the
   Shortened Local Name (`0x08`). Names must be valid UTF-8 and are truncated at
   a character boundary to 32 bytes; a device without a name is listed as

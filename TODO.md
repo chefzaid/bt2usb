@@ -38,8 +38,8 @@ probe, or USB host to close.
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
-| [Product Extensions](#product-extensions) | 0 | 32 | 0 |
-| **Total** | **157** | **68** | **20** |
+| [Product Extensions](#product-extensions) | 1 | 31 | 0 |
+| **Total** | **158** | **67** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1512,8 +1512,8 @@ and the Renode scenario, which reads each screen back from the modelled panel,
 verify them; a board confirms them with the rest of the
 [first-flash checklist](docs/first-flash.md).
 
-- [ ] **P2** **List scan results strongest first.** The Select device list
-  keeps the order in which the scan first heard each HID advertiser
+- [x] **P2** **List scan results strongest first.** The Select device list
+  kept the order in which the scan first heard each HID advertiser
   (`merge_advertisement` in `src/ble/scan_list.rs` appends a newcomer, or puts
   it in the weakest one's place when the list is full), so the keyboard in
   pairing mode next to the bridge can sit below a neighbour's. Sort the list
@@ -1522,7 +1522,11 @@ verify them; a board confirms them with the rest of the
   keep the order heard, and a device without a measured signal goes last.
   Accept when scan-list tests cover the order, ties, and an unmeasured signal,
   and the Renode scenario, whose scan hears its weaker mouse first, lists the
-  keyboard first ([features](docs/features.md#scanning)).
+  keyboard first ([features](docs/features.md#scanning)). Done 2026-10-30:
+  `strongest_first` in `src/ble/scan_list.rs`, called by `src/ble/scanner.rs`
+  and `src/sim_ble.rs` before the list is reported
+  ([validation record](docs/validation-records.md#validation-record--2026-10-30-strongest-first-scan-list))
+  *(hardware evidence pending)*.
 - [ ] **P2** **Name both connected devices.** With two links up, the Connected
   screen shows `2 devices` (`connection_summary` in `src/ble/coordinator.rs`),
   so a glance cannot tell whether the mouse came back after it slept. Show

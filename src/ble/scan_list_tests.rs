@@ -143,3 +143,29 @@ fn zero_capacity_list_stays_empty() {
     assert!(!merge_advertisement(&mut found, 1, -40, HID_ADV));
     assert!(found.is_empty());
 }
+
+#[test]
+fn a_finished_scan_lists_the_strongest_first_and_keeps_ties_in_order_heard() {
+    let mut found = heapless::Vec::<_, 6>::new();
+    for (address, rssi) in [
+        (1u8, -70),
+        (2, RSSI_UNAVAILABLE),
+        (3, -40),
+        (4, -70),
+        (5, -55),
+        (6, -40),
+    ] {
+        assert!(merge_advertisement(&mut found, address, rssi, HID_ADV));
+    }
+    let order = |found: &heapless::Vec<DeviceInfo<Addr>, 6>| -> Vec<Addr, 6> {
+        found.iter().map(|device| device.address).collect()
+    };
+    strongest_first(&mut found);
+    assert_eq!(order(&found).as_slice(), &[3, 6, 5, 1, 4, 2]);
+    strongest_first(&mut found);
+    assert_eq!(order(&found).as_slice(), &[3, 6, 5, 1, 4, 2]);
+
+    let mut empty = heapless::Vec::<DeviceInfo<Addr>, 2>::new();
+    strongest_first(&mut empty);
+    assert!(empty.is_empty());
+}

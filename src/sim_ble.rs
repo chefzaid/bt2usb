@@ -8,7 +8,7 @@
 //! disconnect, a scan hears the fixed advertisements in [`AIRWAVES`], and the
 //! pairing item is written to RAM and read back. What runs is the firmware's
 //! decision code: `coordinator::{plan_*, on_slot_*, link_state}`,
-//! `scan_list::merge_advertisement`,
+//! `scan_list::{merge_advertisement, strongest_first}`,
 //! `management::{forget_targets, Quiescence, commit}`, and
 //! `storage::devices::DeviceList` with its record codec and framing, called in
 //! the order `ble::coordinator_loop` calls them.
@@ -70,8 +70,9 @@ const PHONE: Advertiser = Advertiser {
     data: &[0x02, 0x01, 0x06, 0x06, 0x09, b'P', b'h', b'o', b'n', b'e'],
 };
 
-/// Everything a simulated scan hears, in the order it hears it.
-const AIRWAVES: [Advertiser; 3] = [KEYBOARD, PHONE, MOUSE];
+/// Everything a simulated scan hears, in the order it hears it: the mouse
+/// first, so the list shows the stronger keyboard above it only once sorted.
+const AIRWAVES: [Advertiser; 3] = [MOUSE, PHONE, KEYBOARD];
 
 fn peripheral(advertiser: &Advertiser) -> DeviceInfo<SimAddr> {
     DeviceInfo {
@@ -343,24 +344,22 @@ impl SimBle {
     }
 
     /// A user scan: merge every advertisement heard through the firmware's
-    /// scan reducer and report each HID device that enters the list.
+    /// scan reducer, then report the list strongest first, as `ble::scanner`
+    /// does when its window closes.
     fn run_scan(&mut self, console: &mut Console, events: &mut Events) {
         self.scan.clear();
         let _ = events.push(Event::ScanStarted);
         for advertiser in &AIRWAVES {
-            let listed = scan_list::merge_advertisement(
+            scan_list::merge_advertisement(
                 &mut self.scan,
                 advertiser.address,
                 advertiser.rssi,
                 advertiser.data,
             );
-            if let Some(device) = self
-                .scan
-                .iter()
-                .find(|device| listed && device.address == advertiser.address)
-            {
-                let _ = events.push(Event::DeviceFound(device.clone()));
-            }
+        }
+        scan_list::strongest_first(&mut self.scan);
+        for device in &self.scan {
+            let _ = events.push(Event::DeviceFound(device.clone()));
         }
         slog!(
             console,

@@ -1,11 +1,12 @@
 //! The bounded device list a user scan builds: which advertisers enter it,
-//! which one a newcomer replaces when it is full, and what a later response
-//! from a listed device updates.
+//! which one a newcomer replaces when it is full, what a later response from
+//! a listed device updates, and the order the user sees it in.
 //!
 //! Pure and SoftDevice-free like [`coordinator`](crate::ble::coordinator),
 //! whose [`DeviceInfo`] entries it holds, so host tests run it directly (see
 //! docs/architecture.md#module-layers-and-dependency-rules). The live scan in
-//! `ble::scanner` and the Renode simulation both call [`merge_advertisement`].
+//! `ble::scanner` and the Renode simulation both call [`merge_advertisement`]
+//! and then [`strongest_first`].
 
 use crate::ble::coordinator::DeviceInfo;
 use heapless::Vec;
@@ -69,6 +70,29 @@ pub fn merge_advertisement<A: PartialEq, const N: usize>(
             true
         }
         _ => false,
+    }
+}
+
+/// Order a finished scan's list strongest signal first, so the device in
+/// pairing mode next to the bridge tops the Select device screen. Equal
+/// signals keep the order heard, and an unavailable reading goes last. Run it
+/// before the list is reported: `Command::Connect` indexes the same list.
+pub fn strongest_first<A, const N: usize>(found: &mut Vec<DeviceInfo<A>, N>) {
+    // An insertion sort: stable, without the allocation `sort_by_key` needs.
+    let list = found.as_mut_slice();
+    for end in 1..list.len() {
+        let Some(rank) = list.get(end).map(|device| signal_rank(device.rssi)) else {
+            break;
+        };
+        // The sorted prefix is strongest first, so the first weaker entry is
+        // where this one belongs, after every entry as strong as it.
+        let place = list
+            .iter()
+            .take(end)
+            .position(|listed| signal_rank(listed.rssi) < rank);
+        if let Some(run) = place.and_then(|start| list.get_mut(start..=end)) {
+            run.rotate_right(1);
+        }
     }
 }
 

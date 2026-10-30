@@ -74,7 +74,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot state and command reducers; the slot-event reducers are in its child module [coordinator_events.rs](../src/ble/coordinator_events.rs) |
 | [ble/coordinator_loop.rs](../src/ble/coordinator_loop.rs) | Pure core | The BLE coordinator task's loop, generic over the store, scanner, and channels (`CoordinatorIo`): power-up reconnects, UI commands before slot events, the reducers' actions, and the Forget and factory-reset transaction; host fault tests run it on a scripted bench |
-| [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates |
+| [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates, strongest-first order |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/slot_policy.rs](../src/ble/slot_policy.rs) | Pure core | A connection slot's decisions: the error a link that would not encrypt fails with, and whether the slot reconnects in the background, reports an error, or resumes the retry a user's connection replaced once an attempt ends |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
@@ -406,9 +406,10 @@ which can be too late for a firmware setup key.
    the eight strongest HID advertisers rather than the first eight heard.
 3. The scan stops at the 8-second deadline, checked when an advertisement
    arrives, or at a 10-second wall-clock backstop
-   (`"BLE scan hit hard timeout backstop"`). The GAP lock is released before
-   `DeviceFound` events and `ScanComplete` are sent. The coordinator keeps the
-   result as its connect snapshot.
+   (`"BLE scan hit hard timeout backstop"`). The GAP lock is released, the
+   list is put strongest first (`strongest_first`), and then the `DeviceFound`
+   events and `ScanComplete` are sent. The coordinator keeps the result, in
+   that order, as its connect snapshot.
 4. The UI collects names while on Scanning and moves to the device list, or to
    "No devices found" when the list is empty.
 5. SELECT on a device yields `Connect(index)`. `plan_connect` checks the index

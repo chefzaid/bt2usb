@@ -10,7 +10,7 @@ use core::cell::RefCell;
 use crate::ble::bonder::key_matches;
 use crate::ble::coordinator::MAX_CONNECTIONS;
 use crate::ble::reconnect::{self, owner_of, ReconnectTable, Recorded, ScanDuty};
-use crate::ble::scan_list::merge_advertisement;
+use crate::ble::scan_list::{merge_advertisement, strongest_first};
 use crate::ble::{BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::{
     BLE_FAILED_RECONNECT_HOLDOFF_MS, BLE_FAST_RECONNECT_SECS, BLE_FAST_SCAN_INTERVAL,
@@ -180,9 +180,9 @@ pub struct ScanResult {
 /// Run a BLE scan for `BLE_SCAN_DURATION_SECS` seconds.
 ///
 /// Discovered HID peripherals are buffered during the scan (the SoftDevice scan
-/// callback cannot `.await`), then emitted to `event_tx` as a burst of
-/// `BleEvent::DeviceFound` followed by `BleEvent::ScanComplete` once the scan
-/// window closes.
+/// callback cannot `.await`), then emitted to `event_tx`, strongest first, as
+/// a burst of `BleEvent::DeviceFound` followed by `BleEvent::ScanComplete`
+/// once the scan window closes.
 ///
 /// Returns the accumulated list so the connection manager can index into it.
 pub async fn scan(
@@ -258,7 +258,8 @@ pub async fn scan(
         }
     }
 
-    // Now send all found devices to the UI.
+    // Now send all found devices to the UI, in the order `Connect` indexes.
+    strongest_first(&mut found);
     for device in found.iter() {
         event_tx.send(BleEvent::DeviceFound(device.clone())).await;
     }

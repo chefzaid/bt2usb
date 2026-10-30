@@ -209,7 +209,8 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
 
     # A user scan from Connected, driven by real GPIO presses (P0.24 SELECT,
     # P0.12 DOWN, P0.11 UP) through ui::buttons. The scan merges three
-    # advertisements and lists only the two HID devices.
+    # advertisements, the mouse's first, and lists only the two HID devices,
+    # the stronger keyboard first.
     Press Button              ${PIN_SELECT}    button Select -> screen Scanning (selected 0)
     Wait For Line On Uart     cmd: StartScan
     Wait For Line On Uart     scan: heard 3 advertisers, listed 2 HID devices

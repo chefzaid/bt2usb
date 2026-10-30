@@ -29,7 +29,7 @@ board.
 | `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed |
 | Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` with Ruff 0.16.9 and ShellCheck 0.9.0 | Passed; lint clean, including the new `fuzz` recipe |
 | actionlint | Not installed here | Not run on the new `fuzz` job |
-| Hosted `Parser fuzzing` job | GitHub Actions | Not run before the commit; its first run is recorded separately |
+| Hosted `Parser fuzzing` job | GitHub Actions, `ubuntu-24.04` | Not run before the commit. Its first run, the manual dispatch [41051151107](https://github.com/chefzaid/bt2usb/actions/runs/41051151107) on that commit later the same day, passed: seed `0x98ed6db03` (the run ID), 20 million mutated inputs per target, 120 million in all in 72 s, no finding; the slowest input took 12.6 ms (`report`) |
 | Board/radio/USB acceptance | Physical hardware | Not applicable to the parsers; not performed |
 
 ## Validation Record — 2026-10-30, Release SBOM

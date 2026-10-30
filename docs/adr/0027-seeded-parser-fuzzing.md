@@ -167,8 +167,12 @@ Negative and risks:
   characters instead of stopping (caught only after the boundary seed was
   added). See the
   [validation record](../validation-records.md#validation-record--2026-10-30-parser-fuzzing).
+  The first hosted run of the `Parser fuzzing` job, a manual dispatch the
+  same day
+  ([run 41051151107](https://github.com/chefzaid/bt2usb/actions/runs/41051151107)),
+  passed 20 million inputs per target with the seed `0x98ed6db03` in 72 s.
 - **Hardware-verified:** not applicable; the parsers have no target-specific
-  code. The first scheduled CI run is recorded when it happens.
+  code.
 
 ## Related
 

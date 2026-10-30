@@ -1284,8 +1284,9 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   unmaintained, unsound, and yanked crates, and ignores only these two
   advisories by ID, each with its chain and removal trigger, so any new
   advisory fails CI. Neither crate can be dropped by an upgrade today:
-  `bare-metal` has no patched version and comes from `cortex-m` 0.7.9, the
-  newest release, whose main branch still uses it; `ssd1306` 0.10.0 and its
+  `bare-metal` has no patched version and comes from `cortex-m` 0.7.9; the
+  newer 0.7.10 (Dependabot pull request #17, 2026-10-26) and cortex-m's main
+  branch still use it; `ssd1306` 0.10.0 and its
   main branch pin `maybe-async-cfg =0.2.4`, and with 0.2.5 (which drops
   `proc-macro-error`) `ssd1306` fails to compile, so it needs porting or
   replacing. Both run no code that a peer can reach: `proc-macro-error` runs

@@ -901,7 +901,7 @@ The job replaced `cargo audit` with the same two ignores on 2026-10-30.
 
 | Crate | Advisory (ignored) | Pulled in by | What removes it |
 | --- | --- | --- | --- |
-| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. 0.7.9 is the newest release, and cortex-m's main branch still depends on `bare-metal` 0.2 (checked 2026-10-10, commit `f259e37`) |
+| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. The newer 0.7.10 still depends on `bare-metal` 0.2.5 (its lockfile in Dependabot pull request #17, checked 2026-10-30), and so does cortex-m's main branch (checked 2026-10-10, commit `f259e37`) |
 | `proc-macro-error 1.0.4` | `RUSTSEC-2024-0370` (unmaintained) | `maybe-async-cfg 0.2.4`, which `ssd1306 0.10.0` pins with `=0.2.4` | `maybe-async-cfg 0.2.5` replaced it with `manyhow`, but neither the `ssd1306` 0.10.0 release nor its main branch (commit `79cb629`, checked 2026-10-10) accepts 0.2.5. Raising the pin alone does not work: `ssd1306` then fails to compile with 19 errors, because 0.2.5 generates the async variants differently (tried on 2026-10-10 with a patched copy), so `ssd1306` itself needs porting or replacing |
 
 On 2026-10-30 cargo-deny 0.20.2 found no vulnerabilities and only these two

@@ -101,7 +101,7 @@ regression tests:
 
 ```sh
 python scripts/release.py validate-tag --tag v0.1.0
-python -B -m unittest discover -s scripts -p release_test.py -v
+python -B -m unittest discover -s scripts -p "release*_test.py" -v
 ```
 
 The helper requires Python 3.11 or newer (it uses `tomllib`) and only the
@@ -198,7 +198,8 @@ add code to the flashed image.
 
 1. The `embedded` job builds and lints the ARM firmware. It converts that ELF to
    Intel HEX with the toolchain's `llvm-objcopy` and stages the application,
-   self-test, build inputs, and metadata. Staging rejects changes to tracked
+   self-test, build inputs, metadata, and the
+   [software bill of materials](#software-bill-of-materials). Staging rejects changes to tracked
    source, a checkout that differs from the workflow's source commit, and an
    image that does not report that commit as clean.
 2. After host checks, host coverage, audit, embedded checks, and Renode succeed, `release-package`
@@ -206,7 +207,8 @@ add code to the flashed image.
    download digest mismatches fail the job. No firmware is rebuilt in this job.
 3. The packaging helper checks every staged checksum, exact tag/version, source
    commit/ref, repository, workflow run ID, target/profile/features, log level,
-   compiler version, and checked-out build-input hashes. It preserves firmware
+   compiler version, checked-out build-input hashes, and the version and commit
+   the SBOM names. It preserves firmware
    bytes, adds versioned filenames, and creates the release checksum manifest.
 4. The SHA-pinned official `actions/attest` action signs provenance for all
    package files, including `SHA256SUMS`, using GitHub's OIDC identity. The bundle
@@ -232,6 +234,7 @@ A release for tag `vX.Y.Z` contains:
 | `bt2usb-selftest-vX.Y.Z.elf` | Board self-test image | Only for bring-up; it replaces the bridge |
 | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` | Build inputs from the tagged source | No |
 | `BUILD-INFO.json` | Build identity and hashes | No |
+| `bt2usb.cdx.json` | CycloneDX 1.5 [software bill of materials](#software-bill-of-materials) | No |
 | `SHA256SUMS` | SHA-256 of every file above | No |
 | `provenance.sigstore.json` | Sigstore attestation bundle | No |
 
@@ -271,6 +274,43 @@ The release also contains the application ELF/HEX and self-test ELF. SoftDevice
 is obtained separately. `SHA256SUMS` covers package payloads, not itself or the
 attestation bundle; the manifest itself is an attested subject, and the bundle's
 signature is checked by the verifier.
+
+### Software Bill Of Materials
+
+`bt2usb.cdx.json` is a CycloneDX 1.5 JSON document that lists every crate the
+release build compiles. `release.py stage` writes it with
+[release_sbom.py](../scripts/release_sbom.py), from the same checkout, lockfile,
+target, and features as the firmware, so it travels in `SHA256SUMS` and the
+attestation like the firmware does. The crate set and the dependency edges come
+from `cargo tree`, which resolves features the way the build does: `cargo
+metadata` alone also lists crates that only a test's features pull in.
+`cargo metadata` supplies each crate's source and declared license.
+
+| Entry | Content |
+| --- | --- |
+| `metadata.component` | `bt2usb`, its Cargo version, `GPL-3.0-only`, and a link to the source tree at the build commit |
+| `metadata.properties` | `bt2usb:source_commit`, `bt2usb:target` (`thumbv7em-none-eabihf`), and `bt2usb:features` (`embedded`) |
+| crates.io crates | Name, version, a `pkg:cargo/<name>@<version>` package URL, and the SHA-256 that `Cargo.lock` records for the downloaded crate |
+| Git crates (`nrf-softdevice-s140`, `nrf-softdevice-macro`) | A package URL whose `vcs_url` names the repository and the full revision |
+| The vendored `nrf-softdevice` | Its path in this repository and a link to it at the build commit; it has no package URL, because the code is this repository's copy, not the upstream crate |
+| Licenses | The SPDX expression each crate's manifest declares, with the old `MIT/Apache-2.0` form written as `MIT OR Apache-2.0`; the [deny.toml](../deny.toml) clarification for `nrf-softdevice-s140`, which names only a license file |
+| `scope` | `required` for what the firmware links; `excluded` for what only runs while building, such as procedural macros and build scripts' dependencies. Development dependencies are not listed |
+| SoftDevice | `s140_nrf52` 7.3.0 as a `firmware` component supplied by Nordic Semiconductor ASA, which the application depends on but the package does not contain |
+| `dependencies` | Each component's direct dependencies, as `cargo tree` shows them |
+
+The document has no timestamp, and its `serialNumber` is a UUID derived from
+the repository and commit, so building the same commit writes the same bytes.
+It does not list the precompiled `core` and `compiler_builtins` that come with
+the pinned toolchain, which `BUILD-INFO.json` `rustc` names. Staging fails if
+Cargo cannot resolve the graph offline, if a crates.io crate has no checksum in
+`Cargo.lock`, or if `GITHUB_REPOSITORY` is not an `owner/repository` name.
+
+Any CycloneDX 1.5 reader can consume it. For example, list what the firmware
+links:
+
+```sh
+jq -r '.components[] | select(.scope == "required") | "\(.name) \(.version)"' bt2usb.cdx.json
+```
 
 ## Verify Before Flashing
 
@@ -588,13 +628,15 @@ The direct firmware dependencies from crates.io (`embassy-executor`,
 `embedded-storage-async`, `defmt`, `defmt-rtt`, `panic-probe`, `static_cell`,
 and `heapless`) are each published as `MIT OR Apache-2.0` for every version of
 them that `Cargo.lock` selects, as listed by the crates.io API on 2026-10-09.
-The remaining transitive packages in `Cargo.lock` have not been inventoried.
+Every crate the build compiles, direct or transitive, is listed with the
+license its manifest declares in the release package's
+[software bill of materials](#software-bill-of-materials).
 
 The SoftDevice is a separate component obtained from Nordic: neither the
 repository nor a release package contains it ([SoftDevice
 Installation](#softdevice-installation)). A release package contains the
-firmware, its build inputs, and the provenance files, but not `LICENSE` or any
-third-party license text.
+firmware, its build inputs, the SBOM, and the provenance files, but not
+`LICENSE` or any third-party license text.
 
 Since 2026-10-30 the CI audit checks every crate's declared license against
 an allow list of licenses GPL-3.0 can incorporate

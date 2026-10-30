@@ -8,6 +8,32 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Release SBOM
+
+This record covers the commit that checks off "Release SBOM", split from the
+P1 item "Supply-chain and tooling maintenance" in
+[TODO.md](../TODO.md#release-provenance-and-supply-chain): `release.py stage`
+writes the CycloneDX 1.5 document `bt2usb.cdx.json` with
+`scripts/release_sbom.py`, packaging refuses one for another version or
+commit, and CI runs the new tests through `-p "release*_test.py"`
+([software bill of materials](deployment.md#software-bill-of-materials)). The
+checks ran locally on Linux in a container on the change before it was
+pushed (the stage and package run on a local commit of it, before the release
+notes template gained its SBOM sentence); nothing ran on a board or in a
+hosted tag run.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Release helper and SBOM tests | `python3 -m unittest discover -s scripts -p "release*_test.py"`, Python 3 on Linux | Passed: 25 tests, 7 of them new. With every crate's scope forced to `required`, `test_linked_crates_are_required_and_build_time_crates_excluded` fails |
+| Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` with Ruff 0.16.9 and ShellCheck 0.9.0 | Passed, 59 tests; lint clean over 14 Python files |
+| Real stage and package | `cargo build --release` with `DEFMT_LOG=info`, then `release.py stage` and `release.py package --tag v0.1.0` with the `GITHUB_*` variables set by hand and `llvm-objcopy` from the pinned toolchain | Passed: the package holds `bt2usb.cdx.json` in `SHA256SUMS`, with 87 linked and 47 build-time components plus the SoftDevice. A second staging wrote byte-identical SBOM bytes; without `GITHUB_REPOSITORY`, staging stopped before creating its output directory; `release.py notes` filled the template with the new SBOM link |
+| Crate set against the build's resolver | The SBOM's crates compared with `cargo tree --target thumbv7em-none-eabihf --features embedded` over normal and build edges | Equal. Built from `cargo metadata` alone, it also listed `slab`, which only a test's `futures-util` features pull in; that is why the graph comes from `cargo tree` |
+| CycloneDX schema | `JsonStrictValidator` for CycloneDX 1.5 from `cyclonedx-python-lib` in a scratch virtual environment; package URLs parsed with `packageurl-python` | Valid; both Git package URLs parse to a `vcs_url` with the full revision |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed |
+| actionlint | Not installed here | Not run; the workflow change is the quoted unittest pattern in one `run:` line |
+| Hosted tag run | GitHub Actions `release-package` | Not performed: no tag was pushed, so attestation of the SBOM is checked only by the existing `subject-path: dist/*` |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-30, Storage And Security Errors On The OLED
 
 This record covers the commit that checks off the P1 item "Visible

@@ -35,11 +35,11 @@ probe, or USB host to close.
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 13 | 3 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 10 | 7 | 2 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 11 | 7 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **147** | **67** | **20** |
+| **Total** | **148** | **67** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1192,11 +1192,24 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   against a pinned SHA-256 before extracting it, and needs `RENODE_SHA256` for
   another version ([auditing](docs/code-quality.md#auditing),
   [security](docs/security.md#supply-chain)).
-- [ ] **P1** **Supply-chain and tooling maintenance.** Add an SBOM artifact to
-  the release package and a verified digest for the SoftDevice archive that
-  `mask softdevice` downloads. Accept when a digest mismatch fails the recipe
-  with an actionable message, the release package carries an SBOM, and
-  dependency alerts have an assigned review process
+- [x] **P1** **Release SBOM.** `release.py stage` writes `bt2usb.cdx.json`, a
+  CycloneDX 1.5 document built by `scripts/release_sbom.py` from `cargo tree`
+  (the crate set and edges the build resolves, so a crate only a test's
+  features pull in is left out) and `cargo metadata` for the embedded target
+  and features: every compiled crate with its package URL, lockfile SHA-256,
+  declared license, and `required` or `excluded` scope, the vendored crate by
+  its repository path, and the SoftDevice as a Nordic firmware component. The
+  document has no timestamp, so the same commit gives the same bytes; it
+  travels in `SHA256SUMS` and the attestation, and packaging refuses one that
+  names another version or commit. Checked against the CycloneDX 1.5 strict
+  schema; seven new helper tests
+  ([software bill of materials](docs/deployment.md#software-bill-of-materials);
+  `scripts/release.py`, `scripts/release_sbom.py`, `scripts/release_sbom_test.py`,
+  `scripts/release_test.py`).
+- [ ] **P1** **Supply-chain and tooling maintenance.** Add a verified digest
+  for the SoftDevice archive that `mask softdevice` downloads. Accept when a
+  digest mismatch fails the recipe with an actionable message and dependency
+  alerts have an assigned review process
   ([security](docs/security.md#supply-chain)). The SoftDevice digest and the
   review owner wait on [Needs Your Input](#needs-your-input).
 - [ ] **P1** **Replace unmaintained transitive dependencies.** The 2026-09-28

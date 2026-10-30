@@ -18,10 +18,14 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import release_sbom
+
 TARGET = "thumbv7em-none-eabihf"
+FEATURES = ("embedded",)
 INPUTS = ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml")
 FIRMWARE = ("bt2usb.elf", "bt2usb-selftest.elf", "bt2usb.hex")
-STAGED = (*FIRMWARE, *INPUTS, "BUILD-INFO.json")
+RECORDS = ("BUILD-INFO.json", release_sbom.FILE_NAME)
+STAGED = (*FIRMWARE, *INPUTS, *RECORDS)
 NOTES_TEMPLATE = Path(".github", "release-notes.md")
 SEMVER = re.compile(
     r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
@@ -117,6 +121,8 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
             raise ReleaseError(f"{name} does not report the clean source commit {commit}")
     rustc = command(["rustc", "--version"], root)
     cargo = command(["cargo", "--version"], root)
+    repository = os.environ.get("GITHUB_REPOSITORY", "")
+    sbom = software_bill_of_materials(root, version, commit, repository)
     output.mkdir(parents=True, exist_ok=False)
     shutil.copyfile(build_dir / "bt2usb", output / "bt2usb.elf")
     shutil.copyfile(build_dir / "bt2usb-selftest", output / "bt2usb-selftest.elf")
@@ -138,22 +144,45 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
         "version": version,
         "source_commit": commit,
         "source_ref": os.environ.get("GITHUB_REF", ""),
-        "repository": os.environ.get("GITHUB_REPOSITORY", ""),
+        "repository": repository,
         "workflow_run_id": os.environ.get("GITHUB_RUN_ID", ""),
         "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         "target": TARGET,
         "profile": "release",
-        "features": ["embedded"],
+        "features": list(FEATURES),
         "defmt_log": os.environ.get("DEFMT_LOG", "info"),
         "rustc": rustc,
         "cargo": cargo,
         "input_sha256": input_hashes,
         "artifact_sha256": {name: digest(output / name) for name in FIRMWARE},
     }
-    (output / "BUILD-INFO.json").write_text(
-        json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
-    )
+    for name, document in zip(RECORDS, (metadata, sbom)):
+        (output / name).write_text(
+            json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+        )
     write_checksums(output, STAGED)
+
+
+def software_bill_of_materials(root: Path, version: str, commit: str, repository: str) -> dict:
+    """The SBOM of the firmware `cargo build --features embedded` builds from `root`."""
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ReleaseError("GITHUB_REPOSITORY must name the owner/repository the SBOM links to")
+    selection = ["--locked", "--offline", "--features", ",".join(FEATURES)]
+    metadata = ["cargo", "metadata", *selection, "--format-version", "1"]
+    tree = ["cargo", "tree", *selection, "--target", TARGET, "--prefix", "depth", "--format", "{p}"]
+    return release_sbom.build_sbom(
+        json.loads(command([*metadata, "--filter-platform", TARGET], root)),
+        command([*tree, "--edges", "normal,build"], root),
+        command([*tree, "--edges", "normal,no-proc-macro"], root),
+        release_sbom.lock_checksums((root / "Cargo.lock").read_text(encoding="utf-8")),
+        release_sbom.license_clarifications((root / "deny.toml").read_text(encoding="utf-8")),
+        version=version,
+        commit=commit,
+        repository=repository,
+        target=TARGET,
+        features=list(FEATURES),
+        softdevice=softdevice_prerequisite(root),
+    )
 
 
 def package_release(
@@ -181,7 +210,7 @@ def package_release(
         "workflow_run_id": expected_run_id,
         "target": TARGET,
         "profile": "release",
-        "features": ["embedded"],
+        "features": list(FEATURES),
         "defmt_log": "info",
     }
     for field, value in expected.items():
@@ -197,6 +226,9 @@ def package_release(
     for name in FIRMWARE:
         if metadata.get("artifact_sha256", {}).get(name) != digest(source / name):
             raise ReleaseError(f"build metadata artifact digest mismatch: {name}")
+    sbom = json.loads((source / release_sbom.FILE_NAME).read_text(encoding="utf-8"))
+    if release_sbom.sbom_identity(sbom) != (version, expected_commit):
+        raise ReleaseError("SBOM does not describe the release version and source commit")
     toolchain = tomllib.loads((root / "rust-toolchain.toml").read_text(encoding="utf-8"))
     channel = toolchain["toolchain"]["channel"]
     if not metadata.get("rustc", "").startswith(f"rustc {channel} "):
@@ -205,7 +237,7 @@ def package_release(
         "bt2usb.elf": f"bt2usb-{tag}.elf",
         "bt2usb-selftest.elf": f"bt2usb-selftest-{tag}.elf",
         "bt2usb.hex": f"bt2usb-{tag}.hex",
-        **{name: name for name in (*INPUTS, "BUILD-INFO.json")},
+        **{name: name for name in (*INPUTS, *RECORDS)},
     }
     output.mkdir(parents=True, exist_ok=False)
     for original, renamed in names.items():

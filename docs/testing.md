@@ -60,7 +60,7 @@ PowerShell, use the direct command.
 | Simulation build | `mask sim-build` | `cargo build --locked --features sim --target thumbv7em-none-eabihf` |
 | Headless Renode test | `mask sim-test` | `renode-test renode/bt2usb-sim.robot` |
 | Interactive Renode | `mask sim` | `renode renode/bt2usb-sim.resc` |
-| Release helper tests | — | `python -m unittest discover -s scripts -p "release_test.py" -v` |
+| Release helper tests | — | `python -m unittest discover -s scripts -p "release*_test.py" -v` |
 | Markdown links, constants, memory map, and commands | `mask docs-check` | `python scripts/check_docs.py`, and its tests with `python -m unittest discover -s scripts -p "check_docs_test.py" -v` |
 | Format check | `mask fmt-check` | `cargo fmt --package bt2usb -- --check` |
 | API documentation, every build, warnings denied | `mask rustdoc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
@@ -578,13 +578,16 @@ The ARM builds catch failures the host crate cannot:
 
 [release_test.py](../scripts/release_test.py) tests
 [release.py](../scripts/release.py), the helper CI uses to validate tags, stage
-the embedded build, package a release, and fill its notes. The tests build a fixture repository
-and fake firmware in a temporary directory; they use no network, publish
-nothing, and build no firmware. `release.py` needs Python 3.11 or newer for
-`tomllib`.
+the embedded build, package a release, and fill its notes, and
+[release_sbom_test.py](../scripts/release_sbom_test.py) tests
+[release_sbom.py](../scripts/release_sbom.py), which builds the release's
+[SBOM](deployment.md#software-bill-of-materials). The tests build a fixture
+repository, fake firmware, and a small fixture dependency graph in a temporary
+directory; they use no network, run no Cargo command, publish nothing, and
+build no firmware. Both scripts need Python 3.11 or newer for `tomllib`.
 
 ```sh
-python -m unittest discover -s scripts -p "release_test.py" -v
+python -m unittest discover -s scripts -p "release*_test.py" -v
 ```
 
 | Test | What it asserts |
@@ -592,14 +595,16 @@ python -m unittest discover -s scripts -p "release_test.py" -v
 | `test_exact_stable_prerelease_and_build_metadata_tags` | `v` plus the exact Cargo version validates, and prerelease detection is correct with and without build metadata |
 | `test_prerelease_package_keeps_exact_version_identity` | A prerelease with build metadata packages under its full version name |
 | `test_wrong_tag_or_nonsemantic_version_fails` | Missing `v`, mismatched versions, trailing newlines, path segments, and non-semantic versions are rejected |
-| `test_package_preserves_exact_built_payload_and_checksums` | Packaged ELF/HEX files are byte-identical to staged inputs, `SHA256SUMS` matches, and `BUILD-INFO.json` is unchanged |
+| `test_package_preserves_exact_built_payload_and_checksums` | Packaged ELF/HEX files are byte-identical to staged inputs, `SHA256SUMS` matches, and `BUILD-INFO.json` and the SBOM are unchanged |
 | `test_artifact_tampering_is_rejected` | A modified staged ELF fails with a checksum mismatch and leaves no output |
 | `test_metadata_identity_and_build_policy_must_match` | Wrong commit, ref, repository, run ID, version, target, profile, features, `DEFMT_LOG` level, schema, or compiler fails packaging |
+| `test_sbom_must_describe_the_release_version_and_commit` | An SBOM naming another version or commit, or no commit, fails packaging |
 | `test_changed_lockfile_is_rejected` | A `Cargo.lock` differing from the recorded build input fails |
 | `test_rehashed_artifact_must_still_match_build_metadata` | Regenerating checksums for a changed HEX still fails against the build metadata digest |
 | `test_missing_extra_duplicate_and_unsafe_checksum_entries_fail` | Missing, duplicate, path-escaping, and unexpected entries or files fail |
 | `test_existing_destination_is_not_overwritten` | Packaging refuses an existing output directory and keeps its contents |
-| `test_staging_records_exact_compiled_bytes_and_build_identity` | Staging records the compiled bytes' digests and build identity, and its output packages successfully |
+| `test_staging_records_exact_compiled_bytes_and_build_identity` | Staging records the compiled bytes' digests and build identity, writes the SBOM built for that commit and repository, and its output packages successfully |
+| `test_sbom_reads_the_dependency_graph_the_firmware_build_resolves` | The SBOM's `cargo metadata` and `cargo tree` commands run locked and offline with the `embedded` feature, for the firmware target, over the built (`normal,build`) and linked (`normal,no-proc-macro`) edges; a repository that is not `owner/repository` is refused |
 | `test_staging_refuses_firmware_that_reports_another_or_dirty_commit` | An application image that carries another commit, or the checked-out commit followed by `-dirty`, stops staging before anything is written |
 | `test_staging_refuses_dirty_source_or_wrong_checkout` | Modified tracked files, or a checkout whose `HEAD` differs from `GITHUB_SHA`, stop staging |
 | `test_notes_fill_every_field_from_the_package_and_source` | The repository's release notes template, filled from a fixture package, leaves no field unfilled, carries the commit, run, SoftDevice S140 v7.3.0 with its HEX and origins, the connection, saved-device, and USB identity limits, the storage pages, magic, and version, and the exact `SHA256SUMS`, and keeps its four `REVIEW:` lines |
@@ -607,6 +612,14 @@ python -m unittest discover -s scripts -p "release_test.py" -v
 | `test_prerelease_notes_say_so` | A prerelease tag fills the heading as a prerelease |
 | `test_notes_refuse_a_package_that_does_not_match` | A checksum entry for a missing or path-escaping file, a wrong digest, an empty manifest, or build metadata with another version, a short commit, or no compiler stops the notes |
 | `test_notes_require_the_softdevice_mask_installs` | The notes fail when the `softdevice` recipe installs a different SoftDevice version than `memory_sd.x` links against |
+
+| SBOM test | What it asserts |
+| --- | --- |
+| `test_linked_crates_are_required_and_build_time_crates_excluded` | Crates the firmware links and the SoftDevice are `required`; a procedural macro, its dependency, and a build dependency are `excluded`; a development dependency that `cargo metadata` lists but no build compiles is absent |
+| `test_each_source_kind_is_identified_and_licensed` | A crates.io crate carries its package URL and lockfile SHA-256; a Git crate a `vcs_url` with its revision and the `deny.toml` license; the vendored crate its repository path and link; `MIT/Apache-2.0` becomes `MIT OR Apache-2.0` |
+| `test_dependencies_follow_the_built_graph` | Every component has exactly one `dependencies` entry, and the entries match the `cargo tree` edges, with the SoftDevice under `bt2usb` |
+| `test_document_identifies_the_build_and_is_deterministic` | The document names the version and commit, carries no timestamp, is identical when rebuilt, and changes serial number with the commit |
+| `test_inconsistent_inputs_are_refused` | A missing checksum, a package that metadata names twice or not at all, a malformed or out-of-order tree line, a second or missing root, a linked crate outside the built tree, a path dependency outside the repository, and an SBOM without a commit fail |
 
 These tests cannot issue GitHub OIDC credentials or exercise the hosted
 attestation and release APIs; see

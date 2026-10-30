@@ -148,7 +148,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 - [ci.yml](../../.github/workflows/ci.yml) jobs:
   - "Host tests (ubuntu-24.04, windows-2025)": `cargo fmt --package bt2usb
-    -- --check`, `python -m unittest discover -s scripts -p "release_test.py"`,
+    -- --check`, `python -m unittest discover -s scripts -p "release*_test.py"`,
     actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 (Linux,
     checksum-verified downloads) with `python scripts/lint_scripts.py`, tag
     validation on tags, `cargo test --locked --lib --tests`, host Clippy, and

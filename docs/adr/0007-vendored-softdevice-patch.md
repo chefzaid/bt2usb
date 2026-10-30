@@ -199,7 +199,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   the absent-map fallback stays allowed.
 - "Parser fuzzing and property tests": fuzz the descriptor and long-read paths.
 - "Supply-chain and tooling maintenance": include the vendored crate in license
-  and SBOM checks.
+  and SBOM checks (both landed on 2026-10-30: `cargo deny` checks its declared
+  license, and the release SBOM lists it by its path in this repository).
 - Offer the changes upstream, and drop the patch once an upstream release
   provides the same guarantees.
 

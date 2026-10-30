@@ -968,7 +968,7 @@ lists what exists.
 | Board self-test | `bt2usb-selftest` checks each hardware stage on a new board and prints one PASS or FAIL line per stage | [First flash](first-flash.md#2-self-test-image) |
 | Pinned builds and tasks | Rust 1.95.0, `Cargo.lock` with `--locked`, the pinned `nrf-softdevice` revision, and the `maskfile.md` tasks; `build.rs` refuses mixed features and selects the linker script | [Development](development.md), [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md), [ADR 0010](adr/0010-static-memory-layout.md) |
 | Continuous integration | Host tests on Linux and Windows, coverage, the dependency audit, embedded and simulation builds, script and workflow lint, and the Markdown checks, on every push and weekly | [Testing](testing.md#continuous-integration), [code quality](code-quality.md) |
-| Attested draft releases | A `v*` tag stages the checked firmware, verifies it, attests its provenance, fills the release notes, and creates a draft release | [Deployment](deployment.md#artifact-flow), [ADR 0008](adr/0008-attested-draft-releases.md) |
+| Attested draft releases | A `v*` tag stages the checked firmware with its software bill of materials, verifies it, attests its provenance, fills the release notes, and creates a draft release | [Deployment](deployment.md#artifact-flow), [ADR 0008](adr/0008-attested-draft-releases.md) |
 | Developer environment | `scripts/run-tool.sh` finds Cargo and probe-rs on Linux, macOS, and WSL; a VS Code devcontainer installs the toolchain | [Development](development.md#devcontainer-and-wsl2) |
 | Documentation set | README, guides in `docs/`, ADRs indexed in the architecture guide, `TODO.md` as the work plan, and GitHub issue templates | [ADR 0001](adr/0001-documentation-structure.md) |
 

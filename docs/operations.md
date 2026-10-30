@@ -28,7 +28,7 @@ hardware-verified result; record board results with the
 | USB enumeration | Host device manager, `lsusb` | Keyboard, mouse, and consumer interfaces; VID/PID, strings, per-unit serial |
 | Self-test | `mask selftest` | Staged `[PASS]`/`[FAIL]`/`[SKIP]` results for each peripheral |
 | Simulation UART | Renode `mask sim` | Logs from the SoftDevice-free build; no probe needed |
-| Release metadata | `BUILD-INFO.json`, `SHA256SUMS` | Which build a unit was flashed with; the firmware's boot line reports the same commit ([boot sequence](#boot-sequence)) |
+| Release metadata | `BUILD-INFO.json`, `SHA256SUMS`, `bt2usb.cdx.json` | Which build a unit was flashed with, since the firmware's boot line reports the same commit ([boot sequence](#boot-sequence)), and which crate versions that build contains, to check a new advisory against deployed units ([SBOM](deployment.md#software-bill-of-materials)) |
 
 On the USB host the bridge appears with the development identity from
 [config.rs](../src/config.rs):

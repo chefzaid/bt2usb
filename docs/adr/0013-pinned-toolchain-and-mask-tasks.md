@@ -190,9 +190,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 - "Development environment hardening": pin the container inputs, and replace
   blanket container privilege with scoped probe access.
-- "Supply-chain and tooling maintenance": add an SBOM and a verified digest
-  for the SoftDevice download (license checks and the Renode digest landed on
-  2026-10-30).
+- "Supply-chain and tooling maintenance": add a verified digest for the
+  SoftDevice download (license checks, the Renode digest, and the release SBOM
+  landed on 2026-10-30).
 - "Reproducible firmware evidence": compare artifacts from two clean
   environments and document remaining nondeterminism.
 

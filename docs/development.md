@@ -243,7 +243,7 @@ cargo clippy --locked --features embedded,log-sensitive-data --target thumbv7em-
 cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings
 cargo build --locked --features sim --target thumbv7em-none-eabihf
-python -B -m unittest discover -s scripts -p release_test.py -v
+python -B -m unittest discover -s scripts -p "release*_test.py" -v
 ```
 
 Build `embedded` and `sim` separately. The simulation supplies a different
@@ -558,7 +558,7 @@ commands behind them also work directly in PowerShell; CI runs its host job on
 | Format check | `cargo fmt --package bt2usb -- --check` |
 | Host Clippy | `cargo clippy --locked --lib --tests -- -D warnings` |
 | Firmware build | `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` |
-| Release-helper tests | `python -m unittest discover -s scripts -p "release_test.py" -v` |
+| Release-helper tests | `python -m unittest discover -s scripts -p "release*_test.py" -v` |
 | Host rustdoc with warnings denied | `$env:RUSTDOCFLAGS = "-D warnings"; cargo doc --locked --no-deps --lib` |
 | Release-level logs | `$env:DEFMT_LOG = "info"` before the build |
 

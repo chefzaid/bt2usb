@@ -51,8 +51,10 @@ below.
   recorded but not compared.
 - **Package contents.** `bt2usb-<tag>.elf`, `bt2usb-<tag>.hex`,
   `bt2usb-selftest-<tag>.elf`, `Cargo.toml`, `Cargo.lock`,
-  `rust-toolchain.toml`, `BUILD-INFO.json`, `SHA256SUMS` over those files, and
-  `provenance.sigstore.json`. The SoftDevice is not included.
+  `rust-toolchain.toml`, `BUILD-INFO.json`, (since 2026-10-30) the CycloneDX
+  SBOM `bt2usb.cdx.json`, which packaging checks names the release version and
+  commit, `SHA256SUMS` over those files, and `provenance.sigstore.json`. The
+  SoftDevice is not included.
 - **Attestation.** A GitHub artifact attestation, signed with the workflow's
   OIDC identity by the SHA-pinned `actions/attest` action, covers every package
   file, including `SHA256SUMS`.
@@ -157,8 +159,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   document rollback and recovery.
 - "Reproducible firmware evidence": compare builds from two clean
   environments and enforce size budgets.
-- "Supply-chain and tooling maintenance": add license checks and an SBOM to the
-  package.
+- "Supply-chain and tooling maintenance": verify the SoftDevice download's
+  digest and assign dependency alert review (license checks and the SBOM
+  landed on 2026-10-30).
 - "Signed USB/BLE DFU": device-side signature enforcement is separate work.
 
 ## Implementation
@@ -172,7 +175,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Publication | The `release` job's "Refuse to modify a published release" step (`gh api --paginate .../releases`), then `softprops/action-gh-release` with `draft: true`, the prerelease flag, `target_commitish` set to the tagged commit, `fail_on_unmatched_files: true`, `body_path` pointing at the filled release notes, and generated notes appended after them |
 | Ordering and permissions | `release-package` needs `lint-and-test`, `coverage`, `audit`, `embedded`, and `simulation`; both release jobs run only for tag pushes; the workflow default is `contents: read`; tag runs are never cancelled by a newer run (`cancel-in-progress` is false for tags) |
 | Action pins | Every action is pinned to a commit SHA with a comment naming its exact upstream release, in [ci.yml](../../.github/workflows/ci.yml); the release jobs use `actions/download-artifact` v8.0.1, `actions/attest` v4.2.2, `actions/upload-artifact` v7.0.1, and `softprops/action-gh-release` v3.0.3, all on Node 24, on the pinned `ubuntu-24.04` image |
-| Helper tests | [release_test.py](../../scripts/release_test.py), run on Linux and Windows in CI; `grep -c 'def test_'` counts 18 tests covering exact and prerelease tags, tampering, metadata identity, changed lockfiles, rehashed artifacts, checksum entries, overwrites, staging identity, firmware that reports another or a dirty commit, dirty checkouts, and the filled release notes |
+| SBOM | `software_bill_of_materials` in `release.py stage` runs `cargo metadata` and two `cargo tree` graphs offline for the embedded target and features; [release_sbom.py](../../scripts/release_sbom.py) builds the CycloneDX 1.5 document ([deployment](../deployment.md#software-bill-of-materials)); `package_release` compares its version and commit with the release's |
+| Helper tests | [release_test.py](../../scripts/release_test.py) and [release_sbom_test.py](../../scripts/release_sbom_test.py), run on Linux and Windows in CI; `grep -c 'def test_'` counts 20 and 5 tests covering exact and prerelease tags, tampering, metadata identity, the SBOM's identity and the Cargo commands that feed it, changed lockfiles, rehashed artifacts, checksum entries, overwrites, staging identity, firmware that reports another or a dirty commit, dirty checkouts, the filled release notes, and the SBOM's scopes, identifiers, licenses, edges, determinism, and refusals |
 
 Error messages are specific, for example
 `release tag must be exactly v{version}; received {tag!r}`,

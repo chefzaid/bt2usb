@@ -64,6 +64,12 @@ class ReleaseTests(unittest.TestCase):
         self.metadata["artifact_sha256"] = {
             name: release.digest(self.source / name) for name in release.FIRMWARE
         }
+        self.sbom = {
+            "metadata": {
+                "component": {"version": "0.1.0"},
+                "properties": [{"name": "bt2usb:source_commit", "value": self.commit}],
+            }
+        }
         self.refresh_metadata()
 
     def set_version(self, version):
@@ -73,6 +79,7 @@ class ReleaseTests(unittest.TestCase):
 
     def refresh_metadata(self):
         (self.source / "BUILD-INFO.json").write_text(json.dumps(self.metadata), encoding="utf-8")
+        (self.source / "bt2usb.cdx.json").write_text(json.dumps(self.sbom), encoding="utf-8")
         release.write_checksums(self.source, release.STAGED)
 
     def package(self):
@@ -100,6 +107,7 @@ class ReleaseTests(unittest.TestCase):
         self.metadata["version"] = version
         self.metadata["source_ref"] = f"refs/tags/v{version}"
         self.metadata["input_sha256"]["Cargo.toml"] = release.digest(self.manifest)
+        self.sbom["metadata"]["component"]["version"] = version
         self.refresh_metadata()
         release.package_release(
             self.root,
@@ -134,10 +142,8 @@ class ReleaseTests(unittest.TestCase):
         for line in (self.output / "SHA256SUMS").read_text().splitlines():
             checksum, name = line.split("  ")
             self.assertEqual(checksum, release.digest(self.output / name))
-        self.assertEqual(
-            (self.output / "BUILD-INFO.json").read_bytes(),
-            (self.source / "BUILD-INFO.json").read_bytes(),
-        )
+        for name in release.RECORDS:
+            self.assertEqual((self.output / name).read_bytes(), (self.source / name).read_bytes())
 
     def test_artifact_tampering_is_rejected(self):
         (self.source / "bt2usb.elf").write_bytes(b"modified after successful build")
@@ -166,6 +172,21 @@ class ReleaseTests(unittest.TestCase):
                 with self.assertRaises(release.ReleaseError):
                     self.package()
                 self.metadata[field] = original
+                self.assertFalse(self.output.exists())
+
+    def test_sbom_must_describe_the_release_version_and_commit(self):
+        original = json.dumps(self.sbom)
+        for change in (
+            lambda sbom: sbom["metadata"]["component"].update(version="0.2.0"),
+            lambda sbom: sbom["metadata"]["properties"][0].update(value="b" * 40),
+            lambda sbom: sbom["metadata"]["properties"].clear(),
+        ):
+            with self.subTest(change=change):
+                self.sbom = json.loads(original)
+                change(self.sbom)
+                self.refresh_metadata()
+                with self.assertRaises(ValueError):
+                    self.package()
                 self.assertFalse(self.output.exists())
 
     def test_changed_lockfile_is_rejected(self):
@@ -231,16 +252,44 @@ class ReleaseTests(unittest.TestCase):
                 side_effect=["", self.commit, "rustc 1.95.0 (example)", "cargo 1.95.0 (example)"],
             ),
             patch.object(release.subprocess, "run", side_effect=convert),
+            patch.object(release, "software_bill_of_materials", return_value=self.sbom) as sbom,
         ):
             release.stage_build(self.root, build, output, Path("llvm-objcopy"))
+        sbom.assert_called_once_with(self.root, "0.1.0", self.commit, "chefzaid/bt2usb")
         metadata = release.verify_staged(output)
         self.assertEqual(metadata["source_commit"], self.commit)
+        self.assertEqual(json.loads((output / "bt2usb.cdx.json").read_text()), self.sbom)
         self.assertEqual(
             metadata["artifact_sha256"]["bt2usb.elf"], release.digest(build / "bt2usb")
         )
         release.package_release(
             self.root, output, self.output, "v0.1.0", self.commit, "chefzaid/bt2usb", "123"
         )
+
+    def test_sbom_reads_the_dependency_graph_the_firmware_build_resolves(self):
+        for name in ("memory_sd.x", "maskfile.md", "deny.toml"):
+            shutil.copyfile(REPOSITORY / name, self.root / name)
+        with (
+            patch.object(release, "command", side_effect=["{}", "built", "linked"]) as command,
+            patch.object(release.release_sbom, "build_sbom", return_value=self.sbom) as build,
+        ):
+            sbom = release.software_bill_of_materials(
+                self.root, "0.1.0", self.commit, "chefzaid/bt2usb"
+            )
+        self.assertIs(sbom, self.sbom)
+        metadata, built, linked = (call.args[0] for call in command.call_args_list)
+        for args in (metadata, built, linked):
+            self.assertIn("--locked", args)
+            self.assertIn("--offline", args)
+            self.assertEqual(args[args.index("--features") + 1], "embedded")
+        self.assertEqual(metadata[metadata.index("--filter-platform") + 1], release.TARGET)
+        self.assertEqual(built[built.index("--edges") + 1], "normal,build")
+        self.assertEqual(linked[linked.index("--edges") + 1], "normal,no-proc-macro")
+        self.assertEqual(build.call_args.args[:3], ({}, "built", "linked"))
+        self.assertEqual(build.call_args.kwargs["softdevice"]["softdevice"], "S140 v7.3.0")
+        for repository in ("", "owner", "owner/repo/extra"):
+            with self.subTest(repository=repository), self.assertRaises(release.ReleaseError):
+                release.software_bill_of_materials(self.root, "0.1.0", self.commit, repository)
 
     def test_staging_refuses_firmware_that_reports_another_or_dirty_commit(self):
         build = Path(self.temp.name) / "build"

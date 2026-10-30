@@ -93,4 +93,7 @@ sha256sum --strict --check SHA256SUMS
 ## Build
 
 `${rustc}`, target `thumbv7em-none-eabihf`, release profile with
-`DEFMT_LOG=${defmt_log}`. `BUILD-INFO.json` records the full build identity.
+`DEFMT_LOG=${defmt_log}`. `BUILD-INFO.json` records the full build identity,
+and `bt2usb.cdx.json`, a CycloneDX software bill of materials, lists every
+crate the firmware was built from
+([SBOM](https://github.com/${repository}/blob/${tag}/docs/deployment.md#software-bill-of-materials)).

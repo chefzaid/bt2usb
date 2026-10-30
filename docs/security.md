@@ -158,7 +158,7 @@ implemented in the source cited; none is hardware-verified.
 | Physical attacker with SWD | Read LTK/IRK from flash, impersonate peers, or decrypt recorded traffic | None | No readout protection: every boot leaves the debug port open ([Physical Access And Debug Port](#physical-access-and-debug-port)); keys unencrypted. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning) |
 | Physical attacker with SWD | Replace firmware with a keylogger | None on the device; release provenance helps only people who verify before flashing | No secure boot or signed updates. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning), TODO: [Signed USB/BLE DFU](../TODO.md#updates-and-host-tools) |
 | Physical attacker with buttons | Pair their own keyboard, or Forget/reset the user's devices | Default-Cancel confirmations for destructive actions ([ui_logic.rs](../src/ui/ui_logic.rs)) | No lock or PIN on the local UI. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
-| Supply-chain attacker | Ship a malicious crate or toolchain update | `Cargo.lock` with `--locked`, pinned Rust 1.95.0, fixed `nrf-softdevice` revision with a reviewed vendored patch, `cargo deny` on every run and weekly, failing on any vulnerability, unmaintained, unsound, or yanked advisory, a license outside the allow list, or an unlisted crate source | No SBOM; two unmaintained transitive crates whose advisories the audit ignores by ID. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain), TODO: [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) |
+| Supply-chain attacker | Ship a malicious crate or toolchain update | `Cargo.lock` with `--locked`, pinned Rust 1.95.0, fixed `nrf-softdevice` revision with a reviewed vendored patch, `cargo deny` on every run and weekly, failing on any vulnerability, unmaintained, unsound, or yanked advisory, a license outside the allow list, or an unlisted crate source; a [software bill of materials](deployment.md#software-bill-of-materials) in every release that lists each compiled crate with its checksum | Two unmaintained transitive crates whose advisories the audit ignores by ID. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain), TODO: [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) |
 | Supply-chain attacker | Compromise a GitHub Action or a workflow job | Actions pinned to commit SHAs; default permission `contents: read`; `persist-credentials: false`; signing and publication split into separate jobs | Dependabot action updates have no assigned reviewer. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) |
 | Supply-chain attacker | Tamper with the SoftDevice, Renode, or pip downloads | HTTPS downloads; the CI actionlint, Ruff, and ShellCheck archives are checked against a SHA-256 | `mask softdevice` and `scripts/install-renode.sh` verify no digest. TODO: [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) |
 | Supply-chain attacker | Substitute a release artifact | Attested `dist/*` subjects, draft-only releases, refusal to modify a published release ([ADR 0008](adr/0008-attested-draft-releases.md)) | Hosted attestation not yet exercised end to end. TODO: [Hosted provenance and release recovery acceptance](../TODO.md#release-provenance-and-supply-chain) |
@@ -525,6 +525,7 @@ The release path in [ci.yml](../.github/workflows/ci.yml) and
 - build inputs (manifest, lockfile, toolchain file) and firmware digests must
   match the recorded values, and the recorded `rustc` version must match the
   channel in `rust-toolchain.toml`
+- the SBOM must name the release version and the expected commit
 - only the `release-package` job holds `id-token: write` and
   `attestations: write`; the `release` job holds `contents: write`, checks out
   no code, creates a draft, and refuses to touch a release already published
@@ -551,7 +552,7 @@ The device itself accepts any image written through SWD. See
 | Input | Pinned by | Integrity check | Gap |
 | --- | --- | --- | --- |
 | Rust toolchain | `channel = "1.95.0"` in [rust-toolchain.toml](../rust-toolchain.toml) | rustup | — |
-| Crates | `Cargo.lock`, `--locked` | crates.io checksums in the lockfile; cargo-deny 0.20.2 advisories, licenses, and sources on every CI run and Mondays 07:23 UTC | No SBOM |
+| Crates | `Cargo.lock`, `--locked` | crates.io checksums in the lockfile; cargo-deny 0.20.2 advisories, licenses, and sources on every CI run and Mondays 07:23 UTC; each release lists every compiled crate with its checksum in its [SBOM](deployment.md#software-bill-of-materials) | No assigned owner reviews dependency alerts |
 | `nrf-softdevice` | Git revision `47d6121c…` in `Cargo.toml`, replaced by the vendored copy through `[patch]` | Source committed under `vendor/` | Upstream changes need a manual re-review |
 | `nrf-softdevice-s140` (SoftDevice bindings) | Same Git revision, not vendored | Git commit identity in `Cargo.lock` | Not covered by the vendored review |
 | GitHub Actions | Commit SHAs in [ci.yml](../.github/workflows/ci.yml) | Git object identity | Dependabot bumps need review |
@@ -561,8 +562,8 @@ The device itself accepts any image written through SWD. See
 | `get-pip.py`, Robot Framework | [install-renode.sh](../scripts/install-renode.sh) | None | No digests; some Python versions are ranges |
 | Devcontainer | `mcr.microsoft.com/devcontainers/rust:1-bookworm`; `cargo install --locked` without versions | None | Tag not digest; `--privileged` container |
 
-An SBOM and digest verification for the SoftDevice download are open in
-[TODO.md](../TODO.md). The two ignored unmaintained-crate advisories,
+Digest verification for the SoftDevice download and an owner for dependency
+alerts are open in [TODO.md](../TODO.md). The two ignored unmaintained-crate advisories,
 their dependency chains, and what would remove them are in
 [code quality](code-quality.md#auditing). Toolchain and task
 pinning is recorded in
@@ -616,7 +617,7 @@ Linux and Windows in CI. Malformed and hostile input is covered here:
 | Stored records | [framing.rs](../src/storage/framing.rs), [record.rs](../src/storage/record.rs), [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | Truncated and zero-length records, count mismatch, future versions, invalid names and address types, bond flag/size mismatch, non-identity address types; malformed, future, and unreadable stores loading empty with saves refused; legacy count and length checks |
 | Deletion transactions | [management.rs](../src/ble/management.rs), [ui_logic.rs](../src/ui/ui_logic.rs) | Failed and cancelled persistence, stale quiescence tokens, default-Cancel confirmation, stale management replies |
 | Held-input release | [delivery.rs](../src/hid/delivery.rs), [coalesce.rs](../src/hid/coalesce.rs) | `queue_overflow_preserves_final_release`, `keyboard_latest_state_wins_but_release_survives` |
-| Release integrity | [release_test.py](../scripts/release_test.py) | Artifact tampering, lockfile change, metadata and build-policy mismatch (including a `debug` log level), bad checksum entries, dirty source; release notes refused for a package whose checksums or metadata do not match, or a SoftDevice the linker script does not expect |
+| Release integrity | [release_test.py](../scripts/release_test.py), [release_sbom_test.py](../scripts/release_sbom_test.py) | Artifact tampering, lockfile change, metadata and build-policy mismatch (including a `debug` log level), an SBOM for another version or commit, bad checksum entries, dirty source; release notes refused for a package whose checksums or metadata do not match, or a SoftDevice the linker script does not expect; an SBOM refused for a crate without a lockfile checksum, a package Cargo's metadata does not name exactly once, or a path dependency outside the repository |
 
 Not covered by automated tests:
 

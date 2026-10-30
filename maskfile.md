@@ -98,6 +98,22 @@ instead).
 ./scripts/run-tool.sh cargo test --locked --lib --tests
 ```
 
+## fuzz
+
+> Fuzz the parsers longer than a test run does
+
+Runs the fuzz targets for Report Maps, report notifications, advertising data,
+long attribute reads, and the pairing store's flash item
+([parser fuzzing](docs/testing.md#parser-fuzzing)) with a million mutated
+inputs each instead of the 5,000 of an ordinary test run. Set
+`BT2USB_FUZZ_CASES` for another count and `BT2USB_FUZZ_SEED` to search other
+inputs or to reproduce a reported failure.
+
+```bash
+export BT2USB_FUZZ_CASES="${BT2USB_FUZZ_CASES:-1000000}"
+./scripts/run-tool.sh cargo test --locked --lib fuzz_ -- --nocapture
+```
+
 ## test-verbose
 
 > Run unit + integration tests with output shown

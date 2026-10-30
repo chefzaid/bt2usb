@@ -8,6 +8,30 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Parser Fuzzing
+
+This record covers the commit that checks off the P1 item "Parser fuzzing and
+property tests" in [TODO.md](../TODO.md#verification-and-code-quality): the
+harness in `src/fuzz.rs`, six fuzz targets in `src/fuzz_tests.rs` and
+`src/storage_fuzz_tests.rs`, the seed corpus in `tests/fuzz-corpus/`, the
+weekly and manual `Parser fuzzing` CI job, and `mask fuzz`
+([ADR 0027](adr/0027-seeded-parser-fuzzing.md),
+[parser fuzzing](testing.md#parser-fuzzing)). The checks ran locally on Linux
+in a container on the working tree just before that commit; nothing ran on a
+board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 440 unit tests (9 new: six targets at 5,000 mutated inputs each and three harness tests), 3 integration tests, 3 glyph-table tests, 2 pairing-permission tests, and 5 vendored-portal tests; the library tests took 0.13 s |
+| Long fuzzing | `cargo test --locked --lib fuzz_` with `BT2USB_FUZZ_CASES` 1,000,000 for seed 1 and 20,000,000 for seeds 2 and 3 | Passed, no finding in 246 million inputs; 20 million per target took 74 s for all six. The slowest input took 17 ms, on a container shared with other work |
+| Mutants | Each change made by hand, run against its target, and reverted | Caught: a framing that accepts zero-length records (mutated case 8 of `store-framing`) and a mouse decoder without its button mask (mutated case 8 of `report`). Not caught in a million inputs: a name cut that skips a character that does not fit instead of stopping; caught by the seed added for it, a 31-byte name, a two-byte character, and one more character |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only`, cargo-llvm-cov 0.9.1 | 98.93% of lines, 98.49% of functions, 98.73% of regions; `fuzz.rs` misses its environment parsing and the slow-input rerun |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed |
+| Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` with Ruff 0.16.9 and ShellCheck 0.9.0 | Passed; lint clean, including the new `fuzz` recipe |
+| actionlint | Not installed here | Not run on the new `fuzz` job |
+| Hosted `Parser fuzzing` job | GitHub Actions | Not run before the commit; its first run is recorded separately |
+| Board/radio/USB acceptance | Physical hardware | Not applicable to the parsers; not performed |
+
 ## Validation Record — 2026-10-30, Release SBOM
 
 This record covers the commit that checks off "Release SBOM", split from the

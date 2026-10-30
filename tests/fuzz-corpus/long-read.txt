@@ -1,0 +1,24 @@
+# Seed corpus for the long attribute read fuzz target (src/fuzz_tests.rs).
+# The first two bytes choose the ATT MTU, 20 plus their little-endian value
+# modulo 500 (23 to 517 are valid). Each further byte is one step: its top
+# two bits pick a full fragment (0), a short one of the low six bits' length
+# (1), one longer than the payload by that length plus one (2), or the end of
+# the value by an error (3; low bit set for Invalid Offset, clear for
+# Attribute Not Long). One input per line in hex; `#` starts a comment.
+
+# MTU 23: two full fragments, then a short one.
+03 00 00 00 45
+# MTU 23: one full fragment that Attribute Not Long ends.
+03 00 00 C0
+# MTU 23: two full fragments that Invalid Offset ends.
+03 00 00 00 C1
+# MTU 23: Attribute Not Long after two full fragments, which is refused.
+03 00 00 00 C0
+# MTU 23: an empty final fragment after a full one.
+03 00 00 40
+# MTU 517: a value that would pass 512 bytes.
+F1 01 00 00
+# MTU 22, which is refused.
+02 00 00
+# MTU 23: a fragment longer than the payload, then appends after the end.
+03 00 81 40 00

@@ -1,0 +1,26 @@
+# Seed corpus for the advertisement fuzz target (src/fuzz_tests.rs):
+# advertising and scan-response data as length-type-value structures. One
+# input per line in hex; `#` starts a comment.
+
+# Flags, the complete 16-bit service list with HID (0x1812), and the complete
+# name "Keyboard".
+02 01 06 03 03 12 18 09 09 4B 65 79 62 6F 61 72 64
+# Flags, an incomplete list with Battery (0x180F) and HID, and the shortened
+# name "Mouse".
+02 01 06 05 02 0F 18 12 18 06 08 4D 6F 75 73 65
+# Appearance (keyboard) and flags, without a name.
+03 19 C1 03 02 01 05
+# A shortened, then a complete UTF-8 name ("Clé" and "Clavier é").
+05 08 43 6C C3 A9 0B 09 43 6C 61 76 69 65 72 20 C3 A9
+# A 33-byte name, which is cut to 32 bytes.
+22 09 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41
+# 31 bytes and a two-byte character, which is cut before the character.
+22 09 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 C3 A9
+# The same with one more character after it, which is not kept either.
+23 09 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 C3 A9 42
+# A name that is not UTF-8.
+05 09 FF FE FD FC
+# A zero-length structure ends the walk before the HID UUID.
+00 03 03 12 18
+# A structure that runs past the end.
+09 09 4B 65 79

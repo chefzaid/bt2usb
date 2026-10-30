@@ -1,0 +1,26 @@
+# Seed corpus for the report classification fuzz target (src/fuzz_tests.rs):
+# HID report notification values. One input per line in hex; `#` starts a
+# comment.
+
+# Boot keyboard report pressing A with Left Shift.
+02 00 04 00 00 00 00 00
+# The same report behind report ID 1.
+01 02 00 04 00 00 00 00 00
+# A keyboard report with a nonzero OEM byte, which only a declared keyboard
+# report may carry.
+00 01 05 00 00 00 00 00
+# Mouse reports: buttons, X, Y, then optional wheel and pan.
+01 05 FB
+00 7F 81 01
+1F 80 7F FF 01
+# A mouse report behind report ID 2.
+02 01 02 03
+# Consumer control: Volume Increment, and the same behind report ID 3.
+E9 00
+03 CD 00
+# A consumer usage above the USB descriptor's maximum (0x0FFF).
+00 10
+# A 16-byte NKRO bitmap report, which no fixed decoder accepts.
+04 00 00 00 10 00 00 00 00 00 00 00 00 00 00 00
+# A lone report ID.
+01

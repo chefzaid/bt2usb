@@ -138,8 +138,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   scheduled check runs already pass on GitHub-hosted runners.
 - Run and record layer 5 on declared peripherals, hosts, and hubs ("Hardware
   compatibility baseline").
-- Add the missing layers listed as known gaps: "Parser fuzzing and property
-  tests", "Async task fault tests", "Power-loss-safe persistence", "Soak and
+- Add the missing layers listed as known gaps: "Async task fault tests", "Power-loss-safe persistence", "Soak and
   latency measurements", and "Reproducible firmware evidence". "Automated
   documentation checks" was closed on 2026-10-10 by `scripts/check_docs.py`
   in the Linux host job.

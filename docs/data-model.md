@@ -75,8 +75,10 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/scan_list.rs](../src/ble/scan_list.rs), [ble/messages.rs](../src/ble/messages.rs) | 33 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs), 8 in [scan_list_tests.rs](../src/ble/scan_list_tests.rs), and 3 in `messages.rs`; Renode scenario | None recorded |
 | UI state model and request tracking | [ui/ui_logic.rs](../src/ui/ui_logic.rs), [ui/controller.rs](../src/ui/controller.rs) | 30 host tests in [ui_logic_tests.rs](../src/ui/ui_logic_tests.rs) and 16 in [controller_tests.rs](../src/ui/controller_tests.rs); Renode scenario | None recorded |
 
-[Testing](testing.md#known-verification-gaps) lists the missing fuzzing, fault
-injection, and hardware evidence. The `mask selftest` flash stage exercises the
+The store's [fuzz targets](testing.md#parser-fuzzing) check that every
+record the codec accepts is the one it writes and that a loaded list saved
+again loads back unchanged. [Testing](testing.md#known-verification-gaps)
+lists the missing fault injection and hardware evidence. The `mask selftest` flash stage exercises the
 pairing region with a scratch key, not this record format.
 
 ## Pairing Store

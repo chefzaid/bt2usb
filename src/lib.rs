@@ -82,3 +82,16 @@ mod hid_keyboard_report_tests;
 #[cfg(test)]
 #[path = "hid_classify_tests.rs"]
 mod hid_classify_tests;
+
+// A dependency-free fuzzing harness and the parser targets it drives
+// (docs/testing.md#parser-fuzzing).
+#[cfg(test)]
+mod fuzz;
+
+#[cfg(test)]
+#[path = "fuzz_tests.rs"]
+mod fuzz_tests;
+
+#[cfg(test)]
+#[path = "storage_fuzz_tests.rs"]
+mod storage_fuzz_tests;

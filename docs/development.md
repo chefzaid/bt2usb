@@ -35,9 +35,10 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── ui/                display task and screen layout, buttons, UI controller
 │   │                      and state machine
 │   └── lib_tests.rs, lib_logic_tests.rs, hid_classify_tests.rs,
-│       hid_descriptor_tests.rs, hid_keyboard_report_tests.rs
+│       hid_descriptor_tests.rs, hid_keyboard_report_tests.rs,
+│       fuzz.rs, fuzz_tests.rs, storage_fuzz_tests.rs
 │                          host test modules included by lib.rs
-├── tests/                 host integration tests
+├── tests/                 host integration tests; fuzz-corpus/ seed inputs
 ├── renode/                platform overlays, GPIO/GPIOTE, TWIM, and SSD1306
 │                          models, OLED glyph table, Robot test
 ├── scripts/               release helper and tests, Renode installer, WSL tool shim
@@ -447,6 +448,7 @@ build panics on integer overflow, and a release build wraps.
 | `RUSTUP_TOOLCHAIN` | rustup | Unset | Overrides `rust-toolchain.toml`; leave it unset |
 | `CARGO_TARGET_DIR` | Cargo | Unset | Moves `target/`. `mask rtt`, the Renode script, the Robot test, and the CI staging step assume `target/` |
 | `CARGO_FEATURE_SIM`, `CARGO_FEATURE_EMBEDDED` | `build.rs` | Set by Cargo from `--features` | Memory-map selection and the feature guard; never set them by hand |
+| `BT2USB_FUZZ_CASES`, `BT2USB_FUZZ_SEED` | The fuzz targets in `cargo test`; `mask fuzz` | 5,000 and `0x627432757362`; `mask fuzz` sets a million cases; the CI fuzz job sets 20 million and the run ID | Mutated inputs per target and the generator's seed ([parser fuzzing](testing.md#parser-fuzzing)) |
 | `BT2USB_SOURCE_COMMIT` | `build.rs` | Unset | The commit to report for a build outside a git checkout, such as from a source archive; must be a full 40-digit lower-case commit, and is ignored inside a checkout |
 | `GITHUB_SHA`, `GITHUB_REF`, `GITHUB_REPOSITORY`, `GITHUB_RUN_ID`, `GITHUB_RUN_ATTEMPT`, `GITHUB_OUTPUT` | `scripts/release.py` | Set by GitHub Actions | Build identity in `BUILD-INFO.json`; tag outputs |
 | `CARGO_TERM_COLOR`, `PYTHONDONTWRITEBYTECODE` | CI workflow | `always`, `1` | Log color; no `.pyc` files |
@@ -818,7 +820,9 @@ classification by report ID or length in
 descriptor and routing cases (including every truncated descriptor prefix) in
 [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs) and
 [hid_keyboard_report_tests.rs](../src/hid_keyboard_report_tests.rs), held-input release
-in the aggregation and delivery tests, and a round trip in
+in the aggregation and delivery tests, the Report Map and notification fuzz
+targets in [fuzz_tests.rs](../src/fuzz_tests.rs), whose seeds in
+`tests/fuzz-corpus/` gain a line for each new layout, and a round trip in
 [tests/integration.rs](../tests/integration.rs). Docs: the
 [report contracts](data-model.md#usb-hid-report-contracts),
 [HID path and limits](architecture.md#hid-path-and-limits), and

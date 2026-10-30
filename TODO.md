@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 13 | 3 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 14 | 2 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 11 | 7 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **148** | **67** | **20** |
+| **Total** | **149** | **66** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -970,11 +970,20 @@ Host tests, simulation, and code-health work. Context:
   three links; the host tests assume two links and stop compiling when the
   count changes (2026-10-10;
   [development](docs/development.md#add-a-configuration-constant)).
-- [ ] **P1** **Parser fuzzing and property tests.** Add bounded fuzz targets for
+- [x] **P1** **Parser fuzzing and property tests.** Add bounded fuzz targets for
   HID descriptors, advertisements, report classification, and persistence
   framing. Accept when CI runs a seed corpus and scheduled fuzzing records no
-  panics, out-of-bounds access, excessive work, or invalid accepted output
-  ([testing](docs/testing.md#known-verification-gaps)).
+  panics, out-of-bounds access, excessive work, or invalid accepted output.
+  Done on 2026-10-30 with a dependency-free harness on the pinned stable
+  toolchain ([ADR 0027](docs/adr/0027-seeded-parser-fuzzing.md)): six targets
+  (Report Maps, report notifications, advertisements, long attribute reads,
+  store framing, store items) check properties of every accepted input, not
+  only the absence of panics, over a reviewed corpus in `tests/fuzz-corpus/`
+  and inputs mutated from it. Every host test run checks 5,000 per target;
+  the weekly and manual `Parser fuzzing` CI job checks 20 million with a new
+  seed, and `mask fuzz` a million. 246 million local inputs found nothing;
+  three deliberate mutants were caught
+  ([parser fuzzing](docs/testing.md#parser-fuzzing)).
 - [ ] **P1** **Async task fault tests.** Exercise command cancellation, full
   event channels, scan/reconnect contention, repeated security failures, and
   device disappearance during discovery. Accept when deterministic test cases

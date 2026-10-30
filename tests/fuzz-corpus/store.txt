@@ -1,0 +1,28 @@
+# Seed corpus for the pairing store fuzz targets (src/storage_fuzz_tests.rs):
+# flash items as the store writes them (magic B2, version 01, a record count,
+# then length-prefixed device records; docs/data-model.md#pairing-store) and
+# items it must refuse. One input per line in hex; `#` starts a comment.
+
+# An empty store.
+B2 01 00
+# One device without keys: public address, RSSI -60, "Mouse".
+B2 01 01 0F 01 22 33 44 55 C6 00 C4 05 4D 6F 75 73 65 00
+# A bonded keyboard at its random static identity, then the mouse.
+B2 01 02 44 02 22 33 44 55 C6 01 D0 08 4B 65 79 62 6F 61 72 64 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 02 22 33 44 55 C6 01 0F 01 22 33 44 55 C6 00 C4 05 4D 6F 75 73 65 00
+# A full store: four bonded devices with 32-byte UTF-8 names, the largest item.
+B2 01 04 5C 10 22 33 44 55 C6 00 A6 20 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E C3 A9 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 60 10 22 33 44 55 C6 00 5C 11 22 33 44 55 C6 00 A6 20 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E C3 A9 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 61 11 22 33 44 55 C6 00 5C 12 22 33 44 55 C6 00 A6 20 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E C3 A9 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 62 62 62 62 62 62 62 62 62 62 62 62 62 62 62 62 12 22 33 44 55 C6 00 5C 13 22 33 44 55 C6 00 A6 20 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E 4E C3 A9 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 63 63 63 63 63 63 63 63 63 63 63 63 63 63 63 63 13 22 33 44 55 C6 00
+# A private address saved by older firmware, then the bonded identity whose
+# key resolves it in the fuzz targets' stand-in, which loading merges.
+B2 01 02 15 77 22 33 44 55 C6 02 BA 0B 4F 6C 64 20 61 64 64 72 65 73 73 00 42 30 22 33 44 55 C6 00 CE 06 4D 65 72 67 65 64 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 77 77 77 77 77 77 77 77 77 77 77 77 77 77 77 77 30 22 33 44 55 C6 00
+# A bond whose identity is a private address, which loading refuses.
+B2 01 01 44 02 22 33 44 55 C6 01 D0 08 4B 65 79 62 6F 61 72 64 01 34 12 07 07 07 07 07 07 07 07 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 42 03 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 5A 02 22 33 44 55 C6 02
+# Five records, one more than the store holds.
+B2 01 05 0B 00 22 33 44 55 C6 00 00 01 44 00 0B 01 22 33 44 55 C6 00 00 01 44 00 0B 02 22 33 44 55 C6 00 00 01 44 00 0B 03 22 33 44 55 C6 00 00 01 44 00 0B 04 22 33 44 55 C6 00 00 01 44 00
+# A future storage version, kept but not loaded.
+B2 02 01 0F 01 22 33 44 55 C6 00 C4 05 4D 6F 75 73 65 00
+# A truncated record, and a bond flag that is neither 0 nor 1.
+B2 01 01 0F 01 22 33 44 55 C6 00 C4 05 4D 6F 75 73 65
+B2 01 01 0F 01 22 33 44 55 C6 00 C4 05 4D 6F 75 73 65 02
+# The pre-versioning layout: a count, then records without a bond flag.
+01 01 22 33 44 55 C6 00 C4 05 4D 6F 75 73 65
+00

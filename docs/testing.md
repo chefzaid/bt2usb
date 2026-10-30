@@ -49,6 +49,7 @@ PowerShell, use the direct command.
 | Host tests with output | `mask test-verbose` | `cargo test --locked --lib --tests -- --nocapture` |
 | One module or test name | — | `cargo test --locked --lib coordinator` |
 | Integration tests only | — | `cargo test --locked --test integration` |
+| Parser fuzzing, a million inputs per target | `mask fuzz` | `cargo test --locked --lib fuzz_ -- --nocapture` with `BT2USB_FUZZ_CASES=1000000` ([parser fuzzing](#parser-fuzzing)) |
 | Renode glyph table check, or rewrite after a font change | — | `cargo test --locked --test oled_font`, or with `UPDATE_OLED_FONT=1` |
 | Coverage summary | `mask coverage` | `cargo llvm-cov --locked --lib --tests` |
 | Coverage HTML / JSON | `mask coverage --html` / `--json` | `cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html` |
@@ -148,8 +149,8 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-30, in the commit that shows storage and security errors. The tree
-holds 444 `#[test]` functions: 431 in
+2026-10-30, in the commit that adds parser fuzzing. The tree
+holds 453 `#[test]` functions: 440 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, 2 in `tests/vendor_pairing_gate.rs`, and 5 in
 `tests/vendor_portal.rs`, and every one of
@@ -187,6 +188,8 @@ and the 384 passed the same day. There are no `#[ignore]` or
 | [hid/host_leds.rs](../src/hid/host_leds.rs) | 5 | `forward_host_leds`, polled by hand with a fake host: a new link gets the host's current lock-key state first, a reconnecting keyboard gets a state the slot already forwarded to its previous link, nothing is written before the host sends a state, later changes follow in order, and the host's first state is forwarded when it arrives during the link. |
 | [hid/keyboard.rs](../src/hid/keyboard.rs) | 4 | Host keyboard LED byte decoding: individual LEDs, Caps Lock with Num Lock, masking of undefined upper bits with round trip, and the all-off default. |
 | [hid/wake.rs](../src/hid/wake.rs) | 3 | Remote-wake eligibility: only a new key or modifier wakes (the rollover error code does not); mouse motion, wheel, pan, and releases do not, a new button does; consumer input needs a new nonzero usage. |
+| [fuzz_tests.rs](../src/fuzz_tests.rs) | 4 | The Report Map, report notification, advertisement, and long-read fuzz targets ([Parser Fuzzing](#parser-fuzzing)) |
+| [fuzz.rs](../src/fuzz.rs) | 3 | The fuzzing harness itself: corpus lines are hex with comments, mutated inputs are reproducible from their seed and bounded in length, and a failing check names the target, case, input, and settings |
 | [hid/report_protocol.rs](../src/hid/report_protocol.rs) | 2 | Item framing in the Report Map parser: a short item whose data runs past the end of the map (a Usage Page missing its data byte, a two-byte Usage Page with one, a 32-bit Usage with three) rejects the map, and so does an item with the wrong data size for its tag (Input or Collection without data, Collection with two bytes, End Collection, Push, or Pop with data). |
 
 ### BLE Coordination And Discovery
@@ -213,6 +216,7 @@ and the 384 passed the same day. There are no `#[ignore]` or
 | [storage/record.rs](../src/storage/record.rs) | 3 | Record metadata validation: name encoding, capacity, and base length; agreement between the bond flag and the record size; UTF-8 name lengths counted in bytes. |
 | [storage/codec.rs](../src/storage/codec.rs) | 1 | `encode_device` writes nothing, and leaves the buffer unchanged, when it is one byte too small for a bonded device record. |
 | [storage/devices_format_tests.rs](../src/storage/devices_format_tests.rs) | 16 | The flash format of the device list in `devices.rs` and `codec.rs`. Codec: device records with and without a bond round trip and need their whole buffer, every address kind round trips and kind 5 is rejected, bond fields sit at their offsets, a bond identity must be public or random static, names truncate at a character boundary. Load: a full store of four bonded devices with 32-byte names round trips through the flash item; an empty area is writable; a legacy store loads without bonds and is rewritten versioned on the next change, and a bad legacy count or length is refused; empty, truncated, future-version, miscounted, and malformed items, and a well-formed frame with more records than the capacity, like an unreadable area, leave the store empty and refusing saves until a factory reset, which erases first only for an unreadable store; frames with up to the capacity load unchanged; a save reports an item that does not fit its buffer; loading merges records of one bonded peer. |
+| [storage_fuzz_tests.rs](../src/storage_fuzz_tests.rs) | 2 | The store framing and store item fuzz targets ([Parser Fuzzing](#parser-fuzzing)) |
 | [storage/devices_tests.rs](../src/storage/devices_tests.rs) | 18 | The device list in `devices.rs`. Merge: a bonded device is stored under its identity address; RSSI alone is not saved but a name change is; new keys replace the bond of the same identity and report `BondReplaced`, while keys added to a record without any are an update; a device without keys never clears a bond; keys merge with an entry under the identity or a private address. Identity: every SoftDevice address type decodes and the other 251 values are refused; a device whose bond has any other identity is not stored and leaves nothing to save, and the saved list reloads for every identity kind; a refused bond leaves the stored bond of the same peer; 256 refused pairings from rotating addresses leave every bond of a full store; an all-zero IRK resolves no private address, so such a device neither matches nor merges with a peer bonded without an IRK. Capacity and removal: a fifth device evicts the oldest, and the outcome names the evicted device's identity when it had keys, so the bonder drops them too; lookup follows the stored address or a resolvable private address with `IdentityKey::is_match` rules, and address equality ignores the resolved flag; Forget builds a candidate and leaves the list unchanged; bonds list oldest first and devices newest first; Forget and reset publish only after the save succeeds (through `management::commit`). Both files resolve private addresses with a fake in place of the SoftDevice's AES block. |
 
 The [data model](data-model.md#pairing-store) describes the layout these tests
@@ -270,6 +274,52 @@ exercises.
 | `stack.rs` | Embedded and simulation builds and Clippy; the guard's placement and register values (`stack_logic.rs`) are host-tested; the Renode case `A Stack Overflow Faults In The Guard And Is Reported` programs the MPU, takes a fault in the guard, and checks the report ([Robot test case](#robot-test-case)); self-test `stack` and `stack guard` stages and the optional deliberate overflow; the Renode case also resets the machine and checks the next boot's `previous boot` line from the record kept in `.uninit`; the high-water scan runs only on the board |
 | `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice stage |
 | `power.rs` | Embedded build and Clippy; its policy (`power_logic.rs`) is host-tested; hardware acceptance (sleep and wake) |
+
+## Parser Fuzzing
+
+Six fuzz targets run the parsers that read an advertiser's, a peripheral's,
+or flash's bytes over a seed corpus and mutated inputs, and check what any
+accepted input must satisfy ([ADR 0027](adr/0027-seeded-parser-fuzzing.md)).
+They are ordinary host tests: `cargo test` runs each over its seeds, every
+truncation of them, and 5,000 inputs mutated from them with a fixed seed.
+
+| Target | Parser | Seeds in [tests/fuzz-corpus/](../tests/fuzz-corpus/) | What every input must satisfy |
+| --- | --- | --- | --- |
+| `fuzz_report_maps` | `HidDescriptor::parse` | `report-map.txt` and the firmware's three USB descriptors | An accepted map has a supported input, keeps no report ID for a kind it lacks and never ID 0, and routes an ID only to the one kind that holds it |
+| `fuzz_report_notifications` | `classify_report`, `classify_notification`, `classify_notification_with_hint`, `classify_known`, `classify_gatt_notification` | `report.txt`; the maps of `report-map.txt` that parse, as hints | An accepted report carries exactly the bytes of its kind's fixed layout and serializes to its USB length; a numbered map routes only by its declared IDs, an unnumbered one only to kinds it advertises |
+| `fuzz_advertisements` | `contains_hid_service_uuid`, `advertised_name`, `extract_device_name` | `advertisement.txt` | Both equal an independent walk of the structures, with names cut to 32 bytes on a character boundary |
+| `fuzz_long_reads` | `LongRead` | `long-read.txt`, whose header explains how its bytes encode an MTU and fragments | The value is exactly the accepted fragments and ends only as ATT allows |
+| `fuzz_store_framing` | `framing::records`, `is_complete`, `Writer` | `store.txt` | Records are the runs their prefixes announce, a complete frame is what writing its records produces, and a write that does not fit leaves the frame unchanged |
+| `fuzz_store_items` | `codec::decode_device`, `DeviceList::load` | `store.txt` | An accepted record is byte for byte the one the codec writes; a refused item leaves the store empty and refusing saves; a loaded list saved again loads back unchanged |
+
+A panic in a check, including an out-of-bounds index or an integer overflow,
+fails the test with the target, the case, the input in hex, and the settings
+that reproduce it, for example:
+
+```text
+fuzz target report failed on mutated case 8, input [3a0505]; reproduce with BT2USB_FUZZ_SEED=0x627432757362 BT2USB_FUZZ_CASES=5000: ...
+```
+
+An input whose fastest of three reruns takes longer than 100 ms fails too.
+Reproduce a failure with the two variables it names, then keep the input as a
+commented line in the target's corpus file, or as a unit test beside the fix.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `BT2USB_FUZZ_CASES` | 5,000 | Mutated inputs per target |
+| `BT2USB_FUZZ_SEED` | `0x627432757362` | The generator's seed, in decimal or `0x` hex; each target derives its own inputs from it |
+
+`mask fuzz` runs a million inputs per target, about four seconds for all six
+on the 2026-10-30 container. The `Parser fuzzing` CI job, on the weekly
+schedule and on manual dispatch, runs 20 million with the workflow run ID as
+the seed, so each run searches new inputs; its log prints the seed
+([Continuous Integration](#continuous-integration)).
+
+The search is random, not coverage-guided: an input that needs several
+coordinated edits, such as a longer structure length together with a
+character that crosses the name limit, may never be drawn, so a boundary
+worth checking belongs in the corpus as a seed. The vendored discovery code
+and the GATT client that feed these parsers are not fuzzed.
 
 ## Renode Simulation
 
@@ -642,6 +692,7 @@ Cargo command and install no toolchain.
 | --- | --- | --- |
 | Host tests (`ubuntu-24.04`, `windows-2025`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs` and every `.rs` or `.py` file under `scripts/`, and a `//!` module comment for every `.rs` file; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 (each SHA-256 verified), run the script linter's tests and `scripts/lint_scripts.py` ([Python and shell checks](code-quality.md#python-and-shell-checks)), and run actionlint; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
+| Parser fuzzing | Ubuntu, 20 min, weekly schedule and manual dispatch only | `rustup install`; `cargo test --locked --lib fuzz_ -- --nocapture` with `BT2USB_FUZZ_CASES=20000000` and the workflow run ID as `BT2USB_FUZZ_SEED` ([parser fuzzing](#parser-fuzzing)) |
 | Dependency security audit | Ubuntu, 10 min | `rustup install`; install cargo-deny 0.20.2 (SHA-256 verified); `cargo deny --locked check` with [deny.toml](../deny.toml): advisories (two ignored by ID), licenses, and sources ([auditing](code-quality.md#auditing)) |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`, without and with the `log-sensitive-data` opt-in; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
 | Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; rustdoc with private items and warnings denied for `bt2usb-sim`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
@@ -700,7 +751,8 @@ tracks it.
 | --- | --- | --- |
 | Format check | Yes (`cargo fmt -- --check`) | Yes (`--package bt2usb`) |
 | Host, embedded, and simulation Clippy | Yes | Yes |
-| Host unit and integration tests | Yes | Yes, Linux and Windows |
+| Host unit and integration tests, with 5,000 inputs per fuzz target | Yes | Yes, Linux and Windows |
+| Long parser fuzzing | No (`mask fuzz`, a million inputs per target) | Weekly and manual runs, 20 million per target |
 | Release firmware and simulation builds | Yes | Yes |
 | Release-helper tests | No | Yes, Linux and Windows |
 | Markdown checks (`scripts/check_docs.py`) | Yes (also `mask docs-check`, which adds its tests) | Yes, Linux, with its tests |
@@ -751,7 +803,8 @@ patterns: every truncated prefix of each USB descriptor
 (`parses_actual_usb_descriptors_without_cross_classifying_pan`),
 `reader_stops_on_truncated_record`,
 `malformed_termination_never_exposes_partial_value`, and
-`malformed_known_id_never_falls_back_to_another_kind`.
+`malformed_known_id_never_falls_back_to_another_kind`. A new parser also
+gets a [fuzz target](#parser-fuzzing) with seeds at its boundaries.
 
 ### Prove Held Input Is Released
 
@@ -805,7 +858,8 @@ captured keystrokes in fixtures or logs.
 
 Not yet first-class:
 
-- fuzzing and property tests for descriptors, advertisements, reports, and storage
+- coverage-guided fuzzing; the [parser fuzzing](#parser-fuzzing) is a seeded
+  random search, and it does not reach the vendored discovery code
 - deterministic async fault tests (cancellation, full channels, contention)
   beyond the endpoint delivery worker tests
 - power-loss and flash fault injection

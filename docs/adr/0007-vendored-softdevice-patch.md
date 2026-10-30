@@ -197,7 +197,10 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - "Report Map interoperability and legacy policy": capture long Report Map reads
   and error handling from real peripherals at different MTUs, and decide whether
   the absent-map fallback stays allowed.
-- "Parser fuzzing and property tests": fuzz the descriptor and long-read paths.
+- "Parser fuzzing and property tests": fuzz the descriptor and long-read paths
+  (the pure Report Map parser and long-read assembly are fuzzed since
+  2026-10-30, [ADR 0027](0027-seeded-parser-fuzzing.md); the vendored
+  discovery code that feeds them is not).
 - "Supply-chain and tooling maintenance": include the vendored crate in license
   and SBOM checks (both landed on 2026-10-30: `cargo deny` checks its declared
   license, and the release SBOM lists it by its path in this repository).

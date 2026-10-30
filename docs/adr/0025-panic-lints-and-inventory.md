@@ -196,8 +196,9 @@ Follow-ups, tracked in [TODO.md](../../TODO.md#fixme) (the last one under
   behavior. Fixed on 2026-10-10: the vendored crate calls every security
   handler method after the state is released
   ([ADR 0007](0007-vendored-softdevice-patch.md)).
-- "Parser fuzzing and property tests" (P1) would exercise the rewritten
-  parsers with generated input.
+- "Parser fuzzing and property tests" exercises the rewritten parsers with
+  generated input since 2026-10-30
+  ([ADR 0027](0027-seeded-parser-fuzzing.md)).
 
 ## Implementation
 

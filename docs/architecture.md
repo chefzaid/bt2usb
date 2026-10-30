@@ -1532,6 +1532,7 @@ change.
 - [ADR 0024: Model The TWIM And SSD1306 In Renode And Read The Panel's Text Back](adr/0024-renode-oled-models.md)
 - [ADR 0025: Deny Panic-Prone Constructs With Clippy And List The Ones It Cannot See](adr/0025-panic-lints-and-inventory.md)
 - [ADR 0026: Guard The Bottom Of The Stack With An MPU Region](adr/0026-mpu-stack-guard.md)
+- [ADR 0027: Fuzz The Parsers With A Seeded In-Tree Harness On The Stable Toolchain](adr/0027-seeded-parser-fuzzing.md)
 
 ## Proposed ADRs
 

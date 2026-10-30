@@ -176,6 +176,30 @@ jobs:
       - name: Fail below the line-coverage floor
         run: cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"
 
+  # Seeded random inputs against the parsers that read peer and flash data
+  # (docs/testing.md#parser-fuzzing). Every host test run checks each target's
+  # seed corpus and 5,000 mutated inputs; this job adds 20 million per target,
+  # with a seed that differs each run and is printed for reproduction.
+  fuzz:
+    name: Parser fuzzing
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      BT2USB_FUZZ_CASES: "20000000"
+      BT2USB_FUZZ_SEED: ${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust toolchain
+        run: |
+          rustup install
+          rustup show active-toolchain
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Fuzz the parsers with this run's seed
+        run: cargo test --locked --lib fuzz_ -- --nocapture
+
   # Advisories, licenses, and crate sources, with the settings in deny.toml.
   audit:
     name: Dependency security audit

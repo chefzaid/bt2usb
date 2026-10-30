@@ -312,9 +312,9 @@ capture method, and hardware-result issue, never keystrokes
 ([fixtures](../testing.md#keep-fixtures-small-and-real)). A differential test
 runs both paths on every fixed-layout fixture; a seeded mutation test in
 `cargo test` asserts no panic, bounded work, table invariants, and USB
-contracts on mutated maps and payloads; a `cargo-fuzz` target, which needs
-nightly outside the pinned toolchain (general knowledge), joins "Parser
-fuzzing and property tests". Renode is not cycle-accurate, so it cannot time
+contracts on mutated maps and payloads, as a target of the seeded fuzzing
+harness ([ADR 0027](0027-seeded-parser-fuzzing.md)), which runs on the pinned
+stable toolchain. Renode is not cycle-accurate, so it cannot time
 the callback; a new `sim.rs` step, which adds the `hid` module to the
 simulation build (today it has only `ble`, `config`, and `ui`), can run the
 corpus on the emulated Cortex-M4 with its 32-bit `usize` and report through
@@ -341,7 +341,9 @@ the user about unsupported reports".
   descriptors and synthetic arrays: 34 tests in `hid_descriptor_tests.rs`, 17
   in `hid_classify_tests.rs`, 10 in `hid_keyboard_report_tests.rs`, 36 report
   parsing and serialization tests in `lib_tests.rs`, and 3 notification round
-  trips in `tests/integration.rs`. No real Report Map, no fuzzing, and no
+  trips in `tests/integration.rs`; since 2026-10-30 the Report Map and
+  notification fuzz targets
+  ([ADR 0027](0027-seeded-parser-fuzzing.md)). No real Report Map and no
   Renode scenario touches HID.
 - **Hardware-verified:** not yet; no real peripheral's map or report recorded.
 

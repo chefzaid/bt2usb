@@ -166,7 +166,12 @@ Negative and risks:
 - **Software-verified:** on 2026-10-30, two clones in different directories,
   one with a copied Cargo home at another path, each built with `release.py
   build` and staged, gave byte-identical packages; staging refused an image
-  from a plain `cargo build`. See the
+  from a plain `cargo build`. The CI build of the commit that made the
+  change
+  ([run 41054684665](https://github.com/chefzaid/bt2usb/actions/runs/41054684665))
+  and a rebuild of it in a separate Linux container, from a fresh clone at
+  another path and with another Cargo home, gave the same bridge ELF,
+  self-test ELF, and HEX. See the
   [validation record](../validation-records.md#validation-record--2026-10-30-reproducible-release-images).
 - **Hardware-verified:** not applicable; the flashed bytes are what changed,
   and the next board run uses them.

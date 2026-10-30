@@ -32,7 +32,7 @@ clones, and nothing ran on a board.
 | Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` and Ruff 0.16.9 on the two new files | Passed: 64 tests, 30 of them release-helper (5 new); lint clean, including the `release-build` recipe |
 | `mask ci` steps | The recipe's script | Passed after this record was added |
 | actionlint | Not installed here | Not run on the changed `embedded` steps |
-| Hosted comparison | GitHub Actions | Not run before the commit; the first push prints `SHA256SUMS`, to compare with a local `release.py build` of that commit |
+| Hosted comparison | GitHub Actions `ubuntu-24.04` against this container | Not run before the commit. The push run [41054684665](https://github.com/chefzaid/bt2usb/actions/runs/41054684665) on that commit, `2967978`, printed `bt2usb.elf` `895a562f…`, `bt2usb-selftest.elf` `5dc66fb3…`, and `bt2usb.hex` `695d7cb0…`; a `release.py build` of the same commit in a fresh clone in this record's container, at another checkout path and with another Cargo home, gave the same three hashes |
 | Board/radio/USB acceptance | Physical hardware | Not applicable: the code is unchanged, only the paths in its panic locations and debug information |
 
 ## Validation Record — 2026-10-30, HFXO Request

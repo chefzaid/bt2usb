@@ -138,7 +138,7 @@ The lints turn "every index is checked" from a review habit into a build
 failure, at no runtime cost where the rewrite only moves an existing check
 into the access. Rewriting rather than annotating also put each bound next to
 the access it protects, so a later edit cannot move one without the other. The
-three sites that keep a reason hold constant or type-guaranteed bounds, where a
+sites that keep a reason hold constant or type-guaranteed bounds, where a
 rewrite would only add a fallback no input can reach. For what the lints cannot
 see, a reasoned list is the best evidence available short of a proof, and the
 inventory showed it is worth having: it found five vendored panics a peer can
@@ -206,7 +206,7 @@ Follow-ups, tracked in [TODO.md](../../TODO.md#fixme) (the last one under
 | --- | --- |
 | Lint levels | `[lints.clippy]` in [Cargo.toml](../../Cargo.toml) |
 | Test allowances | [clippy.toml](../../clippy.toml); crate-level `#![allow]` in [tests/oled_font.rs](../../tests/oled_font.rs) and [build.rs](../../build.rs) |
-| Kept sites | `InputAggregator::keyboard` ([aggregate.rs](../../src/hid/aggregate.rs)), the serial `write!` in `init` ([hid_device.rs](../../src/usb/hid_device.rs)), `SimBle::scenario_step` ([sim_ble.rs](../../src/sim_ble.rs)) |
+| Kept sites | `InputAggregator::keyboard` ([aggregate.rs](../../src/hid/aggregate.rs)), the serial `write!` in `init` ([hid_device.rs](../../src/usb/hid_device.rs)); a third, the simulation's `SimBle::scenario_step`, went with that code on 2026-10-30 |
 | Rewritten parsers | `ad_structures` in [adv_parser.rs](../../src/ble/adv_parser.rs); `HidDescriptor::parse` and `ReportReference::parse` in [report_protocol.rs](../../src/hid/report_protocol.rs); the report decoders in [hid/](../../src/hid); the codecs in [storage/](../../src/storage); `KeyboardLeds::from_output_report` in [keyboard.rs](../../src/hid/keyboard.rs), which `set_report` in [host_requests.rs](../../src/usb/host_requests.rs) calls |
 | Compile-time checks | `LINKS` and the event-size assertion in [sd_setup.rs](../../src/sd_setup.rs); the record-size assertion in [devices.rs](../../src/storage/devices.rs); `const` blocks around `MapConfig::new` in [storage.rs](../../src/storage.rs) and [selftest.rs](../../src/selftest.rs) |
 | Vendored changes | `gap::on_evt` (timeout arm), `ConnectionState::disconnect_with_reason` and `Connection::drop`, and the waiters in `discover_service`, `discover_characteristics`, `discover_descriptors`, and `att_mtu_exchange`, under `vendor/nrf-softdevice/src/ble/`; `evt-max-size-256` in [Cargo.toml](../../Cargo.toml) |

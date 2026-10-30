@@ -20,7 +20,7 @@ Verification layers and the test map are in [testing](testing.md). Lint,
 │   ├── main.rs            bridge firmware entry point (feature `embedded`)
 │   ├── selftest.rs        board bring-up image (feature `embedded`)
 │   ├── sim.rs             Renode entry point (feature `sim`)
-│   ├── sim_ble.rs         Renode stand-in for the BLE coordinator task
+│   ├── sim_ble.rs         Renode stand-ins under the BLE coordinator loop
 │   ├── lib.rs             host-test library of hardware-free modules
 │   ├── config.rs          compile-time timing, USB, and storage constants; pin notes
 │   ├── sd_setup.rs        SoftDevice configuration shared by bridge and self-test
@@ -776,10 +776,11 @@ Files:
   `UiController::event`, which matches `Event` exhaustively. `main.rs` sends
   every command with `BLE_CMD_CHANNEL.try_send`, never an awaited send, so a
   full command channel cannot deadlock the UI against the BLE task.
-- [sim_ble.rs](../src/sim_ble.rs) and [sim.rs](../src/sim.rs): the simulated
-  coordinator matches `Command` and `Action`, and the console log matches
-  `Command` and `Event`, exhaustively, so the `sim` build fails until a new
-  variant is simulated and logged.
+- [sim_ble.rs](../src/sim_ble.rs) and [sim.rs](../src/sim.rs): `SimIo`
+  implements `CoordinatorIo`, its workers match `SlotCommand`, and the
+  console log matches `Command` and `Event`, each exhaustively, so the `sim`
+  build fails until a new `CoordinatorIo` method, slot command, or variant is
+  simulated and logged.
 
 Tests: reducer cases in
 [coordinator_tests.rs](../src/ble/coordinator_tests.rs), management cases in

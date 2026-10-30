@@ -180,8 +180,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - Renode: [bt2usb-sim.robot](../../renode/bt2usb-sim.robot) waits for
   `bt2usb-sim starting`, `buttons ready`, and `entering sim UI loop`, then
   presses SELECT, DOWN, UP, and SELECT on pins 24, 12, 11, and 24 and asserts
-  the resulting screens, commands, and coordinator actions through to
-  `scenario: active_count=0`.
+  the resulting screens, commands, and the coordinator loop's worker
+  commands and store writes through to the closing `Disconnected`.
 - Self-test: [selftest.rs](../../src/selftest.rs) reports the stages
   `softdevice`, `flash`, `usb enumeration`, `usb hid report`, `oled i2c`,
   `oled render`, the three buttons, `ble scan`, `stack`, and `stack guard`,

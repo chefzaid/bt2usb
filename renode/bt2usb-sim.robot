@@ -2,10 +2,10 @@
 Documentation     Headless Layer-3 test: boots the SoftDevice-free bt2usb-sim
 ...               firmware on a simulated nRF52840, presses the real GPIO
 ...               buttons, and asserts over UART0 that the firmware's UI
-...               controller, coordinator reducers, scan merging, link-loss
-...               reservation, saved-device management, and pairing-store codec
-...               all run on the target, and that the display task draws each
-...               screen's text on the simulated OLED. A second test checks
+...               controller and coordinator loop, with its scan merging,
+...               link-loss reservation, saved-device management, and
+...               pairing-store codec, all run on the target, and that the
+...               display task draws each screen's text on the simulated OLED. A second test checks
 ...               the TWIM model itself against the Product Specification.
 ...               Run with:  renode-test renode/bt2usb-sim.robot
 Suite Setup       Setup And Compile Models
@@ -83,6 +83,13 @@ Press Button
     Wait For Line On Uart     ${expected}    pauseEmulation=true
     Execute Command           gpio0 OnGPIO ${pin} true
     Execute Command           emulation RunFor "0.1"
+
+Next Line Should Contain
+    [Documentation]    The next UART line, right after the last one matched,
+    ...                contains ${expected}: nothing came in between.
+    [Arguments]        ${expected}
+    ${next}=                  Wait For Next Line On Uart    pauseEmulation=true
+    Should Contain            ${next.Line}    ${expected}
 
 Oled Should Show
     [Documentation]    Run the emulation in 50 ms steps, up to ${steps} of them,
@@ -201,21 +208,10 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Oled Should Show          bt2usb / Idle    SELECT: scan    UP: saved devices
     Oled Showed No Power-On Noise
 
-    # Scenario step 0 (t~2s, RTC time driver): the keyboard connects through
-    # plan_connect and on_slot_connected, is saved, and the saved item reads
-    # back. Pause there so the presses below land before the next step.
-    Wait For Line On Uart     scenario: connect device 0 (Keyboard)
-    Wait For Line On Uart     action: ConnectSlot slot=0 addr=0xa1
-    Wait For Line On Uart     action: PersistDevice addr=0xa1
-    Wait For Line On Uart     holds 1 device(s); reload matches
-    Wait For Line On Uart     scenario: active_count=1 occupied_count=1
-    Wait For Line On Uart     event: Connected 'Keyboard' -> screen Connected (selected 0)    pauseEmulation=true
-    Oled Should Show          Connected    Keyboard    SEL:add DOWN:disc    UP:saved devices
-
-    # A user scan from Connected, driven by real GPIO presses (P0.24 SELECT,
-    # P0.12 DOWN, P0.11 UP) through ui::buttons. The scan merges three
-    # advertisements, the mouse's first, and lists only the two HID devices,
-    # the stronger keyboard first.
+    # A user scan from Home, driven by real GPIO presses (P0.24 SELECT,
+    # P0.12 DOWN, P0.11 UP) through ui::buttons, and run by the firmware's
+    # coordinator loop. The scan merges three advertisements, the mouse's
+    # first, and lists only the two HID devices, the stronger keyboard first.
     Press Button              ${PIN_SELECT}    button Select -> screen Scanning (selected 0)
     Wait For Line On Uart     cmd: StartScan
     Wait For Line On Uart     scan: heard 3 advertisers, listed 2 HID devices
@@ -227,24 +223,40 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Press Button              ${PIN_DOWN}      button Down -> screen DeviceList (selected 1)
     Oled Should Show          Select device    ${SPACE * 2}Keyboard    > Mouse
     Press Button              ${PIN_UP}        button Up -> screen DeviceList (selected 0)
-    Press Button              ${PIN_DOWN}      button Down -> screen DeviceList (selected 1)
 
-    # Connect the mouse: a slot is reserved, connected, and saved.
+    # Connect the keyboard: plan_connect reserves slot 0, its worker connects
+    # at once, and on_slot_connected saves the device, whose item reads back.
+    Press Button              ${PIN_SELECT}    button Select -> screen Connecting (selected 0)
+    Wait For Line On Uart     cmd: Connect(0)
+    Wait For Line On Uart     slot 0: Connect addr=0xa1
+    Wait For Line On Uart     holds 1 device(s); reload matches
+    Wait For Line On Uart     event: Connected 'Keyboard' -> screen Connected (selected 0)    pauseEmulation=true
+    Oled Should Show          Connected    Keyboard    SEL:add DOWN:disc    UP:saved devices
+
+    # Selecting the connected keyboard again from a new scan only reports the
+    # links again: no worker is told anything in between.
+    Press Button              ${PIN_SELECT}    button Select -> screen Scanning (selected 0)
+    Wait For Line On Uart     event: ScanComplete -> screen DeviceList (selected 0)
+    Press Button              ${PIN_SELECT}    button Select -> screen Connecting (selected 0)
+    Wait For Line On Uart     cmd: Connect(0)
+    Next Line Should Contain    event: Connected 'Keyboard' -> screen Connected (selected 0)
+
+    # Connect the mouse from a third scan: the second slot is reserved,
+    # connected, and saved.
+    Press Button              ${PIN_SELECT}    button Select -> screen Scanning (selected 0)
+    Wait For Line On Uart     event: ScanComplete -> screen DeviceList (selected 0)
+    Press Button              ${PIN_DOWN}      button Down -> screen DeviceList (selected 1)
     Press Button              ${PIN_SELECT}    button Select -> screen Connecting (selected 1)
     Wait For Line On Uart     cmd: Connect(1)
-    Wait For Line On Uart     action: ConnectSlot slot=1 addr=0xb2
+    Wait For Line On Uart     slot 1: Connect addr=0xb2
     Wait For Line On Uart     holds 2 device(s); reload matches
     Wait For Line On Uart     event: Connected 'Keyboard', 'Mouse' -> screen Connected (selected 0)    pauseEmulation=true
     Oled Should Show          Connected    Keyboard    Mouse    SEL:add DOWN:disc    UP:saved devices
 
-    # Step 1: the mouse is already connected, so plan_connect only reports the
-    # links again. Step 2: the keyboard's link drops; on_slot_link_lost keeps
-    # its slot reserved for the reconnect, and the UI shows only the mouse.
-    Wait For Line On Uart     scenario: connect device 1 (Mouse)
-    Wait For Line On Uart     scenario: active_count=2 occupied_count=2
-    Wait For Line On Uart     scenario: slot 0 link lost
-    Wait For Line On Uart     scenario: slot 0 kept reserved for 0xa1
-    Wait For Line On Uart     scenario: active_count=1 occupied_count=2
+    # Scenario step 0, 2 s later (RTC time driver): the keyboard's link
+    # drops and its worker reconnects in the background. on_slot_link_lost
+    # keeps the slot reserved, and the UI shows only the live link.
+    Wait For Line On Uart     scenario: slot 0 link lost, reconnecting to 0xa1
     Wait For Line On Uart     event: Connected 'Mouse' -> screen Connected (selected 0)    pauseEmulation=true
     Oled Should Show          Connected    Mouse    SEL:add DOWN:disc    UP:saved devices
 
@@ -258,25 +270,39 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Oled Should Show          Forget device?    Keyboard    > Cancel    ${SPACE * 2}Forget
     Press Button              ${PIN_SELECT}    button Select -> screen SavedDevices (selected 0)
 
-    # Forget the keyboard while its slot is reserved: the barrier releases that
-    # slot only, the shorter list is saved and reads back, the mouse stays up.
+    # Forget the keyboard while its slot is reserved for the reconnect:
+    # forget_targets picks that slot alone, so only its worker is quiesced,
+    # the shorter list is saved once it acknowledges and reads back, and the
+    # link status comes before the result.
     Press Button              ${PIN_DOWN}      button Down -> screen SavedDevices (selected 1)
     Press Button              ${PIN_SELECT}    button Select -> screen ConfirmForget(1) (selected 0)
     Press Button              ${PIN_DOWN}      button Down -> screen ConfirmForget(1) (selected 1)
     Oled Should Show          Forget device?    Keyboard    ${SPACE * 2}Cancel    > Forget
     Press Button              ${PIN_SELECT}    button Select -> screen Managing (selected 1)
     Wait For Line On Uart     cmd: Forget id=2 addr=0xa1
-    Wait For Line On Uart     quiesce: slot 0 released
-    Wait For Line On Uart     quiesce: complete for token 1
-    Wait For Line On Uart     holds 1 device(s); reload matches
-    Wait For Line On Uart     slots: active_count=1 occupied_count=1
-    Wait For Line On Uart     event: Connected 'Mouse' -> screen Managing
+    Next Line Should Contain    slot 0: Quiesce token 1
+    Next Line Should Contain    holds 1 device(s); reload matches
+    Next Line Should Contain    event: Connected 'Mouse' -> screen Managing
     Wait For Line On Uart     event: ManagementResult id=2 Ok(()) -> screen Notice    pauseEmulation=true
     Oled Should Show          Complete    Device forgotten    SELECT: back
     Press Button              ${PIN_SELECT}    button Select -> screen Connected (selected 0)
 
-    # Factory reset from the last entry of the list: every slot is released,
-    # the empty list is saved, and the UI returns home with no link.
+    # Step 1: the mouse's link drops too. With its slot reserved for the
+    # reconnect and no link up, Home says the bridge is reconnecting.
+    Wait For Line On Uart     scenario: slot 1 link lost, reconnecting to 0xb2
+    Wait For Line On Uart     event: Reconnecting -> screen Home (selected 0)    pauseEmulation=true
+    Oled Should Show          bt2usb / Reconnecting    SELECT: scan    UP: saved devices
+
+    # Step 2: slot 0, freed by the Forget, has nothing to reconnect. Step 3:
+    # the mouse advertises again and its worker connects under the same
+    # attempt. Only its RSSI could have changed, so nothing is written.
+    Wait For Line On Uart     scenario: slot 0 has nothing to reconnect
+    Wait For Line On Uart     scenario: slot 1 reconnected to 0xb2
+    Next Line Should Contain    event: Connected 'Mouse' -> screen Connected (selected 0)
+    Oled Should Show          Connected    Mouse    SEL:add DOWN:disc    UP:saved devices
+
+    # Factory reset from the saved list: every worker is quiesced, the empty
+    # list is saved, and the UI returns home with no link.
     Press Button              ${PIN_UP}        button Up -> screen Managing (selected 0)
     Wait For Line On Uart     cmd: ListPaired id=3
     Wait For Line On Uart     event: PairedDevices id=3 ['Mouse'] -> screen SavedDevices (selected 0)
@@ -293,11 +319,10 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Oled Should Show          Reset all pairings?    Disconnect all    ${SPACE * 2}Cancel    > Reset
     Press Button              ${PIN_SELECT}    button Select -> screen Managing (selected 1)
     Wait For Line On Uart     cmd: FactoryReset id=4
-    Wait For Line On Uart     quiesce: slot 1 released
-    Wait For Line On Uart     quiesce: complete for token 2
-    Wait For Line On Uart     holds 0 device(s); reload matches
-    Wait For Line On Uart     slots: active_count=0 occupied_count=0
-    Wait For Line On Uart     event: Disconnected -> screen Managing
+    Next Line Should Contain    slot 0: Quiesce token 2
+    Next Line Should Contain    slot 1: Quiesce token 2
+    Next Line Should Contain    holds 0 device(s); reload matches
+    Next Line Should Contain    event: Disconnected -> screen Managing
     Wait For Line On Uart     event: ManagementResult id=4 Ok(()) -> screen Notice    pauseEmulation=true
     Oled Should Show          Complete    Pairings reset    SELECT: back
 
@@ -314,24 +339,19 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Oled Should Show          bt2usb / Idle    SELECT: scan    UP: saved devices    steps=40
     Oled Showed No Power-On Noise
 
-    # Steps 3 and 4 have no link left to lose or close; the next cycle's
-    # keyboard is saved again, so the reset store accepts writes.
-    Wait For Line On Uart     scenario: disconnect all
-    Wait For Line On Uart     scenario: active_count=0 occupied_count=0
-    Wait For Line On Uart     scenario: connect device 0 (Keyboard)
+    # The reset store accepts writes: the keyboard is saved again. DOWN then
+    # closes its link through plan_disconnect, and the UI is home, idle.
+    Press Button              ${PIN_SELECT}    button Select -> screen Scanning (selected 0)
+    Wait For Line On Uart     event: ScanComplete -> screen DeviceList (selected 0)
+    Press Button              ${PIN_SELECT}    button Select -> screen Connecting (selected 0)
+    Wait For Line On Uart     slot 0: Connect addr=0xa1
     Wait For Line On Uart     holds 1 device(s); reload matches
     Wait For Line On Uart     event: Connected 'Keyboard' -> screen Connected (selected 0)    pauseEmulation=true
     Oled Should Show          Connected    Keyboard    SEL:add DOWN:disc    UP:saved devices
-
-    # Step 1 adds the mouse; steps 2 and 3 drop the keyboard's link, then the
-    # mouse's. Both slots stay reserved while their workers reconnect, so Home
-    # says so, until step 4 closes them.
-    Wait For Line On Uart     event: Connected 'Keyboard', 'Mouse' -> screen Connected (selected 0)
-    Wait For Line On Uart     scenario: slot 1 kept reserved for 0xb2
-    Wait For Line On Uart     event: Reconnecting -> screen Home (selected 0)    pauseEmulation=true
-    Oled Should Show          bt2usb / Reconnecting    SELECT: scan    UP: saved devices
-    Wait For Line On Uart     scenario: disconnect all
-    Wait For Line On Uart     event: Disconnected -> screen Home (selected 0)    pauseEmulation=true
+    Press Button              ${PIN_DOWN}      button Down -> screen Home (selected 0)
+    Wait For Line On Uart     cmd: Disconnect
+    Next Line Should Contain    slot 0: Disconnect
+    Next Line Should Contain    event: Disconnected -> screen Home (selected 0)
     Oled Should Show          bt2usb / Idle    SELECT: scan    UP: saved devices
 
 A Stack Overflow Faults In The Guard And Is Reported

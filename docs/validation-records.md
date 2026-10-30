@@ -8,6 +8,30 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Simulation On The Coordinator Loop
+
+This record covers the commit that checks off the P1 item "Run the
+simulation on the coordinator loop" in
+[TODO.md](../TODO.md#verification-and-code-quality): `SimBle`, which
+repeated the loop's calls to the coordinator reducers and the management
+barrier by hand, is replaced by `SimIo`, a `CoordinatorIo` with two
+connection workers that answer at once, the scan, and the RAM pairing item.
+`main` in `src/sim.rs` runs `coordinator_loop::run` beside a UI loop that
+sends commands with `try_send` and takes events from a channel, as
+`main.rs` does. The scripted scenario shrinks to four link changes that
+reach the loop as slot events; connecting, Forget, Factory reset, and the
+closing disconnect come from button presses. The `#[expect]` in the old
+scenario step goes with it.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Local CI script | Format, host and three firmware Clippy configurations, host tests, rustdoc, documentation checks, release and simulation builds | Passed |
+| Simulation Clippy | `cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings` | Passed |
+| Renode | `renode-test renode/bt2usb-sim.robot` with the local platform copy without `ApplySVD` | 3 of 3 passed. The scenario connects both devices, sees a reselected keyboard only acknowledged, forgets the keyboard while its slot is reserved (only `slot 0: Quiesce token 1`, then the write), shows `bt2usb / Reconnecting` with the mouse's link down, sees the mouse reconnect with no write, resets, connects the keyboard again, and disconnects |
+| Renode, mutation | `same_peer` changed to always return `false`, then restored | The scenario test failed at the reselection: `slot 1: Connect addr=0xa1` came where the acknowledgement was expected |
+| Host tests | `cargo test --locked --lib` | Unchanged: no host-tested module changed |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed. The checker does not read the data model's verification table, whose hand-kept test counts were stale in five rows (framing, management, coordinator, scan list, UI); they are corrected |
+
 ## Validation Record — 2026-10-30, Bridge Info Screen
 
 This record covers the commit that checks off the P2 item "Bridge information

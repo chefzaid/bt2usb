@@ -64,16 +64,16 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 
 | Contract | Implementation | Software verification | Hardware verification |
 | --- | --- | --- | --- |
-| Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 8 host tests | None recorded |
+| Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 9 host tests | None recorded |
 | Record prefix and bond-flag validation | [storage/record.rs](../src/storage/record.rs) | 3 host tests | None recorded |
 | Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
 | Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 16 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 18 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
 | Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
-| Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
+| Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 8 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
 | USB device identity and request handling | [usb/hid_device.rs](../src/usb/hid_device.rs), [usb/host_requests.rs](../src/usb/host_requests.rs) | Firmware build and Clippy only | Self-test enumeration stage exists; no recorded run |
-| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/scan_list.rs](../src/ble/scan_list.rs), [ble/messages.rs](../src/ble/messages.rs) | 33 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs), 8 in [scan_list_tests.rs](../src/ble/scan_list_tests.rs), and 3 in `messages.rs`; Renode scenario | None recorded |
-| UI state model and request tracking | [ui/ui_logic.rs](../src/ui/ui_logic.rs), [ui/controller.rs](../src/ui/controller.rs) | 30 host tests in [ui_logic_tests.rs](../src/ui/ui_logic_tests.rs) and 16 in [controller_tests.rs](../src/ui/controller_tests.rs); Renode scenario | None recorded |
+| Coordinator reducers behind the BLE messages | [ble/coordinator.rs](../src/ble/coordinator.rs), [ble/scan_list.rs](../src/ble/scan_list.rs), [ble/messages.rs](../src/ble/messages.rs) | 37 host tests in [coordinator_tests.rs](../src/ble/coordinator_tests.rs) and [coordinator_attempt_tests.rs](../src/ble/coordinator_attempt_tests.rs), 9 in [scan_list_tests.rs](../src/ble/scan_list_tests.rs), and 3 in `messages.rs`; the Renode scenario runs them under the coordinator loop | None recorded |
+| UI state model and request tracking | [ui/ui_logic.rs](../src/ui/ui_logic.rs), [ui/controller.rs](../src/ui/controller.rs) | 32 host tests in [ui_logic_tests.rs](../src/ui/ui_logic_tests.rs) and 22 in [controller_tests.rs](../src/ui/controller_tests.rs); Renode scenario | None recorded |
 
 The store's [fuzz targets](testing.md#parser-fuzzing) check that every
 record the codec accepts is the one it writes and that a loaded list saved

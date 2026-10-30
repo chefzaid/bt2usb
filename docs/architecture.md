@@ -56,8 +56,8 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | Area | Layer | Responsibility |
 | --- | --- | --- |
 | [main.rs](../src/main.rs) | Entry point | Hardware setup, task spawning, channels, and the UI loop that runs the UI controller |
-| [sim.rs](../src/sim.rs) | Entry point | SoftDevice-free Renode entry point: UART console, button tasks, the display task, and the UI loop over the UI controller |
-| [sim_ble.rs](../src/sim_ble.rs) | Simulation shell | Renode stand-in for the BLE coordinator task: the real coordinator reducers, scan merging, management barrier and commit, and device list, with workers, radio, and flash that answer at once |
+| [sim.rs](../src/sim.rs) | Entry point | SoftDevice-free Renode entry point: UART console, button tasks, the display task, and the UI loop over the UI controller beside the firmware's coordinator loop |
+| [sim_ble.rs](../src/sim_ble.rs) | Simulation shell | Renode `CoordinatorIo` for the coordinator loop: connection workers, a scan, and flash that answer at once, with the real scan merging and device list, and the scripted link changes |
 | [selftest.rs](../src/selftest.rs) | Entry point | Staged board bring-up image |
 | [lib.rs](../src/lib.rs) | Host crate | Host-test entry point for hardware-free logic |
 | [config.rs](../src/config.rs) | Constants | Timing, scan, connection, USB identity, and storage constants |
@@ -121,7 +121,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, coordinator_loop, scan_list, reconnect, slot_loop, slot_policy, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, coordinator_loop, scan_list, reconnect, slot_loop, slot_policy, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator loop, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, device_info, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -1209,8 +1209,8 @@ The tasks in `bt2usb`, that is `main` (`#[embassy_executor::main]`) and the
 `bt2usb-selftest` spawns only `softdevice_task` and `usb_device_task` and runs
 its stages in `main`. `bt2usb-sim` spawns three instances of one
 `button_task` declared with `pool_size = 3` and the same `ui::display::task`
-as the bridge, and runs its UI loop and the simulated coordinator
-(`sim_ble::SimBle`) in `main`.
+as the bridge, and runs its UI loop and `coordinator_loop::run`, on the
+stand-ins in `sim_ble::SimIo`, side by side in `main`.
 
 ### Interrupt Priorities
 

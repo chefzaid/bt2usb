@@ -273,13 +273,13 @@ exercises.
 | --- | --- |
 | `ble/hid_client.rs` | Its decisions are in `ble/hid_gatt.rs` and host-tested. What remains are the SoftDevice discovery, read, and write calls, turning their results into `Fragment`s, the first-found keyboard LED handle, `NotifyFailed` when no subscription succeeded, and log lines; it takes a SoftDevice `Connection`, which only the firmware target compiles, so a host fake would mean reimplementing `nrf-softdevice`'s GATT client. Checked by the embedded build and Clippy and by hardware acceptance |
 | `ble/slot_worker.rs`, `ble/slot_link.rs` | The worker's loop is `ble/slot_loop.rs`, which the fault tests run against a scripted radio; the error a link that would not encrypt fails with, and what the slot does once an attempt ends, are in `ble/slot_policy.rs`; the slot table they report to is the host-tested coordinator. What remains is `slot_worker.rs`'s `Radio`, which passes each `SlotIo` call to a channel, the bonder, the reconnect scan, or `slot_link.rs`, and in `slot_link.rs` the order of SoftDevice procedures within one attempt (connect, encrypt and its 5 s wait, pairing, discovery), racing each against the slot's commands, the takeover check, and closing the link. They await a SoftDevice `Connection` and `Softdevice`, which only the firmware target compiles, so a host fake would mean reimplementing `nrf-softdevice`'s central and security procedures. Checked by the embedded build and Clippy and by hardware acceptance |
-| `ble/multi_conn.rs` | The coordinator's loop is `ble/coordinator_loop.rs`, which the fault tests run on a scripted bench; the reducers it executes, the `Quiescence` barrier, and `persist_report` are host-tested too. What remains is `multi_conn.rs`'s `Shell`, which passes each `CoordinatorIo` call to a channel, the scanner, the bonder, or the store shell: loading the store and its keys, choosing the saved devices with keys to reconnect at power-up, resolving a forgotten device's private addresses, the store writes for a connected device and for a Forget or reset, and keeping the bonder's keys in step with each. It owns the SoftDevice `Flash` and reaches the bonder and the store shell, which only the firmware target compiles. Checked by the embedded build and Clippy and by hardware acceptance; `sim_ble.rs` executes the same `Action`s in the same order in the Renode scenario, with a simpler store write of its own: no keys, no notices, and `StorageFailed` for any failed save |
+| `ble/multi_conn.rs` | The coordinator's loop is `ble/coordinator_loop.rs`, which the fault tests run on a scripted bench; the reducers it executes, the `Quiescence` barrier, and `persist_report` are host-tested too. What remains is `multi_conn.rs`'s `Shell`, which passes each `CoordinatorIo` call to a channel, the scanner, the bonder, or the store shell: loading the store and its keys, choosing the saved devices with keys to reconnect at power-up, resolving a forgotten device's private addresses, the store writes for a connected device and for a Forget or reset, and keeping the bonder's keys in step with each. It owns the SoftDevice `Flash` and reaches the bonder and the store shell, which only the firmware target compiles. Checked by the embedded build and Clippy and by hardware acceptance; the Renode scenario runs `coordinator_loop::run` on `sim_ble.rs`'s own `CoordinatorIo`, whose store write is simpler: no keys, no notices, and `StorageFailed` for any failed save |
 | `ble/bonder.rs` | Its decisions are host-tested: which keys are held, replaced, or dropped (`BondTable`), the per-link flags behind `BondRefused` and `KeysRejected` (`LinkFlags`), the connection parameters granted (`conn_params`), and which identity addresses the store accepts (the device list tests). What remains are the SoftDevice `SecurityHandler` callbacks and two checks over SoftDevice types: `key_matches`, whose all-zero-IRK rule wraps `IdentityKey::is_match`, which resolves a private address with the SoftDevice's AES block (`sd_ecb_block_encrypt`); `encrypts` over `SecurityMode`; and the two refusals in `on_bonded`, for a link not opened for pairing and an identity address that is not public or random static. None of those types or calls exist off the firmware target. Checked by the embedded build and Clippy and by hardware acceptance (pairing, re-pairing, and refused keys in the [first-flash checklist](first-flash.md)) |
 | `ble/device_info.rs`, `ble/scanner.rs` | The PnP ID parser, the scan list, advertisement parsing, and the reconnect table are host-tested. What remains are the SoftDevice procedures: Device Information discovery and its one read, which only log; the scan loops with their timeouts; and handing each advertisement to the tested code, with `key_matches` resolving a saved device's private address. Checked by the embedded build and Clippy and by hardware acceptance. The self-test scan stage checks the radio with its own scan loop and `ble/adv_parser.rs`; it does not run these modules |
 | `storage.rs` | Embedded build and Clippy; the decisions it calls (the device list, codec, framing, and record validation) are host-tested, but its conversions to and from SoftDevice types, IRK resolution through the SoftDevice, and flash writes with retries are not, since they use SoftDevice types and calls that build only for the firmware target; the self-test flash stage exercises the same region and `sequential-storage` map, not this code; hardware acceptance |
 | `usb/hid_device.rs`, `usb/host_requests.rs` | Their decisions are host-tested: delivery and retry (`run_endpoint` with `EndpointDelivery`), aggregation, wake policy, report serialization in both layouts, the host's LED report (`KeyboardLeds::from_output_report`), and LED forwarding. What remains is `embassy-usb` and `embassy-nrf` plumbing: building the device and its descriptors, the bus event handler that resets the protocol and replays held state, choosing the boot layout for the mouse, the SET_PROTOCOL and report ID checks, remote wakeup, and the USB serial from FICR. `embassy-nrf` builds only for the firmware target. Checked by the embedded build and Clippy, the self-test USB stages, and hardware acceptance |
 | `ui/buttons.rs` | Embedded and simulation builds and Clippy; Renode scenario (real GPIO edges through this module); hardware acceptance. The self-test button stages check wiring with their own `Input` code, not this module |
-| `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` mirrors the order in which `ble/coordinator_loop.rs` calls the pure modules, but nothing checks that the two stay in step |
+| `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` is the stand-in workers, scan, and flash under the firmware's `coordinator_loop::run`, so it holds no copy of the loop's order of calls |
 | `ui/display.rs` | Embedded and simulation builds and Clippy; the screen layout (`ui::layout`) and the recovery policy (`display_logic`) are host-tested; the Renode scenario runs the display task on modelled TWIM and SSD1306 peripherals and reads every screen it draws back ([OLED checks](#oled-checks)); self-test OLED stages. Its I2C code is generic, but the task, the 500 ms bus deadline, and the bus STOP use `embassy-nrf`'s TWIM and timer, which build only for the firmware target. No automated check makes the bus fail, so the retry loop after an I2C error runs only on hardware |
 | `stack.rs` | Embedded and simulation builds and Clippy; the guard's placement and register values (`stack_logic.rs`) are host-tested; the Renode case `A Stack Overflow Faults In The Guard And Is Reported` programs the MPU, takes a fault in the guard, and checks the report ([Robot test case](#robot-test-case)); self-test `stack` and `stack guard` stages and the optional deliberate overflow; the Renode case also resets the machine and checks the next boot's `previous boot` line from the record kept in `.uninit`; the high-water scan runs only on the board |
 | `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice and HFXO stages |
@@ -335,12 +335,13 @@ and the GATT client that feed these parsers are not fuzzed.
 
 The simulation runs the firmware's UI controller (`ui::controller` over
 `ui::ui_logic`), its display task (`ui::display` with the `ui::layout`
-screens), its button task, and the pure BLE and storage modules
-(`ble::coordinator`, `ble::management`, `ble::messages`, `ble::adv_parser`,
-and `storage::{devices, codec, framing, record}`) on an emulated nRF52840. The
+screens), its button task, its coordinator loop (`ble::coordinator_loop::run`)
+with the pure BLE and storage modules under it (`ble::coordinator`,
+`ble::management`, `ble::messages`, `ble::scan_list`, `ble::adv_parser`, and
+`storage::{devices, codec, framing, record}`) on an emulated nRF52840. The
 radio, the connection workers, and flash are stand-ins that answer at once;
-BLE events come from a scripted scenario and from the commands the buttons
-send. UART0 carries logs, so no probe or defmt decoder is required, and the
+links drop and come back when a scripted scenario says so, and everything
+else starts from the commands the buttons send. UART0 carries logs, so no probe or defmt decoder is required, and the
 SSD1306 model reads the panel's text back, so the test can check what the
 user would see.
 
@@ -417,11 +418,11 @@ section that the SoftDevice provides in firmware builds.
 | Part | Firmware code that runs | Stand-in |
 | --- | --- | --- |
 | Buttons | `ui::buttons::button_task` on P0.11, P0.12, P0.24, through the custom GPIO/GPIOTE models | Edges injected with `gpio0 OnGPIO` |
-| UI loop | `UiController::{button, event, tick}`, `UiState`, `on_button`, and `display::publish` after every iteration | `sim.rs` applies each event as `main.rs` does, but without the power manager (the panel is always on) or the command and event channels: commands run to completion before the next button |
+| UI loop | `UiController::{button, event, tick, command_not_sent}`, `UiState`, `on_button`, and `display::publish` after every iteration | `ui_loop` in `sim.rs` sends commands and takes events over channels as `main.rs` does, but without the power manager (the panel is always on), and runs in `main` beside the coordinator loop instead of in a task of its own |
 | Display | `ui::display::task` on TWIM0 (SDA P0.26, SCL P0.27) from `display::new_twim`: `run`, `render`, `initialize`, `StopSafeI2c`, `finish_or_stop`, the `ssd1306` driver, and the `ui::layout` lines in `FONT_6X10` | The TWIM model in [nrf52840_twim.cs](../renode/nrf52840_twim.cs) and the SSD1306 model in [ssd1306.cs](../renode/ssd1306.cs) at `0x3C`; see [OLED checks](#oled-checks) |
-| Coordinator | `plan_start_scan`, `plan_connect`, `plan_disconnect`, `on_slot_connected`, `on_slot_disconnected`, `on_slot_link_lost`, `link_state`, and the `ConnManager` | `SimBle` in `sim_ble.rs` executes their `Action`s in the order `coordinator_loop::execute` does; a connection worker connects or disconnects as soon as it is told |
-| Scan | `merge_advertisement` and `adv_parser` | Three fixed advertisements: `Keyboard` (address `0xA1`, RSSI −42, HID UUID), `Phone` (`0xC3`, −30, no HID UUID), `Mouse` (`0xB2`, −55, HID UUID) |
-| Forget and Factory reset | `forget_targets`, `Quiescence`, `on_slot_quiesced`, `commit`, then the link status and `ManagementResult`, as `coordinator_loop::manage` orders them | Targeted workers acknowledge the barrier at once |
+| Coordinator | `coordinator_loop::run`, the same function `multi_conn::ble_task` runs: the power-up reconnects, `next` with commands before slot events, `handle_slot_event`, `execute`, and every `plan_*` and `on_slot_*` reducer it calls on the `ConnManager` | `SimIo` in `sim_ble.rs` is its `CoordinatorIo`. Two simulated connection workers carry out each slot command at once and queue the report a slot worker would send: `Connected` for a `Connect`, `Disconnected` for a `Disconnect`, `Quiesced` for a `Quiesce`; a `Reconnect` waits for a scenario step |
+| Scan | `merge_advertisement`, `strongest_first`, and `adv_parser` | Three fixed advertisements: `Keyboard` (address `0xA1`, RSSI −42, HID UUID), `Phone` (`0xC3`, −30, no HID UUID), `Mouse` (`0xB2`, −55, HID UUID) |
+| Forget and Factory reset | `coordinator_loop::manage`: `forget_targets`, `Quiescence`, `on_slot_quiesced`, then the store change, the link status, and `ManagementResult`; the store change is `management::commit` | The workers it quiesces acknowledge at once |
 | Stack guard | `stack::enable_guard`, the `HardFault` handler, the assembly `MemoryManagement` handler, and `report_overflow`, which writes its line through `uart_write_blocking` | Renode's MPU model, which takes the guard's fault as MemManage even though it is disabled ([ADR 0026](adr/0026-mpu-stack-guard.md)). The simulation has no painted stack, so it never runs `high_water` |
 | Pairing store | `DeviceList::{add, find, without, reset, pending_item, mark_saved, load, iter_recent}` with the record codec and framing | The item is written to RAM; each save is read back with `DeviceList::load` and compared with the list. Addresses are random static addresses whose low four bytes are the `u32` stand-in; peers never pair, so no record has a bond |
 
@@ -484,14 +485,14 @@ the expected lines exactly.
 | Robot step | Panel text checked | What it proves |
 | --- | --- | --- |
 | After boot | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices`; then `NoisyBytes` is 0 | The display task initializes the panel over the modelled TWIM and draws the published Home view, and the panel was never lit while its RAM held power-on noise |
-| After each link change | `Connected` with `Keyboard`, `Keyboard` and `Mouse` on two rows, or `Mouse`, and both hints | Coordinator events reach the screen through the controller and `publish` |
+| After each link change | `Connected` with `Keyboard`, `Keyboard` and `Mouse` on two rows, or `Mouse`, and both hints | Coordinator events reach the screen through the event channel, the controller, and `publish` |
 | After the scan and a DOWN | `Select device`, `> Keyboard`, `  Mouse`, then the mark on `Mouse` | The device list and its selection mark |
 | Saved devices | `Saved devices`, `> Mouse`, `  Keyboard`, `  Factory reset`, `  Bridge info`, `UP at first: back` | The saved list, newest first, ends with Factory reset and Bridge info |
 | Bridge info | `Bridge info`, `Version` and the boot line's version, `Commit` and its first eight digits with any `-dirty`, `Reset: power/brownout`, `SELECT: back` | The screen shows the build identity the boot log prints; the simulation reads no reset register |
 | Forget and reset confirmations | `Forget device?`, `Keyboard`, `> Cancel`, `  Forget` (then the mark on `Forget`); `Reset all pairings?`, `Disconnect all`, `  Cancel`, `> Reset` | Confirmations name their subject and open on Cancel |
 | Notices | `Complete` with `Device forgotten` or `Pairings reset`, and `SELECT: back` | Management results reach the screen |
 | Unplug, SELECT, plug back in | `(display off)` right after the panel powers up again, then Home within 2 s, and `NoisyBytes` 0 again | A frame that fails on an address NACK leaves the UI loop running; the 1 s retry initializes the panel again and draws the latest view without showing noise |
-| Both links lost, then closed | `bt2usb / Reconnecting`, then `bt2usb / Idle`, with both hints | A background reconnect with no link up reaches Home |
+| The last link lost, then the closing DOWN | `bt2usb / Reconnecting`, then, after the mouse is back and the keyboard is connected again and closed, `bt2usb / Idle`, with both hints | A background reconnect with no link up reaches Home, and so does a user disconnect |
 
 `Unplug The OLED` makes the TWIM NACK address `0x3C`
 (`twi0 SetDevicePresent 0x3C false`); `Plug The OLED Back In` resets the panel
@@ -515,47 +516,56 @@ firmware's display traffic does not reach:
 
 ### Scripted BLE Scenario
 
-The sim's main loop waits for either a button event or a 2-second timer. A
-button event runs `UiController::button`; a command it returns runs through
-`SimBle::command`, and the events that produces go to `UiController::event`,
-each logged as `  event: <event> -> screen <screen> (selected <n>)`. A timer
-tick runs one step of a five-step scenario through `SimBle::scenario_step`
-and applies its events the same way. The timer restarts after every button
-event, so a tick is "2 s without a button press", not a fixed period.
+`main` in `sim.rs` runs two loops side by side, as the firmware runs its UI
+and BLE tasks: `coordinator_loop::run` on `SimIo`, and `ui_loop`. They share
+a `Bus` with the firmware's channels and capacities: commands from the UI
+(4), events for the UI (8), and slot events (8). `ui_loop` waits for a
+button, an event, or a 2-second timer. A button runs `UiController::button`,
+and a command it returns goes on the command channel with `try_send`, as in
+`main.rs`. An event goes to `UiController::event`, logged as
+`  event: <event> -> screen <screen> (selected <n>)`. A timer tick runs one
+step of a four-step scenario through `Bus::scenario_step`, which queues a
+slot event as a worker would, then `UiController::tick`. The timer restarts
+after every button and event, so a tick is "2 s since the last press, event,
+or tick", not a fixed period.
 
-| Step (tick mod 5) | UART header | Reducer calls | UI event | Slots after (`active_count`, `occupied_count`) |
+Both loops run in one task, and a channel with room takes a message without
+waiting, so each command or slot event is handled to the end, with all its
+log lines, before the UI loop logs the first event it produced.
+
+| Step (tick mod 4) | Change | UART line | Slot event | Coordinator then |
 | --- | --- | --- | --- | --- |
-| 0 | `scenario: connect device 0 (Keyboard)` | `plan_connect`, then `on_slot_connected`; the device is saved | `Connected 'Keyboard'`, or the current links if it is already connected | One more active, unless already connected |
-| 1 | `scenario: connect device 1 (Mouse)` | The same for the mouse | `Connected 'Keyboard', 'Mouse'` when both are up | As step 0 |
-| 2 | `scenario: slot 0 link lost` | `on_slot_link_lost` for the device in slot 0; then `scenario: slot 0 kept reserved for 0xa1` (or `released`, which would be a fault) | The remaining links, for example `Connected 'Mouse'` | One fewer active, the same occupied |
-| 3 | `scenario: slot 1 link lost` | The same for slot 1, then `scenario: slot 1 kept reserved for 0xb2` | `Reconnecting` when no link is left up | As step 2 |
-| 4 | `scenario: disconnect all` | `plan_disconnect`, then `on_slot_disconnected` per occupied slot | `Reconnecting` while the other slot still retries, then `Disconnected` | 0, 0 |
+| 0 | Slot 0's link drops | `scenario: slot 0 link lost, reconnecting to 0x<address>` | `LinkLost` under the worker's attempt | `on_slot_link_lost` keeps the slot reserved and reports the links still up, or `Reconnecting` with none |
+| 1 | The same for slot 1 | `scenario: slot 1 link lost, reconnecting to 0x<address>` | As step 0 | As step 0 |
+| 2 | Slot 0's device advertises again and its worker connects | `scenario: slot 0 reconnected to 0x<address>` | `Connected` under the same attempt | `on_slot_connected` saves the device (no write when only its RSSI changed) and reports the links |
+| 3 | The same for slot 1 | `scenario: slot 1 reconnected to 0x<address>` | As step 2 | As step 2 |
 
-Steps 2 and 3 log `scenario: slot N has no link to lose` when that slot is empty. Every
-step ends with `scenario: active_count=N occupied_count=M`, so a reserved slot
-shows as an occupied one that is not active. Connect steps also log
-`action: ConnectSlot …`, `action: PersistDevice …`, and, when the list changed,
-`store: item of N bytes holds M device(s); reload matches`. The cycle then
-repeats.
+A step logs `scenario: slot N has nothing to lose` or
+`scenario: slot N has nothing to reconnect` when that worker is idle or
+already in the other state, and queues nothing. The cycle then repeats.
 
 Button commands are handled as follows:
 
-| Command | Simulation behavior | Log lines |
+| Command | Coordinator loop, with the stand-ins | Log lines |
 | --- | --- | --- |
-| `StartScan` | `plan_start_scan`, then the three advertisements through `merge_advertisement`, heard mouse first, and `strongest_first` | `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, then `ScanStarted`, one `DeviceFound` per HID device with the stronger keyboard first, and `ScanComplete` events |
-| `Connect(index)` | `plan_connect` on the last scan's results; a new connection is saved | `cmd: Connect(n)`, the actions, and the link-status event |
-| `Disconnect` | `plan_disconnect` | `cmd: Disconnect`, `action: DisconnectSlot(n)`, link status |
+| `StartScan` | `plan_start_scan`, which closes both links when both slots are taken; then `SimIo::scan` merges the three advertisements, heard mouse first, through `merge_advertisement` and `strongest_first` | `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, then `ScanStarted`, one `DeviceFound` per HID device with the stronger keyboard first, and `ScanComplete` events |
+| `Connect(index)` | `plan_connect` on the last scan's results; the worker connects at once, and `on_slot_connected` saves a new device. A device already connected is only acknowledged | `cmd: Connect(n)`, `slot n: Connect addr=0x…`, `store: …` when the list changed, and the link-status event; for an acknowledgement, only the event |
+| `Disconnect` | `plan_disconnect`; each worker reports `Disconnected` | `cmd: Disconnect`, `slot n: Disconnect`, `Disconnected` |
 | `ListPaired { id }` | Replies with the saved devices, newest first | `cmd: ListPaired id=N`, `event: PairedDevices id=N ['Mouse', 'Keyboard'] …` |
-| `Forget { id, address }` | Looks the device up, quiesces the slots `forget_targets` picks, commits the list without it, reports the links, then the result | `cmd: Forget id=N addr=0x…`, `quiesce: slot n released`, `quiesce: complete for token T`, `store: …`, `slots: active_count=… occupied_count=…`, link status, `ManagementResult id=N Ok(())` |
-| `FactoryReset { id }` | Quiesces every slot, commits an empty list, clears the scan results | As Forget, with every slot released |
+| `Forget { id, address }` | Looks the device up, quiesces the slots `forget_targets` picks, waits for each acknowledgement, commits the list without it, reports the links, then the result | `cmd: Forget id=N addr=0x…`, `slot n: Quiesce token T` per targeted slot, `store: …`, link status, `ManagementResult id=N Ok(())` |
+| `FactoryReset { id }` | Quiesces every slot, commits an empty list, clears the scan results | As Forget, with a `Quiesce` line for each slot |
 
-Item sizes follow the record layout in the
+Each changed list is logged as
+`store: item of N bytes holds M device(s); reload matches`. Item sizes
+follow the record layout in the
 [data model](data-model.md#pairing-store): 22 bytes for `Keyboard` alone, 38
 with `Mouse`, 19 for `Mouse` alone, and 3 for an empty list.
 
-The simulation sends no command through a channel, so `try_send` on a full
-channel ("Busy; try again") and the management timeout never happen there;
-host tests cover both.
+No step fills a channel, so the command the UI could not queue
+("Busy; try again") and the management timeout never happen there; host
+tests cover both. A slot event that found its channel full would be logged
+as `slot event lost: channel full`, and the scenario would then stop
+matching.
 
 ### Robot Test Case
 
@@ -577,25 +587,34 @@ interrupted by a scenario step.
 
 | Order | Stimulus | Expected UART text (abridged) | What it proves |
 | --- | --- | --- | --- |
-| 1 | Boot | `bt2usb-sim starting`, `version 0.1.0, commit <40 hex digits, or unknown>, debug build` (matched as a pattern), `stack guard: 4096 bytes at 0x<8 hex digits>..0x<8 hex digits>` (a pattern), `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, the build identity from `build.rs` in a target build, the MPU stack guard turned on, three button tasks, UI loop |
-| 2 | Timer (step 0, pauses emulation) | `connect device 0 (Keyboard)`, `ConnectSlot slot=0 addr=0xa1`, `PersistDevice addr=0xa1`, `holds 1 device(s); reload matches`, `active_count=1 occupied_count=1`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | RTC time driver, `plan_connect` and `on_slot_connected`, the store's encode and load on the target, the controller's link update |
-| 3 | SELECT | `button Select -> screen Scanning (selected 0)`, `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, `ScanStarted`, `DeviceFound 'Keyboard' addr=0xa1 rssi=-42`, `DeviceFound 'Mouse' addr=0xb2 rssi=-55`, `event: ScanComplete -> screen DeviceList (selected 0)` | GPIO edge to `UiController::button`; scan merging drops the non-HID phone and lists the keyboard, heard last, first; scan events build the list |
-| 4 | DOWN, UP, DOWN | `button Down -> screen DeviceList (selected 1)`, then `selected 0`, then `selected 1` | List navigation both ways |
-| 5 | SELECT | `button Select -> screen Connecting (selected 1)`, `cmd: Connect(1)`, `ConnectSlot slot=1 addr=0xb2`, `holds 2 device(s); reload matches`, `event: Connected 'Keyboard', 'Mouse' -> screen Connected (selected 0)` | A user connect reserves, connects, and saves the second device |
-| 6 | Timer (steps 1 and 2, pauses emulation) | `connect device 1 (Mouse)`, `active_count=2 occupied_count=2`, `slot 0 link lost`, `slot 0 kept reserved for 0xa1`, `active_count=1 occupied_count=2`, `event: Connected 'Mouse' -> screen Connected (selected 0)` | An already connected device only re-reports the links; `on_slot_link_lost` keeps the slot reserved while the UI shows only the live link |
-| 7 | UP, DOWN, SELECT, SELECT | `button Up -> screen Managing (selected 0)`, `cmd: ListPaired id=1`, `event: PairedDevices id=1 ['Mouse', 'Keyboard'] -> screen SavedDevices (selected 0)`, then `SavedDevices (selected 1)`, `ConfirmForget(1) (selected 0)`, `SavedDevices (selected 0)` | The saved list, newest first, under a request ID; a confirmation opens on Cancel and cancelling changes nothing |
-| 8 | DOWN, SELECT, DOWN, SELECT | `ConfirmForget(1) (selected 1)`, `button Select -> screen Managing (selected 1)`, `cmd: Forget id=2 addr=0xa1`, `quiesce: slot 0 released`, `quiesce: complete for token 1`, `holds 1 device(s); reload matches`, `slots: active_count=1 occupied_count=1`, `event: Connected 'Mouse' -> screen Managing`, `event: ManagementResult id=2 Ok(()) -> screen Notice` | Forget of a device whose slot is reserved: the barrier releases that slot only, the shorter list is committed and reads back, the link status comes before the result, and the result shows the notice |
-| 9 | SELECT | `button Select -> screen Connected (selected 0)` | Dismissing returns to the live link |
-| 10 | UP, DOWN, DOWN, SELECT, SELECT, UP, SELECT, DOWN, SELECT | `cmd: ListPaired id=3`, `PairedDevices id=3 ['Mouse']`, `SavedDevices (selected 1)` (the Factory reset row), `SavedDevices (selected 2)`, `BridgeInfo (selected 2)`, `SavedDevices (selected 2)`, `SavedDevices (selected 1)`, `ConfirmReset (selected 0)`, `ConfirmReset (selected 1)`, `cmd: FactoryReset id=4`, `quiesce: slot 1 released`, `quiesce: complete for token 2`, `holds 0 device(s); reload matches`, `slots: active_count=0 occupied_count=0`, `event: Disconnected -> screen Managing`, `event: ManagementResult id=4 Ok(()) -> screen Notice` | Bridge info opens from the last entry and returns to it; Factory reset releases every slot, commits an empty list, and reports no link |
-| 11 | SELECT | `button Select -> screen Home (selected 0)` | Dismissing with no link returns home |
-| 12 | Timer (steps 3 and 4, then step 0) | `slot 1 has no link to lose`, `disconnect all`, `active_count=0 occupied_count=0`, `connect device 0 (Keyboard)`, `holds 1 device(s); reload matches`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | Nothing is left to close, and the reset store accepts writes again |
-| 13 | Timer (steps 1 to 4) | `event: Connected 'Keyboard', 'Mouse'`, `slot 1 kept reserved for 0xb2`, `event: Reconnecting -> screen Home (selected 0)`, `disconnect all`, `event: Disconnected -> screen Home (selected 0)` | With both links lost and both slots retrying, Home says the bridge is reconnecting, until the retries are closed |
+| 1 | Boot | `bt2usb-sim starting`, `version 0.1.0, commit <40 hex digits, or unknown>, debug build` (matched as a pattern), `stack guard: 4096 bytes at 0x<8 hex digits>..0x<8 hex digits>` (a pattern), `buttons ready`, `entering sim UI loop (screen=Home)` | Reset, memory map, executor, the build identity from `build.rs` in a target build, the MPU stack guard turned on, three button tasks, both loops |
+| 2 | SELECT | `button Select -> screen Scanning (selected 0)`, `cmd: StartScan`, `scan: heard 3 advertisers, listed 2 HID devices`, `ScanStarted`, `DeviceFound 'Keyboard' addr=0xa1 rssi=-42`, `DeviceFound 'Mouse' addr=0xb2 rssi=-55`, `event: ScanComplete -> screen DeviceList (selected 0)` | GPIO edge to `UiController::button`, the command channel to the coordinator loop; scan merging drops the non-HID phone and lists the keyboard, heard last, first; scan events build the list |
+| 3 | DOWN, UP | `button Down -> screen DeviceList (selected 1)`, then `selected 0` | List navigation both ways |
+| 4 | SELECT | `button Select -> screen Connecting (selected 0)`, `cmd: Connect(0)`, `slot 0: Connect addr=0xa1`, `holds 1 device(s); reload matches`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | `plan_connect` reserves a slot, its worker's `Connected` reaches `on_slot_connected`, the store encodes and loads on the target, and the controller shows the link |
+| 5 | SELECT, SELECT | A second scan, then `cmd: Connect(0)` with `event: Connected 'Keyboard' -> screen Connected (selected 0)` as the very next line | Selecting a connected device only acknowledges it: no worker is told anything |
+| 6 | SELECT, DOWN, SELECT | A third scan, `cmd: Connect(1)`, `slot 1: Connect addr=0xb2`, `holds 2 device(s); reload matches`, `event: Connected 'Keyboard', 'Mouse' -> screen Connected (selected 0)` | The second slot is reserved, connected, and saved |
+| 7 | Timer (step 0, pauses emulation) | `scenario: slot 0 link lost, reconnecting to 0xa1`, `event: Connected 'Mouse' -> screen Connected (selected 0)` | RTC time driver; `on_slot_link_lost` reports only the live link |
+| 8 | UP, DOWN, SELECT, SELECT | `button Up -> screen Managing (selected 0)`, `cmd: ListPaired id=1`, `event: PairedDevices id=1 ['Mouse', 'Keyboard'] -> screen SavedDevices (selected 0)`, then `SavedDevices (selected 1)`, `ConfirmForget(1) (selected 0)`, `SavedDevices (selected 0)` | The saved list, newest first, under a request ID; a confirmation opens on Cancel and cancelling changes nothing |
+| 9 | DOWN, SELECT, DOWN, SELECT | `ConfirmForget(1) (selected 1)`, `button Select -> screen Managing (selected 1)`, `cmd: Forget id=2 addr=0xa1`, then as the very next lines `slot 0: Quiesce token 1`, `holds 1 device(s); reload matches`, `event: Connected 'Mouse' -> screen Managing`; then `event: ManagementResult id=2 Ok(()) -> screen Notice` | Slot 0 is still reserved for the keyboard's reconnect, so `forget_targets` picks it alone; the store changes only after the barrier, the link status comes before the result, and the result shows the notice |
+| 10 | SELECT | `button Select -> screen Connected (selected 0)` | Dismissing returns to the live link |
+| 11 | Timer (step 1, pauses emulation) | `scenario: slot 1 link lost, reconnecting to 0xb2`, `event: Reconnecting -> screen Home (selected 0)` | With no link up and a slot still reserved, Home says the bridge is reconnecting |
+| 12 | Timer (steps 2 and 3) | `scenario: slot 0 has nothing to reconnect`, `scenario: slot 1 reconnected to 0xb2`, then as the very next line `event: Connected 'Mouse' -> screen Connected (selected 0)` | The worker Forget quiesced stays idle; the retry completes under its attempt, and the unchanged record is not written again |
+| 13 | UP, DOWN, DOWN, SELECT, SELECT, UP, SELECT, DOWN, SELECT | `cmd: ListPaired id=3`, `PairedDevices id=3 ['Mouse']`, `SavedDevices (selected 1)` (the Factory reset row), `SavedDevices (selected 2)`, `BridgeInfo (selected 2)`, `SavedDevices (selected 2)`, `SavedDevices (selected 1)`, `ConfirmReset (selected 0)`, `ConfirmReset (selected 1)`, `cmd: FactoryReset id=4`, then as the very next lines `slot 0: Quiesce token 2`, `slot 1: Quiesce token 2`, `holds 0 device(s); reload matches`, `event: Disconnected -> screen Managing`; then `event: ManagementResult id=4 Ok(()) -> screen Notice` | Bridge info opens from the last entry and returns to it; Factory reset quiesces every slot, commits an empty list, and reports no link |
+| 14 | SELECT | `button Select -> screen Home (selected 0)` | Dismissing with no link returns home |
+| 15 | SELECT, SELECT | A scan, `slot 0: Connect addr=0xa1`, `holds 1 device(s); reload matches`, `event: Connected 'Keyboard' -> screen Connected (selected 0)` | The reset store accepts writes again |
+| 16 | DOWN | `button Down -> screen Home (selected 0)`, `cmd: Disconnect`, then as the very next lines `slot 0: Disconnect` and `event: Disconnected -> screen Home (selected 0)` | `plan_disconnect` closes the link, and the worker's report frees the slot |
+
+`Next Line Should Contain` checks "as the very next line" with
+`Wait For Next Line On Uart`, so an extra worker command or store write in
+between fails the test. With `same_peer` changed to always answer `false`,
+step 5 fails on `slot 1: Connect addr=0xa1`.
 
 Between these steps it reads the OLED as listed in
 [OLED checks](#oled-checks).
 
-The test does not exercise the power manager's panel blanking, a full command
-channel, a management timeout, a storage failure, bonds or IRK resolution, a
+The test does not exercise the power manager's panel blanking, the power-up
+reconnects (the RAM store is empty at every boot), a full command channel, a
+management timeout, a storage failure, bonds or IRK resolution, a
 bus held low (the TWIM model has no stuck-bus fault), or anything about real
 radio timing.
 
@@ -913,9 +932,9 @@ Specific to the current workflow and test tree:
   and region and function coverage have no floor.
 - The Renode job runs one scripted scenario on Linux, plus a stack overflow
   case and register-level checks of its TWIM and SSD1306 models. The scenario covers the UI
-  controller, link loss, saved-device management, and the OLED task with its
-  recovery after an address NACK, but its connection workers, radio, and
-  flash are stand-ins that answer at once
+  controller, the coordinator loop with link loss and saved-device
+  management, and the OLED task with its recovery after an address NACK, but
+  its connection workers, radio, and flash are stand-ins that answer at once
   ([Renode Scenario Map](#renode-scenario-map)), and the TWIM and SSD1306
   models are written from the Product Specification and the datasheet, not
   checked against silicon. They have no stuck-bus or data-NACK fault, so the

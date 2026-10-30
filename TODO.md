@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 17 | 1 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **161** | **64** | **20** |
+| **Total** | **162** | **63** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1155,16 +1155,24 @@ Host tests, simulation, and code-health work. Context:
   ([code quality](docs/code-quality.md#file-length); `src/ble/bonder.rs`,
   `src/ble/slot_worker.rs`, `src/usb/host_requests.rs`,
   `src/hid_classify_tests.rs`, `.github/workflows/ci.yml`).
-- [ ] **P1** **Run the simulation on the coordinator loop.** `src/sim_ble.rs`
-  repeats `ble::coordinator_loop`'s order of reducer calls by hand (its
-  `command`, `execute`, and `manage`), so the Renode scenario checks a copy
-  that can drift from the loop the firmware runs. Implement `CoordinatorIo`
+- [x] **P1** **Run the simulation on the coordinator loop.** `src/sim_ble.rs`
+  repeated `ble::coordinator_loop`'s order of reducer calls by hand (its
+  `command`, `execute`, and `manage`), so the Renode scenario checked a copy
+  that could drift from the loop the firmware runs. Implement `CoordinatorIo`
   for the simulation, with connection workers that answer at once and the
   RAM-backed pairing item it already has, and run `coordinator_loop::run`
   itself. Accept when `sim_ble.rs` keeps no copy of the loop's dispatch, the
   scripted steps reach the loop as slot events and UI commands, and the Renode
-  scenario passes with the same checks
-  ([Renode simulation](docs/testing.md#renode-simulation)).
+  scenario passes with checks for the same behaviors
+  ([Renode simulation](docs/testing.md#renode-simulation)). Done 2026-10-30:
+  `SimIo` in `src/sim_ble.rs` is the simulation's `CoordinatorIo`, and
+  `main` in `src/sim.rs` runs `coordinator_loop::run` beside the UI loop
+  over the firmware's channels. The scenario now only drops and restores
+  links, as slot events; the buttons connect, forget, reset, and disconnect.
+  Checks on the old copy's slot counters became checks on what the workers
+  are told and what is written, with nothing in between where it matters
+  ([scenario map](docs/testing.md#renode-scenario-map),
+  [validation record](docs/validation-records.md#validation-record--2026-10-30-simulation-on-the-coordinator-loop)).
 
 ## Release, Provenance And Supply Chain
 

@@ -103,23 +103,27 @@ injected edges in both interactive runs and the headless Robot test.
     shows without a probe or defmt decoder
   - runs button events through the firmware's UI controller
     (`ui::controller::UiController`, since 2026-10-10; before that, through
-    `ui_logic::on_button` alone), and each command it returns through a
-    simulated coordinator that calls the real `ble::coordinator`,
-    `ble::management`, and `storage::devices` code with connection workers,
-    a radio, and flash that answer at once; a scan merges three fixed
-    advertisements through `merge_advertisement`
-  - every 2 s without a button press, advances a scripted BLE scenario through
-    the real `ble::coordinator` reducers, with a `u32` standing in for the
-    SoftDevice `Address`: connect device 0 ("Keyboard", `0xA1`), connect
-    device 1 ("Mouse", `0xB2`), lose slot 0's link (`on_slot_link_lost`, which
-    keeps the slot reserved; until 2026-10-10 the step called
-    `on_slot_disconnected` and freed it), disconnect all, and repeat
+    `ui_logic::on_button` alone), and sends each command it returns to the
+    firmware's coordinator loop (`ble::coordinator_loop::run`, since
+    2026-10-30), which runs on connection workers, a radio, and flash that
+    answer at once, with a `u32` standing in for the SoftDevice `Address`;
+    before that, a simulated coordinator in `sim_ble.rs` repeated the loop's
+    calls to the real `ble::coordinator`, `ble::management`, and
+    `storage::devices` code. A scan merges three fixed advertisements through
+    `merge_advertisement`
+  - every 2 s without a button press or event, advances a scripted scenario
+    of link changes, which reach the loop as slot events: slot 0's link
+    drops, then slot 1's (`on_slot_link_lost` keeps each slot reserved), then
+    each device comes back. Until 2026-10-30 the scenario also connected
+    device 0 ("Keyboard", `0xA1`) and device 1 ("Mouse", `0xB2`) itself and
+    then disconnected all; until 2026-10-10 its link-loss step called
+    `on_slot_disconnected` and freed the slot
 - **Robot test.** [bt2usb-sim.robot](../../renode/bt2usb-sim.robot) builds the
   machine the same way, starts emulation, and asserts UART lines in order:
-  boot, the first scenario connection (pausing emulation there), a scan and
-  a connect driven by real presses on P0.24, P0.12, and P0.11, the link loss
-  that keeps slot 0 reserved, the saved-device list, a cancelled and a
-  confirmed Forget, a Factory reset, and the next scenario cycle; the
+  boot, scans and connects driven by real presses on P0.24, P0.12, and
+  P0.11, the link loss that keeps slot 0 reserved, the saved-device list, a
+  cancelled and a confirmed Forget, the reconnect, a Factory reset, and a
+  connect and disconnect after it; the
   [scenario map](../testing.md#renode-scenario-map) lists every step. Each
   press waits for its UART line with emulation paused before releasing, so
   presses land at deterministic points and always outlast the 50 ms debounce;

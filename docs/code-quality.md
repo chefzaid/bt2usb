@@ -563,7 +563,7 @@ panic path:
   never-type result of its `join4`, and `handle_slot_event` returns on
   `SlotEvent::Quiesced` inside its own match.
 
-Three sites keep the construct under `#[expect(lint, reason = "…")]`. Each
+Two sites keep the construct under `#[expect(lint, reason = "…")]`. Each
 bound is a constant or a type, so a rewrite would only add a fallback that no
 input can reach:
 
@@ -571,7 +571,6 @@ input can reach:
 | --- | --- | --- |
 | `InputAggregator::keyboard` in [aggregate.rs](../src/hid/aggregate.rs) | `indexing_slicing` | `keys` is `[bool; 256]` and is indexed only by a `u8` keycode |
 | The serial-number `write!` in `hid_device::init` ([hid_device.rs](../src/usb/hid_device.rs)) | `expect_used` | Two `{:08X}` words are exactly the 16 characters `serial` holds |
-| `SimBle::scenario_step` in [sim_ble.rs](../src/sim_ble.rs), simulation only | `indexing_slicing` | The arm makes `index` 0 or 1, and `peripherals` is `[_; 2]` |
 
 Rules for a new site:
 
@@ -611,7 +610,7 @@ Each entry has one of three classes:
 | embassy-usb builder checks | `hid_device::init` | Boot only | `max_power` is 100 mA (limit 500), endpoint 0 takes 64-byte packets, four handlers fill the four that `MAX_HANDLER_COUNT` allows (a comment at `builder.handler` says so), three interfaces use three of four, the configuration descriptor uses about 108 of its 256 bytes, and three of seven IN endpoints are taken |
 | Compile-time assertions | `LINKS` and the event-size check in `sd_setup.rs`; the record-size check in `storage/devices.rs`; `MapConfig::new` in `const` blocks in `storage.rs` and `selftest.rs` | Compile time | A violation is a build error. `MapConfig::new` is a `const fn` that panics on a misaligned or empty flash range |
 | `RefCell` borrows | `Bonder` (fifteen, counted with `grep -c '\.borrow' src/ble/bonder.rs`); the report coalescer in `run_notification_loop` (two); the reconnect table in `scanner.rs` (two); `EndpointMailbox` in `hid_device.rs` (six) | Cannot fire | Everything runs on the one thread-mode executor. No borrow is held across an `.await`, and nothing inside a borrow re-enters the same cell or dispatches SoftDevice events (a SoftDevice call never delivers an event synchronously). The scanner and mailbox borrows also sit inside a blocking-mutex closure |
-| heapless capacity | `Vec::remove` in `DeviceList::without`, `DeviceList::add`, `BondTable::insert`, and the bonder's `LinkFlags::set` and `LinkFlags::take`; `collect()` into a fixed `Vec` in `DeviceStore::bonds`, `ble_task`, `handle_slot_event` (three), `publish_paired_devices`, and `SimBle::command` | Cannot fire | Each `remove` takes an index found by `position` on the same `Vec`, or index 0 of a full one. Each `collect` reads a source no longer than its target: `take(MAX_CONNECTIONS)` or `take(MAX_PAIRED_DEVICES)`, a `Vec` of capacity 1 or 2 collected into one of capacity 3, or a device list whose capacity is the target's |
+| heapless capacity | `Vec::remove` in `DeviceList::without`, `DeviceList::add`, `BondTable::insert`, and the bonder's `LinkFlags::set` and `LinkFlags::take`; `collect()` into a fixed `Vec` in `DeviceStore::bonds`, `ble_task`, `handle_slot_event` (three), `publish_paired_devices`, and the simulation's `SimIo::reconnect_targets` and `SimIo::paired` | Cannot fire | Each `remove` takes an index found by `position` on the same `Vec`, or index 0 of a full one. Each `collect` reads a source no longer than its target: `take(MAX_CONNECTIONS)` or `take(MAX_PAIRED_DEVICES)`, a `Vec` of capacity 1 or 2 collected into one of capacity 3, or a device list whose capacity is the target's |
 | `copy_from_slice` | `decode_address`, `encode_bond`, `decode_bond`, and `write_device` in `codec.rs`; the simulation's `Flash::save` in `sim_ble.rs` | Cannot fire | Both sides have the same length by construction: fixed ranges of fixed-size arrays, or parts split off to exactly the length copied |
 | Division by a runtime value | `max_latency_for` in `conn_params.rs`, while bounding a peer's connection parameter request | Cannot fire | It divides by the granted maximum interval, which `bound_request` keeps at or above the configured minimum interval, and it also returns early when that interval is 0, and when its timeout argument (the configured maximum supervision timeout) is 0, so `4 * timeout - 1` cannot underflow either. Every other `/` and `%` has a constant divisor |
 | embassy-time arithmetic | `Instant` plus `Duration`, including the one inside every `Timer::after`, `Ticker`, and `with_timeout`; `Duration::from_secs` and `from_millis`; and `Instant::elapsed`. In `scanner.rs`, `slot_worker.rs`, `buttons.rs`, `power.rs`, `display.rs`, the flash retry in `storage.rs`, the USB retry clock, the main loop's `Ticker`, the HFXO wait in `sd_setup.rs`, the simulation loop, and the self-test | Cannot fire | The operands are small constants or capped values (delivery retries wait at most 1 s, display recovery at most 30 s). `elapsed` subtracts an earlier `Instant::now()` on a monotonic clock, and the 64-bit tick counter would take millions of years to overflow |

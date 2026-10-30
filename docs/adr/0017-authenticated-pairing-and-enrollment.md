@@ -27,7 +27,7 @@ match arm or function):
 - **Who starts security.** `connect_and_run_secure`
   ([slot_link.rs](../../src/ble/slot_link.rs), through `secure_and_discover`)
   calls `encrypt()` and, on `PeerKeysNotFound`, `request_pairing()` only when
-  `allow_pairing` (`!silent` in `connection_slot_task`) is set, that is for
+  `allow_pairing` (`!silent` in `slot_loop::run`) is set, that is for
   `SlotCommand::Connect`. `wait_for_secure_link` polls 25 times at 200 ms
   for `JustWorks`, `Mitm`, or `LescMitm`; the vendored
   `SecurityMode::try_from_raw` (`types.rs`) calls every Level 2
@@ -296,7 +296,7 @@ high-water log would confirm.
 | Request parameters, method table, `verify`, Security Request answer, flag decoding, `permits`, bond admission, `Enrollment` | New `src/ble/pairing_policy.rs` and `pairing_policy_tests.rs`, compiled into the host library ([lib.rs](../../src/lib.rs)) like `conn_params`; it takes plain integers (I/O capability, flags byte, key size, mode and level), no SoftDevice types and no `unsafe` |
 | Handler | `Bonder` in [bonder.rs](../../src/ble/bonder.rs): overrides, passkey and comparison hooks, `enter_passkey` rejecting, pending bond |
 | ECDH | New firmware-only `src/ble/lesc.rs`; `p256` in `Cargo.toml` and `Cargo.lock` |
-| Window, waits, report filter | `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs), `connect_and_run_secure` in [slot_link.rs](../../src/ble/slot_link.rs); notification path in [hid_client.rs](../../src/ble/hid_client.rs) |
+| Window, waits, report filter | `run` in [slot_loop.rs](../../src/ble/slot_loop.rs) and its firmware `SlotIo` in [slot_worker.rs](../../src/ble/slot_worker.rs), `connect_and_run_secure` in [slot_link.rs](../../src/ble/slot_link.rs); notification path in [hid_client.rs](../../src/ble/hid_client.rs) |
 | Refusals | New `ErrorTag` values in [coordinator.rs](../../src/ble/coordinator.rs); `ble_error_message` in [main.rs](../../src/main.rs) |
 | Screens | New `Screen::Pairing` in [ui_logic.rs](../../src/ui/ui_logic.rs), drawn in [display.rs](../../src/ui/display.rs); display kept on in [power_logic.rs](../../src/power_logic.rs) |
 | Binding | `vendor/nrf-softdevice/src/ble/{gap,security,connection,replies}.rs`, [README.bt2usb.md](../../vendor/nrf-softdevice/README.bt2usb.md) |

@@ -2,9 +2,10 @@
 //! discover HID, and run the notification loop, racing each phase against the
 //! slot's commands.
 //!
-//! [`connection_slot_task`](crate::ble::slot_worker::connection_slot_task)
-//! calls [`connect_and_run_secure`] once per attempt and decides from the
-//! returned [`SlotOutcome`] whether to report, retry, or handle a new command.
+//! The slot worker loop ([`slot_loop::run`]) calls [`connect_and_run_secure`]
+//! once per attempt, through the firmware's `SlotIo` in `slot_worker.rs`, and
+//! decides from the returned [`SlotOutcome`] whether to report, retry, or
+//! handle a new command.
 //! A `Connect` for the device being reached takes the attempt over instead of
 //! ending it (see [`take_over`]). A link that drops while it is being secured
 //! or while its HID service is discovered fails as `ConnectFailed`, like a
@@ -14,6 +15,7 @@
 
 use crate::ble::bonder::{bonder, encrypts};
 use crate::ble::multi_conn::{SlotCommand, SlotEvent};
+use crate::ble::slot_loop;
 use crate::ble::slot_policy::{securing_error, Securing};
 use crate::ble::{hid_client, scanner, BleErrorTag, DiscoveredDevice};
 use crate::config;
@@ -25,25 +27,13 @@ use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 use embassy_time::{Duration, Timer};
-use nrf_softdevice::ble::{central, Connection, EncryptError};
+use nrf_softdevice::ble::{central, Address, Connection, EncryptError};
 use nrf_softdevice::raw;
 use nrf_softdevice::Softdevice;
 
-/// Outcome of a single slot connection attempt + run.
-pub(crate) enum SlotOutcome {
-    /// The peer closed the link (or it ended normally).
-    Closed,
-    /// The connection attempt failed before the link was usable. A link that
-    /// dropped while being secured or discovered fails as `ConnectFailed`.
-    Failed(BleErrorTag),
-    /// A `Connect` for this attempt's device took over the attempt, which then
-    /// failed before the link was usable. The user's connection, already
-    /// numbered with the new attempt, is returned to be made next.
-    TakenOver(DiscoveredDevice),
-    /// A new command arrived and superseded the active link, which has already
-    /// been explicitly disconnected. The command is returned to be processed next.
-    Superseded(SlotCommand),
-}
+/// How one attempt ended, over the SoftDevice address
+/// ([`slot_loop::SlotOutcome`]).
+pub(crate) type SlotOutcome = slot_loop::SlotOutcome<Address>;
 
 /// What one attempt connects to, and how.
 pub(crate) struct ConnectionRequest<'a> {

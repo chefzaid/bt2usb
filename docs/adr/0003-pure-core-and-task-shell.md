@@ -55,6 +55,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [scan_list.rs](../../src/ble/scan_list.rs) | Which HID advertisers a user scan lists, and which listed device a newcomer replaces when the list is full | `scan` in [scanner.rs](../../src/ble/scanner.rs) |
 | [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, whether two saved-device records are the same device, how long a sighting stays usable, when a slot is due a wake, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` and `update` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
+| [slot_loop.rs](../../src/ble/slot_loop.rs) | The connection worker's loop itself, generic over the radio (`SlotIo`) so host fault tests run it against a scripted one: which command it serves, when it retries, reports, or resumes, and what it reports | `Radio`, the firmware's `SlotIo`, in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [slot_policy.rs](../../src/ble/slot_policy.rs) | The error a link that would not encrypt fails with, and what a slot does once an attempt ends: reconnect in the background, report, or make the user's connection that took the attempt over | `secure_and_discover` in [slot_link.rs](../../src/ble/slot_link.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [hid_gatt.rs](../../src/ble/hid_gatt.rs) | Which Report characteristics are subscribed and with which kind, which one takes the keyboard LEDs, how each Report Map read request ends or fails the read, and which notifications are passed on whole | `subscribe_all`, `read_report_map`, and `on_hvx` in `hid_client.rs` |
@@ -172,8 +173,11 @@ Follow-up obligations:
   shells against fakes. The device store's rules moved out under
   ["Host tests for the device store"](../../TODO.md#verification-and-code-quality),
   done on 2026-10-10.
-- "Async task fault tests" in [TODO.md](../../TODO.md) covers the shell-level
-  behavior (cancellation, full channels, contention) that reducer tests cannot.
+- Reducer tests cannot reach a task's own behavior: cancellation, full
+  channels, contention. Since 2026-10-30 the slot worker's loop is generic
+  over the radio (`SlotIo` in [slot_loop.rs](../../src/ble/slot_loop.rs)), and
+  host fault tests run it against a scripted one; the coordinator task's own
+  loop and the GAP procedure lock are still checked only on hardware.
 - Passing host tests never closes a hardware gate; that needs the later layers
   in [ADR 0004](0004-layered-verification.md).
 
@@ -182,11 +186,12 @@ Follow-up obligations:
 - [lib.rs](../../src/lib.rs) is `#![cfg_attr(not(test), no_std)]`. It exports
   `hid` verbatim, includes `ble/adv_parser.rs`, `ble/bond_table.rs`,
   `ble/conn_params.rs`, `ble/coordinator.rs`, `ble/reconnect.rs`,
-  `ble/scan_list.rs`, `ble/slot_policy.rs`, `ble/long_read.rs`,
-  `ble/hid_gatt.rs`, `ble/management.rs`, `ble/messages.rs`, `ble/pnp_id.rs`,
-  and the five pure `ui` files (`controller.rs`, `display_logic.rs`,
-  `input_logic.rs`, `layout.rs`, `ui_logic.rs`) in inline `ble` and `ui` modules (through `#[path]` re-export
-  facades until 2026-10-30), `power_logic.rs` as an ordinary module, and
+  `ble/scan_list.rs`, `ble/slot_loop.rs`, `ble/slot_policy.rs`,
+  `ble/long_read.rs`, `ble/hid_gatt.rs`, `ble/management.rs`,
+  `ble/messages.rs`, `ble/pnp_id.rs`, and the five pure `ui` files
+  (`controller.rs`, `display_logic.rs`, `input_logic.rs`, `layout.rs`,
+  `ui_logic.rs`) in inline `ble` and `ui` modules (through `#[path]`
+  re-export facades until 2026-10-30), `power_logic.rs` as an ordinary module, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
   under `#[cfg(test)]`, in an inline `storage` module. It declares `config`
   and, since 2026-10-11, `diagnostics` and `stack_logic` as ordinary modules.

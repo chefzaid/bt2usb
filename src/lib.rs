@@ -39,6 +39,7 @@ pub mod ble {
     pub mod pnp_id;
     pub mod reconnect;
     pub mod scan_list;
+    pub mod slot_loop;
     pub mod slot_policy;
 }
 

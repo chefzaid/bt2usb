@@ -42,7 +42,7 @@ required-features = ["sim"]
 default = []
 # Enable full embedded build (Embassy, SoftDevice, USB)
 embedded = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time", 
-            "dep:embassy-usb", "dep:embassy-sync", "dep:embassy-futures",
+            "dep:embassy-usb", "dep:embassy-sync",
             "dep:nrf-softdevice", "dep:nrf-softdevice-s140",
             "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
             "dep:cortex-m", "dep:cortex-m-rt", "cortex-m-rt/paint-stack",
@@ -62,7 +62,7 @@ log-sensitive-data = ["nrf-softdevice?/log-sensitive-data"]
 # Brings its own critical-section impl (cortex-m single-core) since the
 # SoftDevice usually provides it.
 sim = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
-       "dep:embassy-sync", "dep:embassy-futures",
+       "dep:embassy-sync",
        "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
        "dep:cortex-m", "dep:cortex-m-rt", "dep:embedded-hal", "dep:embedded-hal-async",
        "dep:defmt", "dep:defmt-rtt", "dep:panic-probe",
@@ -76,7 +76,10 @@ embassy-nrf       = { version = "0.7", features = ["defmt", "nrf52840", "time-dr
 embassy-time      = { version = "0.5", features = ["defmt", "defmt-timestamp-uptime"], optional = true }
 embassy-usb       = { version = "0.6", features = ["defmt"], optional = true }
 embassy-sync      = { version = "0.7", features = ["defmt"], optional = true }
-embassy-futures   = { version = "0.1", optional = true }
+
+# - Future combinators (every build): `select` in the slot worker loop, which
+#   the host tests run against fakes (src/ble/slot_loop.rs).
+embassy-futures   = { version = "0.1" }
 
 # - BLE (Nordic SoftDevice S140) (embedded only) ---------------
 nrf-softdevice    = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", features = ["defmt", "nrf52840", "s140", "ble-central", "ble-gatt-client", "ble-sec", "critical-section-impl", "evt-max-size-256"], optional = true }

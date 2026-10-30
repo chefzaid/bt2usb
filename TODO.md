@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 15 | 1 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 16 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **152** | **64** | **20** |
+| **Total** | **153** | **63** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -989,11 +989,20 @@ Host tests, simulation, and code-health work. Context:
   seed, and `mask fuzz` a million. 246 million local inputs found nothing;
   three deliberate mutants were caught
   ([parser fuzzing](docs/testing.md#parser-fuzzing)).
-- [ ] **P1** **Async task fault tests.** Exercise command cancellation, full
+- [x] **P1** **Async task fault tests.** Exercise command cancellation, full
   event channels, scan/reconnect contention, repeated security failures, and
   device disappearance during discovery. Accept when deterministic test cases
   assert completion, retry policy, and UI state without relying only on reducer
-  tests ([testing](docs/testing.md#known-verification-gaps)).
+  tests ([testing](docs/testing.md#known-verification-gaps)). Done 2026-10-30:
+  the slot worker's loop moved into `src/ble/slot_loop.rs`, generic over the
+  radio (`SlotIo`; the firmware's is `Radio` in `src/ble/slot_worker.rs`), and
+  10 host tests in `src/ble/slot_loop_tests.rs` run the production loop
+  against a scripted radio with its events going through the real coordinator
+  reducers, asserting the worker's attempts, retries, and reports and the UI
+  events for each fault listed. The coordinator task's own loop (user scans,
+  the Forget and factory-reset transaction) and the GAP procedure lock are not
+  covered and stay a known gap
+  ([validation record](docs/validation-records.md#validation-record--2026-10-30-slot-worker-fault-tests)).
 - [x] **P1** **Host tests for the I/O shells.** The connection workers,
   security handler, GATT HID client, USB device, and display driver
   (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/slot_link.rs`,

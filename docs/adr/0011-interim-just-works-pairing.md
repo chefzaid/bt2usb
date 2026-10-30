@@ -206,7 +206,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | --- | --- |
 | Security handler and bond cache | `Bonder` and its `SecurityHandler` implementation in [bonder.rs](../../src/ble/bonder.rs) |
 | Encryption gate | `wait_for_secure_link` and `secure_and_discover`, which `connect_and_run_secure` races against commands, in [slot_link.rs](../../src/ble/slot_link.rs) |
-| Pairing permission | `ConnectionRequest { allow_pairing: !silent }` in `connection_slot_task`; `silent` is true for `SlotCommand::Reconnect` |
+| Pairing permission | `!silent` passed to `SlotIo::attempt` in `run` ([slot_loop.rs](../../src/ble/slot_loop.rs)), which the firmware sends as `ConnectionRequest { allow_pairing }` ([slot_worker.rs](../../src/ble/slot_worker.rs)); `silent` is true for `SlotCommand::Reconnect` |
 | Identity resolution on reconnect | `SavedPeer` and the shared reconnect table in [reconnect.rs](../../src/ble/reconnect.rs) ([ADR 0015](0015-shared-reconnect-scan.md)); `find_saved_peer` and the `IdentityKey::is_match` resolver in [scanner.rs](../../src/ble/scanner.rs) |
 | Persistence and eviction | `Action::PersistDevice` in `execute_action` ([multi_conn.rs](../../src/ble/multi_conn.rs)); `DeviceStore::add` in [storage.rs](../../src/storage.rs) |
 | Binding behavior relied on | `security_params` in [security.rs](../../vendor/nrf-softdevice/src/ble/security.rs); `default_security_params` and the Security Request handler in [gap.rs](../../vendor/nrf-softdevice/src/ble/gap.rs) |

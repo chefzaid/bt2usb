@@ -8,6 +8,29 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Slot Worker Fault Tests
+
+This record covers the commit that checks off the P1 item "Async task fault
+tests" in [TODO.md](../TODO.md#verification-and-code-quality): the slot
+worker's loop moves from `connection_slot_task` in `src/ble/slot_worker.rs`
+into `run` in the host-compiled `src/ble/slot_loop.rs`, generic over a
+`SlotIo` trait, with `SlotCommand`, `SlotEvent`, and `SlotOutcome` made
+generic over the address beside it; `slot_worker.rs` keeps the firmware's
+`SlotIo` (`Radio`), and `embassy-futures` becomes a dependency of every build
+so the loop's `select` compiles on the host. Ten fault tests run the
+production loop against a scripted radio
+([slot worker fault tests](testing.md#test-map)). The firmware's behavior is
+meant to be unchanged; the checks ran locally on Linux in a container, and
+nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script, as in the HFXO record | Passed after this record was added; 473 unit tests (10 new in `slot_loop_tests.rs`) and the 13 integration, glyph, pairing-permission, and portal tests |
+| Same loop as before | Review of the old `connection_slot_task` against `run` and `Radio` | The loop body is the same code with each radio call behind a `SlotIo` method that `Radio` implements with the call it replaced: `cmd_rx.receive()`, `slot_event_tx.send()`, the 500 ms `Timer`, `bonder().bond_for_address()`, the five `scanner` functions, and `connect_and_run_secure`. The three log lines are `Note`s that `Radio` prints with the same text. The LED receiver is taken once per slot, as before |
+| Fault tests that failed first | The first run of the new tests | Five failed on expectations, not on the loop: a failed attempt's UI events are the error followed by `Disconnected` (`on_slot_error` sends both), a quiet retry scans for the address the device was last seen at, and a failed takeover drops the selection's unsaved pairing. The tests now assert those |
+| `Cargo.lock` | `git diff` | Unchanged; `embassy-futures` 0.1 was already locked |
+| Board/radio/USB acceptance | Physical hardware | Not run; the coordinator task's own loop and the GAP lock between scans and connects are still checked only on hardware |
+
 ## Validation Record — 2026-10-30, Security Handler And USB Checks
 
 This record covers the commit that checks off the P1 item "Host tests for the

@@ -47,7 +47,7 @@ are not translated.
 | Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/bonder.rs`](../src/ble/bonder.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification, subscription decisions) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`ble/hid_gatt.rs`](../src/ble/hid_gatt.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
 | Report Map long reads up to 512 bytes | Software-verified (fragment assembly) | [`ble/long_read.rs`](../src/ble/long_read.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
-| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table, slot retry policy) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/slot_policy.rs`](../src/ble/slot_policy.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
+| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table, slot retry policy, slot worker loop) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/slot_policy.rs`](../src/ble/slot_policy.rs), [`ble/slot_loop.rs`](../src/ble/slot_loop.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
 | Keyboard LED forwarding to the BLE keyboard, current state on every link | Software-verified (LED byte handling, forwarding loop) | [`usb/host_requests.rs`](../src/usb/host_requests.rs), [`hid/host_leds.rs`](../src/hid/host_leds.rs), [`hid/keyboard.rs`](../src/hid/keyboard.rs), [`ble/hid_client.rs`](../src/ble/hid_client.rs) | [Keyboard LEDs](#keyboard-leds) |
 | Composite USB keyboard, mouse, consumer control | Software-verified (descriptors, report formats) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/`](../src/hid/) | [USB HID Device](#usb-hid-device) |
 | Boot protocol, per-unit serial, software VBUS | Implemented (boot mouse format software-verified) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`usb/host_requests.rs`](../src/usb/host_requests.rs), [`sd_setup.rs`](../src/sd_setup.rs) | [USB HID Device](#usb-hid-device) |
@@ -425,8 +425,10 @@ the Nordic SoftDevice S140 in the central role
 decisions are pure reducers in [`ble/coordinator.rs`](../src/ble/coordinator.rs)
 covered by host tests; the tasks that perform them are in
 [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) (the coordinator task) and
-[`ble/slot_worker.rs`](../src/ble/slot_worker.rs) and
-[`ble/slot_link.rs`](../src/ble/slot_link.rs) (the slot workers), and the
+[`ble/slot_loop.rs`](../src/ble/slot_loop.rs),
+[`ble/slot_worker.rs`](../src/ble/slot_worker.rs), and
+[`ble/slot_link.rs`](../src/ble/slot_link.rs) (the slot workers, whose loop
+the host fault tests run against a scripted radio), and the
 security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
 ([ADR 0003](adr/0003-pure-core-and-task-shell.md)).
 

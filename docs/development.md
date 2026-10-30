@@ -760,9 +760,11 @@ Files:
   reports on, and its reducer must ignore one that is not the slot's current
   number ([attempt numbers](architecture.md#attempt-numbers-and-retry-takeover)). Scan and connection setup must hold `GAP_PROCEDURE`, because the
   SoftDevice runs one such procedure at a time.
-- [ble/slot_worker.rs](../src/ble/slot_worker.rs): handle a new `SlotCommand`
-  in `connection_slot_task`, the per-slot worker, and send a new `SlotEvent`
-  from it. A command that should reach an attempt in progress is also handled
+- [ble/slot_loop.rs](../src/ble/slot_loop.rs): handle a new `SlotCommand` in
+  `run`, the per-slot worker loop, and send a new `SlotEvent` from it; give
+  the fault tests' scripted radio (`slot_loop_bench.rs`) anything new the loop
+  asks of `SlotIo`, and the firmware's `Radio` in
+  [ble/slot_worker.rs](../src/ble/slot_worker.rs). A command that should reach an attempt in progress is also handled
   where [ble/slot_link.rs](../src/ble/slot_link.rs) races each phase against
   the slot's commands (`take_over`).
 - [ble/management.rs](../src/ble/management.rs): targets, quiescence, and

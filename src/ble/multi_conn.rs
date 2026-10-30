@@ -12,6 +12,7 @@ use crate::ble::bonder::{bonder, key_matches};
 use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
 use crate::ble::management::{self, Quiescence};
 use crate::ble::scanner::ScanResult;
+use crate::ble::slot_loop;
 use crate::ble::{scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::MAX_PAIRED_DEVICES;
 use crate::storage::{PairedDevice, Stored, DEVICE_STORE};
@@ -31,63 +32,13 @@ pub type SlotSenders = [Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>
 /// [`crate::ble::coordinator`]; here it is just instantiated.
 type MultiConnectionManager = ConnManager<Address>;
 
-/// A coordinator command to one slot worker. `attempt` is the number the
-/// coordinator gave the slot's reservation (see [`ConnManager`]); the worker
-/// carries it on every event it reports for that command.
-#[derive(Clone)]
-pub enum SlotCommand {
-    /// Connect to a device the user just picked; a failure is reported. Sent
-    /// to a free slot, or to the slot retrying the same device in the
-    /// background, which it takes over.
-    Connect {
-        device: DiscoveredDevice,
-        attempt: u32,
-    },
-    /// Keep silently retrying a paired device until it connects (boot-time
-    /// auto-reconnect). Ends on success, on an error other than a failed
-    /// connection (reported), including the bridge losing the device's keys
-    /// or the device refusing them, or on a new command.
-    Reconnect {
-        device: DiscoveredDevice,
-        attempt: u32,
-    },
-    Disconnect,
-    /// Acknowledge only after the link and automatic retry target are gone.
-    Quiesce(u32),
-}
+/// A coordinator command to one slot worker, over the SoftDevice address
+/// ([`slot_loop::SlotCommand`]).
+pub type SlotCommand = slot_loop::SlotCommand<Address>;
 
-/// A slot worker's report. Every variant but `Quiesced` carries the number of
-/// the attempt it reports on, so the coordinator can ignore one it replaced.
-#[derive(Clone)]
-pub enum SlotEvent {
-    Quiesced {
-        slot: usize,
-        token: u32,
-    },
-    Connected {
-        slot: usize,
-        attempt: u32,
-        device: DiscoveredDevice,
-    },
-    Disconnected {
-        slot: usize,
-        attempt: u32,
-    },
-    /// An established link dropped; the slot is now silently reconnecting.
-    LinkLost {
-        slot: usize,
-        attempt: u32,
-        device: DiscoveredDevice,
-    },
-    /// The attempt failed. `retrying` when it was a user connection that
-    /// took over a background reconnect, which the worker has resumed.
-    Error {
-        slot: usize,
-        attempt: u32,
-        tag: BleErrorTag,
-        retrying: bool,
-    },
-}
+/// A slot worker's report, over the SoftDevice address
+/// ([`slot_loop::SlotEvent`]).
+pub type SlotEvent = slot_loop::SlotEvent<Address>;
 
 pub async fn ble_task(
     sd: &'static Softdevice,

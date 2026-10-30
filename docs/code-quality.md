@@ -156,26 +156,16 @@ exceed 500 lines, counted with `wc -l` (blank and comment lines included). The
 host-tests job runs the check on Linux and lists each file over the limit. Split a file that grows past it along a responsibility, not at an
 arbitrary line: tests go to a sibling `*_tests.rs` file included with
 `#[cfg(test)] #[path = "..."] mod tests;` (as `ui_logic_tests.rs`,
-`reconnect_tests.rs`, and `coordinator_tests.rs` are), and a test file that
+`reconnect_tests.rs`, and `coordinator_tests.rs` are); a test file that
 grows past it splits again into a child module that shares its helpers (as
-`coordinator_attempt_tests.rs` left `coordinator_tests.rs` on 2026-10-11), a
-pure module splits by responsibility (as `scan_list.rs`, the scan result list,
-left `coordinator.rs` with its tests on 2026-10-11), and a shell module
-splits by task or handler (as `multi_conn.rs` gave up `slot_worker.rs` and
-`bonder.rs`, and `hid_device.rs` gave up `host_requests.rs`, on 2026-10-10,
-and `slot_worker.rs` gave up one attempt's connect, secure, discover, and run
-phases to `slot_link.rs` on 2026-10-11).
-The device-store tests split the same way when the store moved into host
-code: `devices_tests.rs` holds the list rules and `devices_format_tests.rs`,
-a child module of it that shares its helpers, the codec and load tests.
-A Python helper splits the same way: on 2026-10-10 the documentation checker
-(775 lines once formatted) became a thin `scripts/check_docs.py` driver and one
-module per check in `scripts/docs_checks/`. Markdown guides, `maskfile.md`, the
+`coordinator_attempt_tests.rs` and `devices_format_tests.rs` do); a pure
+module splits by responsibility (as `scan_list.rs` left `coordinator.rs`); a
+shell module splits by task or handler (as `slot_worker.rs`, `slot_link.rs`,
+and `bonder.rs` left `multi_conn.rs`); and a Python helper splits into a thin
+driver and one module per concern (as `scripts/check_docs.py` and
+`scripts/docs_checks/`). Markdown guides, `maskfile.md`, the
 shell scripts, the Renode C# models (up to 700 lines each), and the vendored
-crate are not checked. On 2026-10-10, after
-the device-store move cut `storage.rs` from 488 lines to 350, the largest Rust
-files were `hid_descriptor_tests.rs` (486) and `coordinator_tests.rs` (465),
-and the largest Python file was `scripts/check_docs_test.py` (436).
+crate are not checked.
 
 ### Clippy
 
@@ -208,21 +198,19 @@ each configuration lists different binaries. Every configuration also lints
 
 ### Lint Allowances
 
-**Review rule.** Five allowances exist in `src/`, counted with
+**Review rule.** Seven allowances exist in `src/`, counted with
 `grep -rn 'allow(' src` over attribute lines:
 
 | Location | Allowance | Reason |
 | --- | --- | --- |
 | [selftest.rs](../src/selftest.rs) (crate level) | `dead_code, unused_imports` | The self-test reuses firmware modules without using all of their items or re-exports (comment in the file) |
 | [sim.rs](../src/sim.rs) (crate level) | `dead_code` | The simulation reuses shared modules, such as the self-test's display helpers, that it does not fully exercise (comment in the file) |
-| [display.rs](../src/ui/display.rs) `init` | `dead_code` | Used only by the self-test (`ui::display::init` in `selftest.rs`) |
-| [display.rs](../src/ui/display.rs) `draw_home` | `dead_code` | Used only by the self-test; no comment at the attribute |
+| [display.rs](../src/ui/display.rs) `init`, `draw_home` | `dead_code` | Used only by the self-test (comment at each attribute) |
 | [hid_device.rs](../src/usb/hid_device.rs) `is_configured` | `dead_code` | Used only by the self-test (comment at the attribute) |
+| [stack.rs](../src/stack.rs) `guard_is_on`, `select_region` | `dead_code` | Used only by the self-test's `stack guard` stage (comment at each attribute) |
 
-A `clippy::too_many_arguments` allowance on `multi_conn::manage_devices` was
-removed on 2026-10-10, when the per-slot command senders became one array and
-the function dropped to seven parameters; an `#[expect]` would have reported
-the stale allowance by itself.
+An `#[expect]` would report a stale allowance by itself, but these
+allowances are needed in some builds and not others, so `#[allow]` stays.
 
 The bridge binary has no crate-level allowance, so an unused item in its
 module tree fails embedded Clippy. The two crate-level allowances mean that

@@ -9,7 +9,7 @@
 
 use super::display_logic::Recovery;
 use super::layout;
-use super::ui_logic::{Screen, UiState};
+use super::ui_logic::UiState;
 use defmt::{info, warn};
 use embassy_futures::select::{select, Either};
 use embassy_nrf::gpio::Pin as GpioPin;
@@ -173,7 +173,7 @@ pub async fn finish_or_stop<F: core::future::Future>(operation: F) -> F::Output 
 }
 
 /// Standalone initialization used by the on-board self-test. Errors are explicit.
-#[allow(dead_code)]
+#[allow(dead_code)] // used by the self-test binary
 pub async fn init<I2C: embedded_hal_async::i2c::I2c>(
     i2c: I2C,
 ) -> Result<Display<I2C>, DisplayFault> {
@@ -225,18 +225,12 @@ fn draw_view<I2C: embedded_hal_async::i2c::I2c>(display: &mut Display<I2C>, stat
     }
 }
 
-#[allow(dead_code)]
+/// Draw the boot Home screen, for the self-test's display stage.
+#[allow(dead_code)] // used by the self-test binary
 pub async fn draw_home<I2C: embedded_hal_async::i2c::I2c>(
     display: &mut Display<I2C>,
-    connected: bool,
-    name: &str,
 ) -> Result<(), DisplayFault> {
-    let mut state = UiState::new();
-    if connected {
-        state.screen = Screen::Connected;
-        let _ = state.connected_name.push_str(name);
-    }
-    draw_view(display, &state);
+    draw_view(display, &UiState::new());
     display.flush().await.map_err(|_| DisplayFault)
 }
 

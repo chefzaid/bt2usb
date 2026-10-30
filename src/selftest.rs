@@ -197,7 +197,7 @@ async fn main(spawner: Spawner) {
             tally.pass("oled i2c", "SSD1306 acknowledged at 0x3C");
             match ui::display::finish_or_stop(ui::display::init(twi)).await {
                 Ok(mut display) => {
-                    if ui::display::finish_or_stop(ui::display::draw_home(&mut display, false, ""))
+                    if ui::display::finish_or_stop(ui::display::draw_home(&mut display))
                         .await
                         .is_ok()
                     {

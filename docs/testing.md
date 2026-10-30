@@ -753,7 +753,7 @@ motion must never be replayed.
 Firmware buffers are fixed-capacity `heapless` types. Test at and beyond
 capacity: `writer_truncates_cleanly_when_full`,
 `maximum_value_completes_and_oversized_map_fails`,
-`targets_are_capped_to_connection_slots`, `parser_nesting_is_bounded`, and
+`find_empty_slot_fills_then_returns_none`, `parser_nesting_is_bounded`, and
 `mouse_accumulation_saturates`. Arithmetic on untrusted sizes and time must
 saturate (`untrusted_report_dimensions_cannot_overflow_routing_parser`,
 `large_timeout_does_not_overflow_into_low_power`).

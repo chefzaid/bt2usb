@@ -89,6 +89,40 @@ impl ResetCause {
             ResetCause::WakeFromOffVbus => "wake from System OFF (VBUS)",
         }
     }
+
+    /// The cause in at most 14 characters, as the Bridge info screen shows it
+    /// after `Reset: ` on a 21-column line.
+    pub const fn short_name(self) -> &'static str {
+        match self {
+            ResetCause::PowerOnOrBrownout => "power/brownout",
+            ResetCause::ResetPin => "reset pin",
+            ResetCause::Watchdog => "watchdog",
+            ResetCause::SoftReset => "soft reset",
+            ResetCause::Lockup => "CPU lock-up",
+            ResetCause::WakeFromOffGpio => "GPIO wake",
+            ResetCause::WakeFromOffLpcomp => "LPCOMP wake",
+            ResetCause::WakeFromOffDebug => "debug wake",
+            ResetCause::WakeFromOffNfc => "NFC wake",
+            ResetCause::WakeFromOffVbus => "VBUS wake",
+        }
+    }
+}
+
+/// A [`SOURCE_COMMIT`] as the Bridge info screen shows it: the first eight
+/// digits, then `-dirty` when the build had local changes; `unknown` stays.
+pub fn short_commit(commit: &str) -> heapless::String<14> {
+    let (digits, dirty) = match commit.strip_suffix("-dirty") {
+        Some(digits) => (digits, true),
+        None => (commit, false),
+    };
+    let mut short = heapless::String::new();
+    for digit in digits.chars().take(8) {
+        let _ = short.push(digit);
+    }
+    if dirty {
+        let _ = short.push_str("-dirty");
+    }
+    short
 }
 
 /// The value of `POWER.RESETREAS` at boot. The register accumulates causes

@@ -1203,7 +1203,11 @@ boot lines from `bt2usb firmware starting` to `reset reason` carry the
 version, the source commit, the profile, the `DEFMT_LOG` filter, the stack
 guard, any previous boot's stack overflow, and the reset reason
 ([boot sequence](#boot-sequence)), so quote them rather than retyping the
-build details. Add the last
+build details. Without a debug probe, the bridge's own **Bridge info**
+screen, the last entry under saved devices (UP, then DOWN to the end, then
+SELECT), shows the version, the commit's first eight digits with any
+`-dirty` mark, and the last reset cause
+([features](features.md#manage-saved-devices)). Add the last
 `diagnostics:` line logged before the failure or after reproducing it
 ([event counters](#event-counters)), and each involved peripheral's
 `slot N PnP ID:` line ([PnP ID](#peripheral-pnp-id)). Sanitize device

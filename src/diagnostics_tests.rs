@@ -96,10 +96,28 @@ fn every_cause_has_a_distinct_name() {
     ];
     for (i, a) in all.iter().enumerate() {
         assert!(!a.name().is_empty());
+        // The screen's short name fits after `Reset: `, with room for ` +N`
+        // when another cause comes first or the cause stands alone.
+        assert!((1..=14).contains(&a.short_name().len()), "{a:?}");
+        if *a != ResetCause::PowerOnOrBrownout {
+            assert!(a.short_name().len() <= 11, "{a:?}");
+        }
         for b in &all[i + 1..] {
             assert_ne!(a.name(), b.name());
+            assert_ne!(a.short_name(), b.short_name());
         }
     }
+}
+
+#[test]
+fn the_screen_shows_eight_commit_digits_and_keeps_the_dirty_mark() {
+    let commit = "0123456789abcdef0123456789abcdef01234567";
+    assert_eq!(short_commit(commit), "01234567");
+    assert_eq!(short_commit(&format!("{commit}-dirty")), "01234567-dirty");
+    assert_eq!(short_commit("unknown"), "unknown");
+    let shown = short_commit(SOURCE_COMMIT);
+    assert!(SOURCE_COMMIT.starts_with(shown.trim_end_matches("-dirty")));
+    assert_eq!(shown.ends_with("-dirty"), SOURCE_COMMIT.ends_with("-dirty"));
 }
 
 /// A snapshot with `count` for each listed counter and zero for the rest.

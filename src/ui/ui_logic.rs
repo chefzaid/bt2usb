@@ -35,6 +35,9 @@ pub enum Screen {
     /// A new pairing was saved and changed another saved device: replaced
     /// its bond or removed it to make room.
     Paired,
+    /// The firmware version, source commit, and last reset cause, opened from
+    /// the saved-device list's last entry.
+    BridgeInfo,
 }
 
 /// Physical button events (after debouncing).
@@ -95,9 +98,12 @@ pub fn on_button(
 ) -> ButtonOutcome {
     // Scan/connection events may invalidate the old cursor. Never dispatch a
     // connection for an empty list or an index outside the current snapshot.
+    // The saved list ends with Factory reset, then Bridge info.
+    let reset_row = device_count;
+    let info_row = device_count.saturating_add(1);
     let count = match screen {
-        Screen::SavedDevices => device_count.saturating_add(1), // final item = reset
-        Screen::ConfirmForget(_) | Screen::ConfirmReset => 2,   // cancel / confirm
+        Screen::SavedDevices => device_count.saturating_add(2),
+        Screen::ConfirmForget(_) | Screen::ConfirmReset => 2, // cancel / confirm
         _ => device_count,
     };
     let selected = selected.min(count.saturating_sub(1));
@@ -136,15 +142,22 @@ pub fn on_button(
             }
         }
         (Screen::SavedDevices, ButtonEvent::Down) => {
-            out.selected = selected.saturating_add(1).min(device_count);
+            out.selected = selected.saturating_add(1).min(info_row);
+        }
+        (Screen::SavedDevices, ButtonEvent::Select) if selected == info_row => {
+            out.screen = Screen::BridgeInfo;
         }
         (Screen::SavedDevices, ButtonEvent::Select) => {
-            out.screen = if selected < device_count {
+            out.screen = if selected < reset_row {
                 Screen::ConfirmForget(selected)
             } else {
                 Screen::ConfirmReset
             };
             out.selected = 0; // A repeated SELECT always cancels, never deletes.
+        }
+        (Screen::BridgeInfo, ButtonEvent::Select) => {
+            out.screen = Screen::SavedDevices;
+            out.selected = info_row;
         }
         (Screen::ConfirmForget(_) | Screen::ConfirmReset, ButtonEvent::Up) => {
             out.selected = 0;
@@ -243,6 +256,8 @@ pub struct UiState {
     pub message: heapless::String<32>,
     /// No link is up and the bridge is reconnecting a saved device.
     pub reconnecting: bool,
+    /// What `POWER.RESETREAS` held at boot, for the Bridge info screen.
+    pub reset_reasons: crate::diagnostics::ResetReasons,
     pub scan_dots: u8,
 }
 
@@ -262,6 +277,7 @@ impl UiState {
             connected_names: heapless::Vec::new(),
             message: heapless::String::new(),
             reconnecting: false,
+            reset_reasons: crate::diagnostics::ResetReasons::from_register(0),
             scan_dots: 0,
         }
     }
@@ -269,7 +285,10 @@ impl UiState {
     pub fn button(&mut self, button: ButtonEvent) -> Option<UiCommand> {
         let count = if matches!(
             self.screen,
-            Screen::SavedDevices | Screen::ConfirmForget(_) | Screen::ConfirmReset
+            Screen::SavedDevices
+                | Screen::ConfirmForget(_)
+                | Screen::ConfirmReset
+                | Screen::BridgeInfo
         ) {
             self.paired_names.len()
         } else {

@@ -8,6 +8,24 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Bridge Info Screen
+
+This record covers the commit that checks off the P2 item "Bridge information
+screen" in [TODO.md](../TODO.md#clearer-bridge-screens): the saved-device
+list gains a final **Bridge info** entry, after Factory reset, whose screen
+shows the firmware version, the source commit's first eight digits with any
+`-dirty` mark, and the first reset cause the boot read from
+`POWER.RESETREAS`, with `+N` for more. It is reachable from every screen UP
+opens the list from, so nothing is disconnected to read it, and it shows no
+device name, address, or key.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Local CI script | Format, host and three firmware Clippy configurations, host tests, rustdoc, documentation checks, release and simulation builds | Passed |
+| Host tests | `cargo test --locked --lib` | 488 passed, 2 new: the screen's lines with one and several reset causes, and the short commit with and without `-dirty` and for `unknown`; the saved-list navigation and layout tests now reach Bridge info |
+| Renode | `renode-test renode/bt2usb-sim.robot` with the local platform copy without `ApplySVD` | 3 of 3 passed; the panel read `Version 0.1.0`, `Commit 5467d537-dirty` (taken from the boot line's commit, as the robot computes it), and `Reset: power/brownout`, and SELECT returned to the entry |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed after the Test Map rows (13, 15) and totals (501, 488) were updated |
+
 ## Validation Record — 2026-10-30, Reconnecting On Home
 
 This record covers the commit that checks off the P2 item "Show that saved

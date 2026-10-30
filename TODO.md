@@ -38,8 +38,8 @@ probe, or USB host to close.
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
-| [Product Extensions](#product-extensions) | 3 | 29 | 0 |
-| **Total** | **160** | **65** | **20** |
+| [Product Extensions](#product-extensions) | 4 | 28 | 0 |
+| **Total** | **161** | **64** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1559,9 +1559,9 @@ verify them; a board confirms them with the rest of the
   new fifth step drops the mouse's link too
   ([validation record](docs/validation-records.md#validation-record--2026-10-30-reconnecting-on-home))
   *(hardware evidence pending)*.
-- [ ] **P2** **Bridge information screen.** The firmware version, source
-  commit, and last reset cause reach only the RTT log (`src/diagnostics.rs`),
-  so reading them needs a debug probe, which a user reporting a defect from a
+- [x] **P2** **Bridge information screen.** The firmware version, source
+  commit, and last reset cause reached only the RTT log (`src/diagnostics.rs`),
+  so reading them needed a debug probe, which a user reporting a defect from a
   bridge behind a monitor does not have. Add a screen, reachable from Home and
   Connected without disconnecting anything, that shows the version, the
   commit's first eight characters with its `-dirty` mark, and the last reset
@@ -1570,7 +1570,14 @@ verify them; a board confirms them with the rest of the
   several reset causes, the Renode scenario reads the version back from the
   modelled panel, and the
   [defect-reporting steps](docs/operations.md#reporting-a-defect) say where to
-  find it.
+  find it. Done 2026-10-30: a final `Bridge info` entry in the saved-device
+  list opens `Screen::BridgeInfo` (`src/ui/ui_logic.rs`), drawn by
+  `bridge_info` in `src/ui/layout.rs` from `short_commit` and
+  `ResetCause::short_name` in `src/diagnostics.rs`; `src/main.rs` hands it
+  the boot's `POWER.RESETREAS`, and the first-flash checklist compares it
+  with the boot log
+  ([validation record](docs/validation-records.md#validation-record--2026-10-30-bridge-info-screen))
+  *(hardware evidence pending)*.
 
 ### Shared Decisions
 

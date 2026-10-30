@@ -358,7 +358,15 @@ connected for logs.
 Run destructive pairing tests on test devices whose records can be recreated.
 These are logical management checks; they do not establish physical key erasure.
 UP opens the "Saved devices" list from Home, Connected, Error, or a notice; the
-list ends with a "Factory reset" entry, and UP on the first entry goes back.
+list ends with "Factory reset" and "Bridge info" entries, and UP on the first
+entry goes back.
+
+- [ ] **Bridge info:** choose the final "Bridge info" entry. The screen shows
+      the same version, the first eight digits of the same commit, and the
+      same first reset cause as the boot log's `bt2usb firmware starting` and
+      `reset reason` lines; after pressing the board's reset button and
+      opening it again it shows `Reset: reset pin`. SELECT goes back to the
+      list.
 
 - [ ] **Cancel by default:** press UP from Home/Connected/Error, choose a saved
       device, then press SELECT twice. The first press opens the
@@ -369,7 +377,7 @@ list ends with a "Factory reset" entry, and UP on the first entry goes back.
       notice stays until acknowledged, and other saved peers remain. Reset the
       board and confirm the forgotten device does not reconnect until
       explicitly paired again.
-- [ ] **Factory reset:** choose the final "Factory reset" entry, then DOWN and
+- [ ] **Factory reset:** choose the "Factory reset" entry, then DOWN and
       SELECT in its "Reset all pairings?" confirmation. After the
       "Pairings reset" notice, reset the board (the firmware does not reboot by
       itself); no prior peer auto-reconnects. Re-pair the test keyboard/mouse

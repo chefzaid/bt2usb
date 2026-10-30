@@ -44,6 +44,7 @@ fn every_screen() -> std::vec::Vec<UiState> {
         Screen::Notice,
         Screen::NoReply,
         Screen::Paired,
+        Screen::BridgeInfo,
     ] {
         for selected in 0..2 {
             let mut state = state(screen);
@@ -138,7 +139,7 @@ fn an_empty_device_list_shows_only_its_title() {
 }
 
 #[test]
-fn saved_list_ends_with_factory_reset_and_says_how_to_go_back() {
+fn saved_list_ends_with_factory_reset_and_bridge_info_and_says_how_to_go_back() {
     let mut saved = state(Screen::SavedDevices);
     let _ = saved.paired_names.push(name("Mouse"));
     let _ = saved.paired_names.push(name("Keyboard"));
@@ -150,15 +151,55 @@ fn saved_list_ends_with_factory_reset_and_says_how_to_go_back() {
             (23, "  Mouse".into()),
             (33, "  Keyboard".into()),
             (43, "> Factory reset".into()),
+            (53, "  Bridge info".into()),
             (63, "UP at first: back".into()),
         ]
+    );
+    // A third device scrolls the list to keep the selection in view.
+    let _ = saved.paired_names.push(name("Remote"));
+    saved.selected = 4;
+    assert_eq!(
+        texts(&saved)[1..5],
+        ["  Keyboard", "  Remote", "  Factory reset", "> Bridge info"]
     );
     saved.paired_names.clear();
     saved.selected = 0;
     assert_eq!(
         texts(&saved),
-        ["Saved devices", "> Factory reset", "UP at first: back"]
+        [
+            "Saved devices",
+            "> Factory reset",
+            "  Bridge info",
+            "UP at first: back"
+        ]
     );
+}
+
+#[test]
+fn bridge_info_names_the_build_and_the_reset_causes() {
+    let mut info = state(Screen::BridgeInfo);
+    let version = format!("Version {}", crate::diagnostics::FIRMWARE_VERSION);
+    let commit = format!(
+        "Commit {}",
+        crate::diagnostics::short_commit(crate::diagnostics::SOURCE_COMMIT)
+    );
+    assert_eq!(
+        shown(&info),
+        [
+            (10, "Bridge info".into()),
+            (23, version.clone()),
+            (33, commit.clone()),
+            (43, "Reset: power/brownout".into()),
+            (58, "SELECT: back".into()),
+        ]
+    );
+    // The reset pin and a soft reset both recorded: the first, and a count.
+    info.reset_reasons = crate::diagnostics::ResetReasons::from_register(0b101);
+    assert_eq!(texts(&info)[3], "Reset: reset pin +1");
+    info.reset_reasons = crate::diagnostics::ResetReasons::from_register(1 << 1);
+    assert_eq!(texts(&info)[3], "Reset: watchdog");
+    // Nothing on it names a device.
+    assert_eq!(texts(&info)[1..3], [version, commit]);
 }
 
 #[test]

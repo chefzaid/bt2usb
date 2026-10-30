@@ -778,6 +778,7 @@ power flag to the display task after every event
 | `connected_names` | `Vec<String<32>, 2>` | The connected devices' names, in slot order; empty when nothing is connected |
 | `reconnecting` | `bool` | Nothing is connected and a saved device is being reconnected; Home shows `bt2usb / Reconnecting` |
 | `message` | `String<32>` | Error or notice text, truncated by characters |
+| `reset_reasons` | `ResetReasons` | `POWER.RESETREAS` as read at boot ([diagnostics](../src/diagnostics.rs)); the Bridge info screen shows its first cause. The firmware sets it once, the simulation leaves it at power-on |
 | `scan_dots` | `u8` | Scanning animation, advanced once per second while scanning with the display on |
 
 The controller also keeps the addresses from the last `PairedDevices` reply,
@@ -786,7 +787,7 @@ the loop keeps the `PowerManager`. RSSI and addresses are never rendered.
 
 `Screen` has the variants `Home`, `Scanning`, `DeviceList`, `Connecting`,
 `Connected`, `Error`, `SavedDevices`, `ConfirmForget(usize)`, `ConfirmReset`,
-`Managing`, `Notice`, `NoReply`, and `Paired`. The text each one shows and what UP, DOWN, and
+`Managing`, `Notice`, `NoReply`, `Paired`, and `BridgeInfo`. The text each one shows and what UP, DOWN, and
 SELECT do on it are listed once, in
 [features: screens and buttons](features.md#screens-and-buttons).
 

@@ -241,6 +241,7 @@ async fn main(spawner: Spawner) {
     info!("UI and isolated OLED tasks started");
 
     let mut ui = UiController::<nrf_softdevice::ble::Address>::new();
+    ui.state.reset_reasons = reasons;
     let mut power = PowerManager::new();
     let mut stack_reported = 0;
     let mut counter_report = diagnostics::CounterReport::new();

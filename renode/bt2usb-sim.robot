@@ -184,7 +184,12 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Wait For Line On Uart     bt2usb-sim starting
     # The build script's identity (src/diagnostics.rs): a full commit, or
     # `unknown` for a build outside git.
-    Wait For Line On Uart     version \\d+\\.\\d+\\.\\d+, commit ([0-9a-f]{40}(-dirty)?|unknown), (debug|release) build    treatAsRegex=true
+    ${build}=                 Wait For Line On Uart     version (\\d+\\.\\d+\\.\\d+), commit ([0-9a-f]{40}(-dirty)?|unknown), (debug|release) build    treatAsRegex=true
+    # The Bridge info screen shows the version and the commit's first eight
+    # digits with its -dirty mark.
+    ${version}=               Set Variable    ${build.Groups[0]}
+    ${commit}=                Set Variable    ${build.Groups[1]}
+    ${short_commit}=          Evaluate    '${commit}'[:8] + ('-dirty' if '${commit}'.endswith('-dirty') else '')
     # The MPU stack guard (src/stack.rs) is on; the overflow test checks it.
     Wait For Line On Uart     stack guard: 4096 bytes at 0x[0-9a-f]{8}\\.\\.0x[0-9a-f]{8}    treatAsRegex=true
     Wait For Line On Uart     buttons ready
@@ -247,7 +252,7 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Press Button              ${PIN_UP}        button Up -> screen Managing (selected 0)
     Wait For Line On Uart     cmd: ListPaired id=1
     Wait For Line On Uart     event: PairedDevices id=1 ['Mouse', 'Keyboard'] -> screen SavedDevices (selected 0)    pauseEmulation=true
-    Oled Should Show          Saved devices    > Mouse    ${SPACE * 2}Keyboard    ${SPACE * 2}Factory reset    UP at first: back
+    Oled Should Show          Saved devices    > Mouse    ${SPACE * 2}Keyboard    ${SPACE * 2}Factory reset    ${SPACE * 2}Bridge info    UP at first: back
     Press Button              ${PIN_DOWN}      button Down -> screen SavedDevices (selected 1)
     Press Button              ${PIN_SELECT}    button Select -> screen ConfirmForget(1) (selected 0)
     Oled Should Show          Forget device?    Keyboard    > Cancel    ${SPACE * 2}Forget
@@ -275,7 +280,14 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Press Button              ${PIN_UP}        button Up -> screen Managing (selected 0)
     Wait For Line On Uart     cmd: ListPaired id=3
     Wait For Line On Uart     event: PairedDevices id=3 ['Mouse'] -> screen SavedDevices (selected 0)
+    # On the way, the last entry shows the build and why the chip restarted;
+    # the simulation reads no reset register, so it reports a power-on.
     Press Button              ${PIN_DOWN}      button Down -> screen SavedDevices (selected 1)
+    Press Button              ${PIN_DOWN}      button Down -> screen SavedDevices (selected 2)
+    Press Button              ${PIN_SELECT}    button Select -> screen BridgeInfo (selected 2)
+    Oled Should Show          Bridge info    Version ${version}    Commit ${short_commit}    Reset: power/brownout    SELECT: back
+    Press Button              ${PIN_SELECT}    button Select -> screen SavedDevices (selected 2)
+    Press Button              ${PIN_UP}        button Up -> screen SavedDevices (selected 1)
     Press Button              ${PIN_SELECT}    button Select -> screen ConfirmReset (selected 0)
     Press Button              ${PIN_DOWN}      button Down -> screen ConfirmReset (selected 1)
     Oled Should Show          Reset all pairings?    Disconnect all    ${SPACE * 2}Cancel    > Reset

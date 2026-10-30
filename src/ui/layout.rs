@@ -6,8 +6,11 @@
 //! host-tested here, and the Renode OLED model reads the same lines back from
 //! the pixels the firmware sends (docs/testing.md#renode-simulation).
 
+use core::fmt::Write;
+
 use heapless::{String, Vec};
 
+use crate::diagnostics::{short_commit, ResetCause, ResetReasons, FIRMWARE_VERSION, SOURCE_COMMIT};
 use crate::ui::input_logic::device_list_window;
 use crate::ui::ui_logic::{Screen, UiState};
 
@@ -111,6 +114,7 @@ pub fn lines(state: &UiState) -> Vec<Line, MAX_LINES> {
             push(&mut out, 44, "SELECT: back");
             push(&mut out, 58, "UP:saved devices");
         }
+        Screen::BridgeInfo => bridge_info(&mut out, state.reset_reasons),
         Screen::NoReply => {
             push(&mut out, 10, "No reply");
             push(&mut out, 26, &state.message);
@@ -121,8 +125,11 @@ pub fn lines(state: &UiState) -> Vec<Line, MAX_LINES> {
     out
 }
 
+/// The saved list's entries after the device names, in order.
+const SAVED_LIST_END: [&str; 2] = ["Factory reset", "Bridge info"];
+
 /// A list screen: the title, the window of rows around the selection (the
-/// saved list ends with "Factory reset"), and the saved list's footer.
+/// saved list ends with [`SAVED_LIST_END`]), and the saved list's footer.
 fn list(out: &mut Vec<Line, MAX_LINES>, names: &[String<32>], selected: usize, saved: bool) {
     push(
         out,
@@ -133,17 +140,40 @@ fn list(out: &mut Vec<Line, MAX_LINES>, names: &[String<32>], selected: usize, s
             "Select device"
         },
     );
-    let count = names.len() + usize::from(saved);
+    let end: &[&str] = if saved { &SAVED_LIST_END } else { &[] };
+    let count = names.len() + end.len();
     for (row, index) in device_list_window(count, selected, LIST_ROWS).enumerate() {
-        let name = names
-            .get(index)
-            .map(|name| name.as_str())
-            .unwrap_or("Factory reset");
-        push_row(out, 23 + row as i32 * 10, index == selected, name);
+        let label = match names.get(index) {
+            Some(name) => name.as_str(),
+            None => end.get(index - names.len()).copied().unwrap_or_default(),
+        };
+        push_row(out, 23 + row as i32 * 10, index == selected, label);
     }
     if saved {
         push(out, 63, "UP at first: back");
     }
+}
+
+/// The firmware's identity and why it last restarted: the first cause, and
+/// how many more `POWER.RESETREAS` recorded.
+fn bridge_info(out: &mut Vec<Line, MAX_LINES>, reasons: ResetReasons) {
+    push(out, 10, "Bridge info");
+    let mut line = String::<32>::new();
+    let _ = write!(line, "Version {}", FIRMWARE_VERSION);
+    push(out, 23, &line);
+    line.clear();
+    let _ = write!(line, "Commit {}", short_commit(SOURCE_COMMIT));
+    push(out, 33, &line);
+    line.clear();
+    let mut causes = reasons.causes();
+    let first = causes.next().map_or("", ResetCause::short_name);
+    let _ = write!(line, "Reset: {}", first);
+    let more = causes.count();
+    if more > 0 {
+        let _ = write!(line, " +{}", more);
+    }
+    push(out, 43, &line);
+    push(out, 58, "SELECT: back");
 }
 
 /// A confirmation: Cancel (the default, row 0) above the action (row 1).

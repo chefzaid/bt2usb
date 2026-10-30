@@ -107,7 +107,8 @@ state behind these screens is in the
 | Connected | `Connected` | `Connected`, each connected device's name on its own row in slot order, `SEL:add DOWN:disc`, `UP:saved devices` | Open saved devices | Disconnect every link and return to Home | Scan to add another device |
 | ERROR | `Error` | `ERROR`, the message, `SEL:retry DOWN:back`, `UP:saved devices` | Open saved devices | Acknowledge: return to Connected if a link is up, otherwise Home | Start a new scan |
 | Please wait... | `Managing` | `Please wait...` while a management request runs | — | — | — |
-| Saved devices | `SavedDevices` | `Saved devices`, saved names newest first, a final `Factory reset` entry, `UP at first: back` | Move up; on the first entry, go back to Home or Connected | Move down, stopping at `Factory reset` | Open the confirmation for the highlighted entry |
+| Saved devices | `SavedDevices` | `Saved devices`, saved names newest first, then `Factory reset` and a final `Bridge info` entry, `UP at first: back` | Move up; on the first entry, go back to Home or Connected | Move down, stopping at `Bridge info` | Open the confirmation for the highlighted device or Factory reset, or Bridge info |
+| Bridge info | `BridgeInfo` | `Bridge info`, `Version` and the firmware version, `Commit` and the source commit's first eight digits (with `-dirty` for a build with local changes), `Reset:` and the last reset cause, with `+N` when the chip recorded N more, `SELECT: back` | — | — | Back to Saved devices, on the Bridge info entry |
 | Forget device? | `ConfirmForget(i)` | The device name, `> Cancel`, `  Forget` | Highlight Cancel | Highlight Forget | Run the highlighted choice |
 | Reset all pairings? | `ConfirmReset` | `Disconnect all`, `> Cancel`, `  Reset` | Highlight Cancel | Highlight Reset | Run the highlighted choice |
 | Complete | `Notice` | `Complete`, `Device forgotten` or `Pairings reset`, `SELECT: back` | Open saved devices | — | Acknowledge: return to Connected if a link is up, otherwise Home |
@@ -135,6 +136,7 @@ stateDiagram-v2
     state "Select device" as DeviceList
     state "Please wait..." as Managing
     state "Saved devices" as SavedDevices
+    state "Bridge info" as BridgeInfo
     state "Forget device?" as ConfirmForget
     state "Reset all pairings?" as ConfirmReset
     state "ERROR" as Error
@@ -162,6 +164,8 @@ stateDiagram-v2
     SavedDevices --> Home: UP on first entry
     SavedDevices --> ConfirmForget: SELECT on a device
     SavedDevices --> ConfirmReset: SELECT on Factory reset
+    SavedDevices --> BridgeInfo: SELECT on Bridge info
+    BridgeInfo --> SavedDevices: SELECT
     ConfirmForget --> SavedDevices: SELECT on Cancel
     ConfirmReset --> SavedDevices: SELECT on Cancel
     ConfirmForget --> Managing: SELECT on Forget
@@ -324,9 +328,11 @@ is never longer than 4 seconds, whatever the peripheral asks for
 
 Press UP on Home, Connected, ERROR, or Complete. The screen shows
 `Please wait...` until the saved-device list arrives, then **Saved devices**,
-newest first, followed by a final **Factory reset** entry. The reset entry is
-present even when nothing is saved, which is how an unreadable store is
-recovered.
+newest first, followed by **Factory reset** and a final **Bridge info**
+entry. The reset entry is present even when nothing is saved, which is how an
+unreadable store is recovered. **Bridge info** shows the firmware version, the
+source commit, and why the chip last restarted, the details a defect report
+needs, without a debug probe ([reporting a defect](operations.md#reporting-a-defect)).
 
 1. Highlight a device and press SELECT to open **Forget device?**, or highlight
    **Factory reset** and press SELECT to open **Reset all pairings?**.

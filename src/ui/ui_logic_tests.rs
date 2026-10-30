@@ -213,7 +213,7 @@ fn name(value: &str) -> heapless::String<32> {
 
 #[test]
 fn saved_devices_navigation_reaches_every_entry_and_backs_out() {
-    // Two saved devices plus the final Factory reset entry.
+    // Two saved devices, then Factory reset and Bridge info.
     let back = on_button(Screen::SavedDevices, ButtonEvent::Up, 0, 2);
     assert_eq!(back.screen, Screen::Home);
     assert_eq!(back.command, Some(UiCommand::Dismiss));
@@ -224,8 +224,10 @@ fn saved_devices_navigation_reaches_every_entry_and_backs_out() {
     );
     let down = on_button(Screen::SavedDevices, ButtonEvent::Down, 1, 2);
     assert_eq!(down.selected, 2);
-    let clamped = on_button(Screen::SavedDevices, ButtonEvent::Down, 2, 2);
-    assert_eq!(clamped.selected, 2);
+    let down = on_button(Screen::SavedDevices, ButtonEvent::Down, 2, 2);
+    assert_eq!(down.selected, 3);
+    let clamped = on_button(Screen::SavedDevices, ButtonEvent::Down, 3, 2);
+    assert_eq!(clamped.selected, 3);
     let forget = on_button(Screen::SavedDevices, ButtonEvent::Select, 1, 2);
     assert_eq!(
         (forget.screen, forget.selected),
@@ -233,6 +235,18 @@ fn saved_devices_navigation_reaches_every_entry_and_backs_out() {
     );
     let reset = on_button(Screen::SavedDevices, ButtonEvent::Select, 2, 2);
     assert_eq!((reset.screen, reset.selected), (Screen::ConfirmReset, 0));
+    // Bridge info sends nothing, and SELECT goes back to its entry.
+    let info = on_button(Screen::SavedDevices, ButtonEvent::Select, 3, 2);
+    assert_eq!((info.screen, info.command), (Screen::BridgeInfo, None));
+    for button in [ButtonEvent::Up, ButtonEvent::Down] {
+        let stay = on_button(Screen::BridgeInfo, button, 3, 2);
+        assert_eq!((stay.screen, stay.command), (Screen::BridgeInfo, None));
+    }
+    let back = on_button(Screen::BridgeInfo, ButtonEvent::Select, 0, 2);
+    assert_eq!(
+        (back.screen, back.selected, back.command),
+        (Screen::SavedDevices, 3, None)
+    );
 }
 
 #[test]

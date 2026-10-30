@@ -283,6 +283,7 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask sim-test` | Build simulation and run headless Renode test |
 | `mask probe-list` | Discover available probes |
 | `mask size` / `mask bloat` | Inspect release size |
+| `mask release-build` | Build the release images byte for byte as a release does |
 | `mask doc` | Generate embedded API documentation |
 | `mask rustdoc-check` | Check every rustdoc build with warnings denied, as CI does |
 | `mask docs-check` | Check Markdown links, documented constants, memory map, and commands |
@@ -316,6 +317,7 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 | `mask build` | `cargo build --locked --features embedded --target <arm>` | Dev profile (`opt-level = 1`); builds `bt2usb` and `bt2usb-selftest` into `target/thumbv7em-none-eabihf/debug/` |
 | `mask build --release` | Same with `--release` | Release profile; output in `target/thumbv7em-none-eabihf/release/` |
 | `mask build-release` | Same as `mask build --release` | Separate name for the same command |
+| `mask release-build` | `release.py build`: the release build with `DEFMT_LOG=info` (unless set) and the Cargo home and checkout paths remapped to `/cargo` and `.` | The ELF files match a release or CI build of the same commit byte for byte ([reproducing a release build](deployment.md#reproducing-a-release-build)); plain release builds do not |
 | `mask check` | `cargo check --locked --features embedded --target <arm>` | Type-check only; nothing is linked, so the linker-script assertions do not run |
 | `mask clean` | `cargo clean` | Deletes `target/`, including the simulation ELF that Renode loads |
 
@@ -439,11 +441,12 @@ build panics on integer overflow, and a release build wraps.
 
 | Variable | Read by | Default | Purpose |
 | --- | --- | --- | --- |
-| `DEFMT_LOG` | defmt at compile time; `build.rs`, for the boot line; `scripts/release.py stage` | `debug` from `.cargo/config.toml`; `info` in CI | Log filter compiled into the firmware |
+| `DEFMT_LOG` | defmt at compile time; `build.rs`, for the boot line; `scripts/release.py build` and `stage` | `debug` from `.cargo/config.toml`; `info` in CI and from `release.py build` | Log filter compiled into the firmware |
 | `RENODE_VERSION` | `install-renode.sh` | `1.16.1` | Renode release to install |
 | `RENODE_DIR` | `install-renode.sh` | `$HOME/.local/share/renode` | Install location |
 | `BIN_DIR` | `install-renode.sh` | `$HOME/.local/bin` | Location of the `renode` and `renode-test` wrappers |
-| `CARGO_HOME`, `HOME`, `USERPROFILE`, `USERNAME` | `run-tool.sh` | Shell environment | Where to look for a tool that is not on `PATH` |
+| `CARGO_HOME`, `HOME`, `USERPROFILE`, `USERNAME` | `run-tool.sh`; `CARGO_HOME` and `HOME` also `scripts/release.py build` and `stage` | Shell environment | Where to look for a tool that is not on `PATH`; the Cargo home path the release build remaps and staging checks for |
+| `CARGO_TARGET_THUMBV7EM_NONE_EABIHF_RUSTFLAGS` | Cargo, for the firmware target, joined with the `.cargo/config.toml` flags | Unset; `release.py build` sets it to the two `--remap-path-prefix` flags | Extra rustc flags for the firmware; `RUSTFLAGS` would replace the linker flags instead |
 | `RUSTDOCFLAGS` | `cargo doc` | Unset locally; `-D warnings` in CI | Deny rustdoc warnings |
 | `RUSTUP_TOOLCHAIN` | rustup | Unset | Overrides `rust-toolchain.toml`; leave it unset |
 | `CARGO_TARGET_DIR` | Cargo | Unset | Moves `target/`. `mask rtt`, the Renode script, the Robot test, and the CI staging step assume `target/` |

@@ -29,6 +29,20 @@ fi
 ./scripts/run-tool.sh cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
 ```
 
+## release-build
+
+> Build the release images exactly as CI does, to compare with a release
+
+Runs `release.py build` ([scripts/release.py](scripts/release.py)): the
+release build of `bt2usb` and `bt2usb-selftest` with `DEFMT_LOG=info` (unless
+set) and the checkout and Cargo home paths remapped, so the ELF files in
+`target/thumbv7em-none-eabihf/release/` match a release or CI build of the same
+commit byte for byte ([reproducing a release](docs/deployment.md#reproducing-a-release-build)).
+
+```bash
+"$(command -v python3 || command -v python)" scripts/release.py build
+```
+
 ## run
 
 > Build, flash, and run firmware on the connected nRF52840 board

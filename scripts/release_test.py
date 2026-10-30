@@ -11,8 +11,24 @@ from unittest.mock import patch
 import release
 from docs_checks.links import anchors
 from docs_checks.model import Document
+from release_image_test import elf_image
 
 REPOSITORY = Path(__file__).resolve().parent.parent
+# What `rustc --version`, `rustc -vV`, `llvm-objcopy --version`, and `cargo
+# --version` print, in the order staging asks.
+TOOL_VERSIONS = (
+    "rustc 1.95.0 (59807616e 2026-04-14)",
+    (
+        "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\n"
+        "commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\n"
+        "host: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2"
+    ),
+    (
+        "llvm-objcopy, compatible with GNU objcopy\nLLVM (http://llvm.org/):\n"
+        "  LLVM version 22.1.2-rust-1.95.0-stable\n  Optimized build."
+    ),
+    "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
+)
 NOTES_SOURCES = (
     release.NOTES_TEMPLATE,
     Path("memory_sd.x"),
@@ -228,10 +244,13 @@ class ReleaseTests(unittest.TestCase):
     def test_staging_records_exact_compiled_bytes_and_build_identity(self):
         build = Path(self.temp.name) / "build"
         build.mkdir()
-        (build / "bt2usb").write_bytes(b"compiled application " + self.commit.encode())
-        (build / "bt2usb-selftest").write_bytes(b"compiled selftest " + self.commit.encode())
+        (build / "bt2usb").write_bytes(elf_image(payload=self.commit.encode()))
+        (build / "bt2usb-selftest").write_bytes(
+            elf_image(payload=b"selftest " + self.commit.encode())
+        )
         output = Path(self.temp.name) / "stage"
         environment = {
+            "CARGO_HOME": str(Path(self.temp.name) / "cargo"),
             "GITHUB_SHA": self.commit,
             "GITHUB_REF": "refs/tags/v0.1.0",
             "GITHUB_REPOSITORY": "chefzaid/bt2usb",
@@ -249,7 +268,7 @@ class ReleaseTests(unittest.TestCase):
             patch.object(
                 release,
                 "command",
-                side_effect=["", self.commit, "rustc 1.95.0 (example)", "cargo 1.95.0 (example)"],
+                side_effect=["", self.commit, *TOOL_VERSIONS],
             ),
             patch.object(release.subprocess, "run", side_effect=convert),
             patch.object(release, "software_bill_of_materials", return_value=self.sbom) as sbom,
@@ -262,6 +281,11 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(
             metadata["artifact_sha256"]["bt2usb.elf"], release.digest(build / "bt2usb")
         )
+        self.assertEqual(metadata["rustc_commit"], "59807616e1fa2540724bfbac14d7976d7e4a3860")
+        self.assertEqual(metadata["llvm"], "22.1.2")
+        self.assertEqual(metadata["objcopy"], "LLVM version 22.1.2-rust-1.95.0-stable")
+        self.assertEqual(metadata["path_prefixes"], {"cargo_home": "/cargo", "source": "."})
+        self.assertEqual(metadata["image_bytes"]["bt2usb.elf"], {"flash": 140_716, "ram": 28_108})
         release.package_release(
             self.root, output, self.output, "v0.1.0", self.commit, "chefzaid/bt2usb", "123"
         )
@@ -303,6 +327,31 @@ class ReleaseTests(unittest.TestCase):
                 patch.dict(release.os.environ, {"GITHUB_SHA": self.commit}),
                 patch.object(release, "command", side_effect=["", self.commit]),
                 self.assertRaisesRegex(release.ReleaseError, "bt2usb does not report"),
+            ):
+                release.stage_build(self.root, build, self.output, Path("llvm-objcopy"))
+            self.assertFalse(self.output.exists())
+
+    def test_staging_refuses_images_that_name_build_paths_or_exceed_budgets(self):
+        build = Path(self.temp.name) / "build"
+        build.mkdir()
+        home = Path(self.temp.name) / "cargo"
+        commit = self.commit.encode()
+        large = ((1, 0x27000, release.release_image.BUDGETS["flash"] + 1, 0),)
+        cases = (
+            (elf_image(payload=commit + str(home.resolve()).encode()), "names"),
+            (elf_image(payload=commit + str(self.root.resolve()).encode()), "names"),
+            (elf_image(large, payload=commit), "is over its size budget: flash"),
+        )
+        for application, message in cases:
+            (build / "bt2usb").write_bytes(application)
+            (build / "bt2usb-selftest").write_bytes(elf_image(payload=commit))
+            with (
+                self.subTest(message=message),
+                patch.dict(
+                    release.os.environ, {"GITHUB_SHA": self.commit, "CARGO_HOME": str(home)}
+                ),
+                patch.object(release, "command", side_effect=["", self.commit]),
+                self.assertRaisesRegex(release.ReleaseError, f"bt2usb {message}"),
             ):
                 release.stage_build(self.root, build, self.output, Path("llvm-objcopy"))
             self.assertFalse(self.output.exists())

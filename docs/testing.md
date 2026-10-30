@@ -618,7 +618,7 @@ The ARM builds catch failures the host crate cannot:
 | Check | Source | Failure it catches |
 | --- | --- | --- |
 | Clippy with `-D warnings` for `embedded` and `sim` | [ci.yml](../.github/workflows/ci.yml), `mask ci` | Lints in task, driver, and entry-point code that the host crate never compiles |
-| Release build of `bt2usb` and `bt2usb-selftest` | `cargo build --features embedded --release` builds both binaries | Type, linker, and size failures in the release profile (`opt-level = "s"`, fat LTO) |
+| Release build of `bt2usb` and `bt2usb-selftest` | `release.py build` builds both binaries with the build paths remapped; `release.py stage` checks them | Type, linker, and size failures in the release profile (`opt-level = "s"`, fat LTO); an image over a [size budget](code-quality.md#release-size-budgets) or one that names the checkout or Cargo home, which would not reproduce |
 | `__sdata == ORIGIN(RAM)` and stack-at-top assertion | [memory_sd.x](../memory_sd.x) | A linker such as flip-link moving `.data`, which would make the SoftDevice claim the stack |
 | FLASH ends at `0xF0000` | [memory_sd.x](../memory_sd.x) | Code or read-only data placed on the pairing pages (240–243) that storage erases |
 | FLASH ends at `STORAGE_FLASH_START`; storage ends within flash | [memory_sd.x](../memory_sd.x), symbols from [build.rs](../build.rs) | The page constants in `config.rs` and the `FLASH` length disagreeing, or storage past `0x00100000` |
@@ -627,14 +627,18 @@ The ARM builds catch failures the host crate cannot:
 ## Release Helper Tests
 
 [release_test.py](../scripts/release_test.py) tests
-[release.py](../scripts/release.py), the helper CI uses to validate tags, stage
-the embedded build, package a release, and fill its notes, and
+[release.py](../scripts/release.py), the helper CI uses to validate tags,
+build and stage the embedded firmware, package a release, and fill its notes;
 [release_sbom_test.py](../scripts/release_sbom_test.py) tests
 [release_sbom.py](../scripts/release_sbom.py), which builds the release's
-[SBOM](deployment.md#software-bill-of-materials). The tests build a fixture
-repository, fake firmware, and a small fixture dependency graph in a temporary
+[SBOM](deployment.md#software-bill-of-materials); and
+[release_image_test.py](../scripts/release_image_test.py) tests
+[release_image.py](../scripts/release_image.py), the path remapping and size
+budgets of [reproducible release builds](deployment.md#reproducing-a-release-build).
+The tests build a fixture repository, fake firmware (small ELF files with the
+bridge's program headers), and a small fixture dependency graph in a temporary
 directory; they use no network, run no Cargo command, publish nothing, and
-build no firmware. Both scripts need Python 3.11 or newer for `tomllib`.
+build no firmware. The scripts need Python 3.11 or newer for `tomllib`.
 
 ```sh
 python -m unittest discover -s scripts -p "release*_test.py" -v
@@ -653,9 +657,10 @@ python -m unittest discover -s scripts -p "release*_test.py" -v
 | `test_rehashed_artifact_must_still_match_build_metadata` | Regenerating checksums for a changed HEX still fails against the build metadata digest |
 | `test_missing_extra_duplicate_and_unsafe_checksum_entries_fail` | Missing, duplicate, path-escaping, and unexpected entries or files fail |
 | `test_existing_destination_is_not_overwritten` | Packaging refuses an existing output directory and keeps its contents |
-| `test_staging_records_exact_compiled_bytes_and_build_identity` | Staging records the compiled bytes' digests and build identity, writes the SBOM built for that commit and repository, and its output packages successfully |
+| `test_staging_records_exact_compiled_bytes_and_build_identity` | Staging records the compiled bytes' digests and build identity, including rustc's commit hash and LLVM version, the `llvm-objcopy` version, the path prefixes, and each image's flash and RAM bytes, writes the SBOM built for that commit and repository, and its output packages successfully |
 | `test_sbom_reads_the_dependency_graph_the_firmware_build_resolves` | The SBOM's `cargo metadata` and `cargo tree` commands run locked and offline with the `embedded` feature, for the firmware target, over the built (`normal,build`) and linked (`normal,no-proc-macro`) edges; a repository that is not `owner/repository` is refused |
 | `test_staging_refuses_firmware_that_reports_another_or_dirty_commit` | An application image that carries another commit, or the checked-out commit followed by `-dirty`, stops staging before anything is written |
+| `test_staging_refuses_images_that_name_build_paths_or_exceed_budgets` | An application image that contains the Cargo home or the checkout path, or whose loadable segments exceed the flash budget, stops staging before anything is written |
 | `test_staging_refuses_dirty_source_or_wrong_checkout` | Modified tracked files, or a checkout whose `HEAD` differs from `GITHUB_SHA`, stop staging |
 | `test_notes_fill_every_field_from_the_package_and_source` | The repository's release notes template, filled from a fixture package, leaves no field unfilled, carries the commit, run, SoftDevice S140 v7.3.0 with its HEX and origins, the connection, saved-device, and USB identity limits, the storage pages, magic, and version, and the exact `SHA256SUMS`, and keeps its four `REVIEW:` lines |
 | `test_notes_links_reach_existing_guide_headings` | Each guide link in the filled notes names a heading that exists in that guide |
@@ -670,6 +675,13 @@ python -m unittest discover -s scripts -p "release*_test.py" -v
 | `test_dependencies_follow_the_built_graph` | Every component has exactly one `dependencies` entry, and the entries match the `cargo tree` edges, with the SoftDevice under `bt2usb` |
 | `test_document_identifies_the_build_and_is_deterministic` | The document names the version and commit, carries no timestamp, is identical when rebuilt, and changes serial number with the commit |
 | `test_inconsistent_inputs_are_refused` | A missing checksum, a package that metadata names twice or not at all, a malformed or out-of-order tree line, a second or missing root, a linked crate outside the built tree, a path dependency outside the repository, and an SBOM without a commit fail |
+
+| Image test | What it asserts |
+| --- | --- |
+| `test_usage_counts_loaded_bytes_as_flash_and_ram_segments_as_ram` | With the release bridge's program headers, flash is every loadable segment's file bytes and RAM the memory bytes of the segments in RAM, matching `llvm-size`; a file that is not a little-endian ELF32 is refused |
+| `test_budgets_name_each_exceeded_kind` | An image at the budgets passes, and one byte over each names both |
+| `test_remap_covers_the_checkout_and_cargo_home_and_refuses_spaces` | The flags remap the Cargo home to `/cargo` and the checkout to `.`, a path with whitespace is refused, and the path check finds an unmapped Cargo home but not `/cargo` |
+| `test_build_remaps_paths_and_defaults_to_info_logging` | `release.py build` runs the locked release build for the firmware target with `DEFMT_LOG=info` and the remap flags in the per-target variable |
 
 These tests cannot issue GitHub OIDC credentials or exercise the hosted
 attestation and release APIs; see
@@ -694,7 +706,7 @@ Cargo command and install no toolchain.
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
 | Parser fuzzing | Ubuntu, 20 min, weekly schedule and manual dispatch only | `rustup install`; `cargo test --locked --lib fuzz_ -- --nocapture` with `BT2USB_FUZZ_CASES=20000000` and the workflow run ID as `BT2USB_FUZZ_SEED` ([parser fuzzing](#parser-fuzzing)) |
 | Dependency security audit | Ubuntu, 10 min | `rustup install`; install cargo-deny 0.20.2 (SHA-256 verified); `cargo deny --locked check` with [deny.toml](../deny.toml): advisories (two ignored by ID), licenses, and sources ([auditing](code-quality.md#auditing)) |
-| Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`, without and with the `log-sensitive-data` opt-in; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
+| Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`, without and with the `log-sensitive-data` opt-in; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; `release.py build` (firmware and self-test, paths remapped); `release.py stage` with `llvm-objcopy` into the runner's temporary directory, which checks build paths and size budgets, and print its `SHA256SUMS`; upload |
 | Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; rustdoc with private items and warnings denied for `bt2usb-sim`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
 | Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after every check job | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload; `release.py notes` from the package; upload the notes separately |
 | Prepare draft firmware release | Ubuntu, 10 min, after packaging | Download the attested package and the notes; refuse if the tag's release is already published; create or update a draft release with the notes as its description, followed by GitHub's generated notes |
@@ -869,7 +881,9 @@ Not yet first-class:
   constants, the memory map, and commands: prose values without a constant's
   name, test counts, sizes, and coverage figures are checked by hand
   ([Markdown checks](code-quality.md#markdown-checks))
-- reproducible-build comparison across clean environments
+- a second build in another environment on every push: staging refuses an
+  image that names a build path, but other causes of difference are found
+  only by [comparing builds by hand](deployment.md#reproducing-a-release-build)
 
 Specific to the current workflow and test tree:
 

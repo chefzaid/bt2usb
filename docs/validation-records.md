@@ -8,6 +8,33 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Reproducible Release Images
+
+This record covers the commit that checks off the P1 item "Reproducible
+firmware evidence" in
+[TODO.md](../TODO.md#release-provenance-and-supply-chain): `release.py build`
+with the remapped build paths, the staging checks for build paths and size
+budgets, the new `BUILD-INFO.json` fields, `mask release-build`, and the CI
+build and staging steps
+([ADR 0028](adr/0028-reproducible-budgeted-release-images.md),
+[reproducing a release build](deployment.md#reproducing-a-release-build)). The
+checks ran locally on Linux in a container; the comparison builds used local
+clones, and nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Before the change: two checkouts | Clones of `3a439a5` in two directories of different depth, one Cargo home, `cargo build --release` with `DEFMT_LOG=info` | The bridge and self-test HEX files, and the ELF files with debug sections stripped, were identical; the full ELF files differed |
+| Before the change: two Cargo homes | The same build with a copy of the Cargo home at another path | The flashed bytes (`llvm-objcopy -O binary`) differed in 14,561 of the first 139,656 and ran 2,856 bytes longer; the image held 31 paths under the Cargo home, all in dependencies' panic locations |
+| `trim-paths` | `trim-paths = "all"` in the release profile, Cargo 1.95.0 | Refused: "feature `trim-paths` is required" |
+| After the change: two environments | The two clones, each with this change committed locally as `f4d6d1d`, one with each Cargo home, each built with `release.py build` and staged with `release.py stage` | Every staged file byte-identical: `bt2usb.elf` `7ce7fed8…`, `bt2usb-selftest.elf` `884ccc8a…`, `bt2usb.hex` `7564fcd9…`, `BUILD-INFO.json`, and the SBOM; neither image contains a build path, and the layout is unchanged (vector table at `0x27000`, `.defmt` present) |
+| Staging refuses a plain build | `cargo build --release` in one clone, then `release.py stage` | Refused, naming the checkout and `/root/.cargo`; nothing written |
+| Recorded sizes | `image_bytes` in the staged `BUILD-INFO.json` | Bridge 139,472 bytes of flash and 28,108 of RAM; self-test 69,116 and 12,704; budgets 393,216 and 65,536 |
+| Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` and Ruff 0.16.9 on the two new files | Passed: 64 tests, 30 of them release-helper (5 new); lint clean, including the `release-build` recipe |
+| `mask ci` steps | The recipe's script | Passed after this record was added |
+| actionlint | Not installed here | Not run on the changed `embedded` steps |
+| Hosted comparison | GitHub Actions | Not run before the commit; the first push prints `SHA256SUMS`, to compare with a local `release.py build` of that commit |
+| Board/radio/USB acceptance | Physical hardware | Not applicable: the code is unchanged, only the paths in its panic locations and debug information |
+
 ## Validation Record — 2026-10-30, HFXO Request
 
 This record covers the commit that fixes the FIXME "USB never requested the

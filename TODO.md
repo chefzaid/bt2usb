@@ -35,11 +35,11 @@ probe, or USB host to close.
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 14 | 2 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 11 | 7 | 2 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **150** | **66** | **20** |
+| **Total** | **151** | **65** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1278,11 +1278,20 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   were checked from their `action.yml`; they first run with the first tag, under
   [Hosted provenance and release recovery acceptance](#release-provenance-and-supply-chain)
   ([testing](docs/testing.md#continuous-integration)).
-- [ ] **P1** **Reproducible firmware evidence.** Compare artifacts from two
-  clean environments, document remaining nondeterminism, and enforce release
-  size budgets. Accept when the release record identifies compiler,
-  dependency, external-tool, source, and artifact hashes
-  ([testing](docs/testing.md#known-verification-gaps)).
+- [x] **P1** **Reproducible firmware evidence.** The flashed bytes named the
+  builder's Cargo home and the ELF's debug information its checkout;
+  `release.py build` (CI's build step, `mask release-build`) remaps both, so
+  two clean builds under different checkouts and Cargo homes staged
+  byte-identical packages on 2026-10-30. Staging refuses an image that names
+  either path or exceeds 384 KiB of flash or 64 KiB of RAM, and
+  `BUILD-INFO.json` adds rustc's commit hash, host, and LLVM version, the
+  `llvm-objcopy` version, the path prefixes, and each image's sizes beside the
+  lockfile, source, and artifact hashes; CI prints `SHA256SUMS`. What still
+  has to match is in
+  [reproducing a release build](docs/deployment.md#reproducing-a-release-build)
+  (`scripts/release.py`, `scripts/release_image.py`,
+  `scripts/release_image_test.py`,
+  [ADR 0028](docs/adr/0028-reproducible-budgeted-release-images.md)).
 
 ## Developer Experience
 

@@ -103,8 +103,11 @@ below.
   already verified it. Changing a published release means tagging a new
   version.
 - **Rely on reproducible builds instead.** Independent rebuilds that match
-  byte for byte would be stronger evidence, but they have not been
-  demonstrated; that is an open item, not a substitute for provenance.
+  byte for byte would be stronger evidence, but they had not been
+  demonstrated when this was decided. Since 2026-10-30 release images are
+  reproducible ([ADR 0028](0028-reproducible-budgeted-release-images.md)),
+  which lets anyone check a release against its source; it complements
+  provenance and does not replace it.
 
 ## Rationale
 
@@ -158,7 +161,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   the downloaded package against the approved commit from a clean machine, and
   document rollback and recovery.
 - "Reproducible firmware evidence": compare builds from two clean
-  environments and enforce size budgets.
+  environments and enforce size budgets. Done in software on 2026-10-30
+  ([ADR 0028](0028-reproducible-budgeted-release-images.md)).
 - "Supply-chain and tooling maintenance": verify the SoftDevice download's
   digest and assign dependency alert review (license checks and the SBOM
   landed on 2026-10-30).

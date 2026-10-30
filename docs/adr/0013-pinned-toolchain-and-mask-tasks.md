@@ -194,7 +194,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   SoftDevice download (license checks, the Renode digest, and the release SBOM
   landed on 2026-10-30).
 - "Reproducible firmware evidence": compare artifacts from two clean
-  environments and document remaining nondeterminism.
+  environments and document remaining nondeterminism. Done in software on
+  2026-10-30: `mask release-build` reproduces a release's images under any
+  checkout and Cargo home ([ADR 0028](0028-reproducible-budgeted-release-images.md)).
 
 ## Implementation
 

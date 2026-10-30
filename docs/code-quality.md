@@ -49,7 +49,7 @@ Clippy warning into an error.
 | Simulation rustdoc | The same flags with `--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim` | `mask ci`, `mask rustdoc-check` | Renode simulation test | Fails on any rustdoc warning |
 | Coverage floor | `cargo llvm-cov --locked --lib --tests --no-report`, then `cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"` (97), cargo-llvm-cov 0.9.1 | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` | Host coverage | Fails when host line coverage drops below the floor; the report uploads first ([Coverage In CI](#coverage-in-ci)) |
 | Host tests | `cargo test --locked --lib --tests` | `mask ci`, `mask test` | Host tests, Linux and Windows | Fails on any failed test |
-| Release firmware build | `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` | `mask ci`, `mask build-release` | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest` |
+| Release firmware build | `python scripts/release.py build`: `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` with the build paths remapped, then `release.py stage` | `mask release-build`; `mask ci` and `mask build-release` build without the remap | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest`; staging fails an image that names a build path or is over a [size budget](#release-size-budgets) |
 | Simulation build | `cargo build --locked --features sim --target thumbv7em-none-eabihf` | `mask ci`, `mask sim-build` | Renode simulation test | Fails the job |
 | Renode scenario | `renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot` | `mask sim-test` (needs `renode-test` on PATH; `mask sim-setup` installs it on Linux or WSL) | Renode simulation test | Fails the job; results upload even on failure |
 | Dependency audit | `cargo deny --locked check`, cargo-deny 0.20.2 (SHA-256 checked), with [deny.toml](../deny.toml) | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory, an unmaintained, unsound, or yanked crate (except the two advisories ignored by ID), a license outside the allow list, or a crate from an unlisted source ([auditing](#auditing)) |
@@ -62,7 +62,7 @@ Clippy warning into an error.
 | Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
 | Module comments | `find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`, failing when it lists a file ([Documentation Comments](#documentation-comments)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file without a `//!` line |
 | Parser fuzzing | `cargo test --locked --lib fuzz_ -- --nocapture` with `BT2USB_FUZZ_CASES=20000000` and the run ID as `BT2USB_FUZZ_SEED` ([parser fuzzing](testing.md#parser-fuzzing)) | `mask fuzz` (a million cases) | Parser fuzzing, weekly schedule and manual dispatch only | Fails the job and prints the target, input, and settings that reproduce it; ordinary host test runs check 5,000 cases per target |
-| Release helper tests | `python -m unittest discover -s scripts -p "release*_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 25 tests (`grep -c 'def test' scripts/release*_test.py`: 20 for the helper, 5 for the SBOM builder) |
+| Release helper tests | `python -m unittest discover -s scripts -p "release*_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 30 tests (`grep -c 'def test' scripts/release*_test.py`: 21 for the helper, 5 for the SBOM builder, 4 for the image module) |
 | Tag matches version | `python scripts/release.py validate-tag --tag "$RELEASE_TAG"` | None | Host tests and the packaging job, `v*` tags only | Fails the tag run |
 | Release staging | `python scripts/release.py stage …` | None | Embedded build & clippy | Refuses a modified tracked source tree, an existing output directory, an empty firmware file, a commit that differs from `GITHUB_SHA`, or an [SBOM](deployment.md#software-bill-of-materials) it cannot build: Cargo cannot resolve the graph offline, a crates.io crate has no lockfile checksum, or `GITHUB_REPOSITORY` is not `owner/repository` |
 | Release notes | `python scripts/release.py notes …` ([release notes](deployment.md#release-notes)) | None | Verify and attest release package, `v*` tags only | Fails the tag run on a checksum entry that does not match its file, build metadata without the release's identity, a template field it cannot fill, or a SoftDevice version that `maskfile.md` and `memory_sd.x` disagree on |
@@ -114,7 +114,7 @@ the tag check, or release staging. Run the ones your change can affect:
 | Pure logic in `src/lib.rs` modules, or their tests | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` |
 | `.github/workflows/ci.yml` | `actionlint`, with `shellcheck` on `PATH` so it checks the `run:` scripts |
 | A Python file, a `*.sh` script, a `maskfile.md` recipe, or `ruff.toml` | `mask lint-scripts` |
-| `scripts/release.py`, `scripts/release_sbom.py`, or the release jobs | `python -m unittest discover -s scripts -p "release*_test.py" -v` |
+| `scripts/release.py`, `scripts/release_sbom.py`, `scripts/release_image.py`, or the release jobs | `python -m unittest discover -s scripts -p "release*_test.py" -v`; for a build change, `mask release-build` twice in two clones and compare the ELF hashes |
 | `Cargo.toml`, `Cargo.lock`, or `deny.toml` | `cargo deny --locked check` |
 | UI, buttons, coordinator, management, BLE messages, the pure `storage` modules, `sim.rs`, `sim_ble.rs`, `memory_sim.x`, or `renode/` | `mask sim-test` |
 
@@ -270,7 +270,7 @@ modules carry `///` comments that state units, bounds, and error meanings.
 | --- | --- | --- |
 | Line endings | [.gitattributes](../.gitattributes) forces LF for shell scripts, `maskfile.md`, Renode files, Rust, TOML, linker scripts, Markdown, JSON, and YAML | Enforced by Git when files are committed and checked out |
 | `.github/workflows/ci.yml` | actionlint 1.7.12 in the Linux host job, which passes each `run:` script to the pinned ShellCheck 0.11.0 | Enforced |
-| Python: `scripts/release.py` with `scripts/release_sbom.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 25 release-helper, 27 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
+| Python: `scripts/release.py` with `scripts/release_sbom.py` and `scripts/release_image.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 30 release-helper, 27 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
 | `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash recipes in `maskfile.md` | ShellCheck 0.11.0 ([Python And Shell Checks](#python-and-shell-checks)) | Enforced |
 | Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, and commands ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
 | Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job, which compiles the C# models when it loads them; not linted | Partial |
@@ -950,6 +950,23 @@ whole 1024 KiB of flash and 256 KiB of RAM to the application and has no
 assert. The [hardware guide](hardware.md#memory-layout) and
 [ADR 0010](adr/0010-static-memory-layout.md) explain the map.
 
+### Release Size Budgets
+
+`release.py stage` refuses a release image over either budget, so CI fails on
+the push that outgrew it ([ADR 0028](adr/0028-reproducible-budgeted-release-images.md)).
+The figures are `BUDGETS` in [release_image.py](../scripts/release_image.py),
+and each staged build records its sizes as `image_bytes` in `BUILD-INFO.json`.
+
+| Budget | Counts | Limit | Bridge at `3a439a5`, from `release.py build` | Why this limit |
+| --- | --- | --- | --- | --- |
+| Flash | The file bytes of every loadable segment: vector table, code, read-only data, and the initial values of `.data` | 384 KiB (393,216 bytes) | 139,472 bytes (35%) | Under half the 804 KiB application region, leaving room for a second image slot if updates over USB or BLE are added |
+| RAM | The memory bytes of the loadable segments at or above `0x20000000`: `.data`, `.bss`, `.uninit` | 64 KiB (65,536 bytes) | 28,108 bytes (43%) | Leaves at least 168 KiB of the 232 KiB application RAM to the stack and its guard |
+
+The self-test image is held to the same budgets; at `3a439a5` it took 69,116
+bytes of flash and 12,704 of RAM. Raising a budget is a reviewed change to
+`BUDGETS` that says why. The budgets do not cover stack depth or the
+SoftDevice's RAM, which no tool checks (below).
+
 ### What No Tool Checks
 
 - **Stack depth.** The stack region runs from `_stack_end` up to the top of
@@ -968,8 +985,9 @@ assert. The [hardware guide](hardware.md#memory-layout) and
   under the guard's 4 KiB, and the SoftDevice's frames are not visible.
 - **SoftDevice RAM.** The 24 KiB reservation is not derived from a
   measurement. `Softdevice::enable` panics at boot if it is too small.
-- **Size growth.** No CI step records `mask size` or compares it with a
-  previous build, and there is no size budget below the linker limits.
+- **Size growth below the budgets.** Each staged build records its sizes,
+  but nothing compares them with the previous build; growth that stays under
+  the [release size budgets](#release-size-budgets) passes.
 
 ### Measuring
 
@@ -1063,7 +1081,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | --- | --- |
 | The connection workers, security handler, GATT HID and Device Information clients, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
 | The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | The [parser fuzz targets](testing.md#parser-fuzzing) exercise the pure parsers' paths ([ADR 0027](adr/0027-seeded-parser-fuzzing.md)); the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
-| No size, stack, or SoftDevice RAM budget is measured or enforced | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1). Since 2026-10-11 an overflow faults in the MPU guard instead of corrupting statics ([ADR 0026](adr/0026-mpu-stack-guard.md)); the guard's hardware evidence is the self-test's `stack guard` stage and optional deliberate overflow |
+| No stack or SoftDevice RAM budget is measured or enforced; the [release size budgets](#release-size-budgets) cover only flash and statics | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0). Since 2026-10-11 an overflow faults in the MPU guard instead of corrupting statics ([ADR 0026](adr/0026-mpu-stack-guard.md)); the guard's hardware evidence is the self-test's `stack guard` stage and optional deliberate overflow |
 | Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | No digest check for the SoftDevice download, and no owner for dependency alerts | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |

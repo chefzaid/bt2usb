@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Validate release identity, package the exact successful CI build, and fill
-the release notes template for its draft.
+"""Validate release identity, build the release images reproducibly, package
+the exact successful CI build, and fill the release notes template for its
+draft.
 
 Python 3.11+; standard library only. This helper never publishes a release.
 """
@@ -18,6 +19,7 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import release_image
 import release_sbom
 
 TARGET = "thumbv7em-none-eabihf"
@@ -98,6 +100,19 @@ def command(args: list[str], root: Path) -> str:
     return subprocess.run(args, cwd=root, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def build_release(root: Path) -> None:
+    """Build both release images as the release does, reproducibly."""
+    home = release_image.cargo_home()
+    env = {
+        **os.environ,
+        "DEFMT_LOG": os.environ.get("DEFMT_LOG", "info"),
+        release_image.TARGET_RUSTFLAGS: release_image.remap_flags(root, home),
+    }
+    features = ",".join(FEATURES)
+    cargo = ["cargo", "build", "--locked", "--features", features, "--target", TARGET, "--release"]
+    subprocess.run(cargo, cwd=root, env=env, check=True)
+
+
 def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> None:
     version = package_version(root / "Cargo.toml")
     if command(["git", "status", "--porcelain", "--untracked-files=no"], root):
@@ -109,6 +124,8 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
         raise ReleaseError("checked-out source does not match the workflow source commit")
     input_hashes = {name: digest(root / name) for name in INPUTS}
     identity = commit.encode()
+    home = release_image.cargo_home()
+    taken = {}
     for name in ("bt2usb", "bt2usb-selftest"):
         if (build_dir / name).stat().st_size == 0:
             raise ReleaseError(f"empty firmware: {name}")
@@ -119,7 +136,16 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
         firmware = (build_dir / name).read_bytes()
         if identity not in firmware or identity + b"-dirty" in firmware:
             raise ReleaseError(f"{name} does not report the clean source commit {commit}")
+        if paths := release_image.unmapped_paths(firmware, root, home):
+            raise ReleaseError(f"{name} names {', '.join(paths)}; build it with `release.py build`")
+        taken[f"{name}.elf"] = release_image.usage(firmware)
+        if over := release_image.over_budget(taken[f"{name}.elf"]):
+            raise ReleaseError(f"{name} is over its size budget: {'; '.join(over)}")
     rustc = command(["rustc", "--version"], root)
+    compiler = dict(
+        line.split(": ", 1) for line in command(["rustc", "-vV"], root).splitlines()[1:]
+    )
+    objcopy_version = command([str(objcopy.resolve()), "--version"], root)
     cargo = command(["cargo", "--version"], root)
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     sbom = software_bill_of_materials(root, version, commit, repository)
@@ -152,7 +178,20 @@ def stage_build(root: Path, build_dir: Path, output: Path, objcopy: Path) -> Non
         "features": list(FEATURES),
         "defmt_log": os.environ.get("DEFMT_LOG", "info"),
         "rustc": rustc,
+        "rustc_commit": compiler["commit-hash"],
+        "rustc_host": compiler["host"],
+        "llvm": compiler["LLVM version"],
         "cargo": cargo,
+        "objcopy": next(
+            (line.strip() for line in objcopy_version.splitlines() if "version" in line),
+            objcopy_version,
+        ),
+        "path_prefixes": {
+            "cargo_home": release_image.CARGO_HOME_PREFIX,
+            "source": release_image.SOURCE_PREFIX,
+        },
+        "image_bytes": taken,
+        "size_budget_bytes": release_image.BUDGETS,
         "input_sha256": input_hashes,
         "artifact_sha256": {name: digest(output / name) for name in FIRMWARE},
     }
@@ -339,6 +378,7 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     validate = commands.add_parser("validate-tag")
     validate.add_argument("--tag", required=True)
+    commands.add_parser("build")
     stage = commands.add_parser("stage")
     stage.add_argument("--build-dir", type=Path, required=True)
     stage.add_argument("--output", type=Path, required=True)
@@ -362,6 +402,8 @@ def main() -> None:
                 with open(output_file, "a", encoding="utf-8", newline="\n") as handle:
                     handle.write(f"version={version}\nprerelease={str(prerelease).lower()}\n")
             print(f"Validated release tag {args.tag}")
+        elif args.command == "build":
+            build_release(args.root)
         elif args.command == "stage":
             stage_build(args.root, args.build_dir, args.output, args.objcopy)
         elif args.command == "notes":

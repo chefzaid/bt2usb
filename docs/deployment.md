@@ -190,18 +190,23 @@ fixed inputs, and packaging rejects a build that differs:
 | Profile | `release`: `opt-level = "s"`, fat LTO, one codegen unit, `debug = 2` | The `--release` build command; `stage` reads only `target/thumbv7em-none-eabihf/release` and records the fixed string `release` |
 | Log level | `DEFMT_LOG=info` | Packaging requires `info` |
 | Source identity | The tagged commit, which `build.rs` embeds and the boot line reports ([boot sequence](operations.md#boot-sequence)) | `stage` refuses an application or self-test ELF that does not contain the checked-out commit, or contains it followed by `-dirty` |
+| Build paths | The Cargo home remapped to `/cargo` and the checkout to `.`, by `release.py build` | `stage` refuses an image that still contains either path ([reproducing a release build](#reproducing-a-release-build)) |
+| Size | Each image at most 384 KiB of flash and 64 KiB of RAM ([release size budgets](code-quality.md#release-size-budgets)) | `stage` refuses an image over either budget |
 
 `debug = 2` keeps DWARF debug information in the ELF for probe-rs; it does not
 add code to the flashed image.
 
 ## Artifact Flow
 
-1. The `embedded` job builds and lints the ARM firmware. It converts that ELF to
-   Intel HEX with the toolchain's `llvm-objcopy` and stages the application,
-   self-test, build inputs, metadata, and the
-   [software bill of materials](#software-bill-of-materials). Staging rejects changes to tracked
-   source, a checkout that differs from the workflow's source commit, and an
-   image that does not report that commit as clean.
+1. The `embedded` job lints the ARM firmware and builds it with `release.py
+   build`. It converts that ELF to Intel HEX with the toolchain's
+   `llvm-objcopy` and stages the application, self-test, build inputs,
+   metadata, and the
+   [software bill of materials](#software-bill-of-materials), then prints
+   `SHA256SUMS` in the job log. Staging rejects changes to tracked source, a
+   checkout that differs from the workflow's source commit, an image that does
+   not report that commit as clean, an image that names a build path, and an
+   image over its size budget.
 2. After host checks, host coverage, audit, embedded checks, and Renode succeed, `release-package`
    downloads the **immutable artifact ID** emitted by that build job. Artifact
    download digest mismatches fail the job. No firmware is rebuilt in this job.
@@ -255,8 +260,9 @@ be queried. To change a published release, tag a new version; do not edit or
 re-run the old tag.
 
 `BUILD-INFO.json` records the original build's commit, ref, repository, workflow
-run/attempt, compiler/Cargo versions, target, profile, features, log level, input
-hashes, and firmware hashes. `Cargo.toml`, `Cargo.lock`, and `rust-toolchain.toml`
+run/attempt, compiler, Cargo, and `llvm-objcopy` identity, target, profile,
+features, log level, path prefixes, input hashes, firmware hashes, and image
+sizes against their budgets. `Cargo.toml`, `Cargo.lock`, and `rust-toolchain.toml`
 are included. Source and vendored patches are identified by the same source
 commit; they are not replaced by a later checkout or recompilation.
 
@@ -267,6 +273,10 @@ commit; they are not replaced by a later checkout or recompilation.
 | `workflow_run_id`, `workflow_run_attempt` | The run that built the firmware |
 | `target`, `profile`, `features`, `defmt_log` | `thumbv7em-none-eabihf`, `release`, `["embedded"]`, `info` |
 | `rustc`, `cargo` | Compiler and Cargo version strings |
+| `rustc_commit`, `rustc_host`, `llvm` | From `rustc -vV`: the compiler's full commit hash, the host triple it ran on, and its LLVM version |
+| `objcopy` | The `LLVM version` line of the `llvm-objcopy` that wrote the HEX |
+| `path_prefixes` | `{"cargo_home": "/cargo", "source": "."}`, the names `release.py build` gave the two build paths |
+| `image_bytes`, `size_budget_bytes` | Each ELF's `flash` and `ram` bytes, and the budgets staging held them to |
 | `input_sha256` | SHA-256 of `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` |
 | `artifact_sha256` | SHA-256 of `bt2usb.elf`, `bt2usb-selftest.elf`, `bt2usb.hex`, under their staged (unversioned) names |
 
@@ -311,6 +321,42 @@ links:
 ```sh
 jq -r '.components[] | select(.scope == "required") | "\(.name) \(.version)"' bt2usb.cdx.json
 ```
+
+### Reproducing A Release Build
+
+`mask release-build` (`release.py build`) builds both images the way the
+release did, so a checkout of the release's commit produces the same ELF files
+byte for byte, on any Linux or WSL2 machine and in any directory. rustc
+otherwise writes the absolute paths of the Cargo home and the checkout into the
+image: the dependencies' file names in the panic locations the flashed code
+keeps, and the compilation directory in the debug information. The build
+remaps them to `/cargo` and `.`, and sets `DEFMT_LOG=info` unless the
+environment sets it ([ADR 0028](adr/0028-reproducible-budgeted-release-images.md)).
+
+```sh
+git checkout "$approved_commit"
+mask release-build
+sha256sum target/thumbv7em-none-eabihf/release/bt2usb target/thumbv7em-none-eabihf/release/bt2usb-selftest
+grep '\.elf$' SHA256SUMS
+```
+
+Each hash must equal the release's `bt2usb-<tag>.elf` and
+`bt2usb-selftest-<tag>.elf` entry, or the `bt2usb.elf` and
+`bt2usb-selftest.elf` entries a CI run prints in its staging step. The HEX is
+converted from the ELF, so a matching ELF also reproduces it with the same
+`llvm-objcopy`.
+
+What has to match for the bytes to match:
+
+- the commit, with no tracked file modified, since `build.rs` embeds it;
+- the Rust toolchain from `rust-toolchain.toml` with its host triple
+  (`rustc_host` in `BUILD-INFO.json`), and `Cargo.lock`;
+- `DEFMT_LOG`, which decides the log calls compiled in;
+- a Linux or WSL2 build: a native Windows build keeps backslashes after the
+  remapped prefix and is expected to differ (not tried).
+
+A plain `cargo build --release` or `mask build-release` differs from a release
+in those paths and in its `debug` log level, and staging refuses it.
 
 ## Verify Before Flashing
 
@@ -504,9 +550,9 @@ like an update.
 
 1. Find the last known-good artifact in the hardware acceptance records: its
    tag or commit and the SHA-256 of the file that was flashed.
-2. Prefer that archived file. A local rebuild of the same commit is not
-   guaranteed to be byte-identical; reproducible-build evidence is open work in
-   [TODO.md](../TODO.md#release-provenance-and-supply-chain).
+2. Prefer that archived file. Without it, rebuild the commit with
+   `mask release-build` and check the ELF's hash against the hardware record
+   before flashing ([reproducing a release build](#reproducing-a-release-build)).
 3. For a release, run [Verify Before Flashing](#verify-before-flashing) with the
    old tag and its approved commit.
 4. Flash it with one of the [flashing methods](#flashing-methods). Do not use a
@@ -560,12 +606,16 @@ explicit; it is not evidence that those reviews passed.
 
 An automated tag build alone is not production approval. Before publishing a
 deployment release, reviewers confirm each gate below. Each one is closed by
-the [TODO.md](../TODO.md) items named with it, all of which are open today:
+the [TODO.md](../TODO.md) items named with it, all of which are open today
+except the first:
 
 - Reproducible source revision, pinned toolchain and dependencies, passing
   host, embedded, and Renode checks, and recorded build and size results:
   "Reproducible firmware evidence" in
-  [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain).
+  [Release, provenance and supply chain](../TODO.md#release-provenance-and-supply-chain),
+  done in software on 2026-10-30. For each release, reviewers compare a
+  [reproduced build](#reproducing-a-release-build) with its `SHA256SUMS` and
+  read `image_bytes` in `BUILD-INFO.json`.
 - Hardware results for the supported peripheral, host, and hub matrix,
   including sleep and wake, USB reconnect, link loss with held inputs, and both
   active slots: "Hardware compatibility baseline" in

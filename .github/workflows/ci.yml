@@ -257,8 +257,10 @@ jobs:
         run: |
           cargo doc --locked --no-deps --document-private-items --features embedded --target thumbv7em-none-eabihf --lib
           cargo doc --locked --no-deps --document-private-items --features embedded --target thumbv7em-none-eabihf --bin bt2usb --bin bt2usb-selftest
+      # With the checkout and Cargo home paths remapped, so the images are the
+      # same bytes wherever they are built (docs/deployment.md#reproducing-a-release-build).
       - name: Build release firmware
-        run: cargo build --locked --features embedded --target thumbv7em-none-eabihf --release
+        run: python scripts/release.py build
       # Stage outside target/: rust-cache saves and restores that directory,
       # and staging refuses a pre-existing output directory.
       - name: Stage the checked firmware and record build inputs
@@ -269,6 +271,7 @@ jobs:
             --build-dir target/thumbv7em-none-eabihf/release \
             --output "$RUNNER_TEMP/release-input" \
             --objcopy "$llvm_bin/llvm-objcopy"
+          cat "$RUNNER_TEMP/release-input/SHA256SUMS"
       - name: Upload checked firmware and build manifest
         id: upload
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

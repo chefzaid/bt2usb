@@ -83,7 +83,7 @@ Platform facts:
   electrical specification; general knowledge), far below seconds.
 - **Retained RAM.** `cortex-m-rt` places a `NOLOAD` `.uninit` above `.bss` and
   below the painted stack (`link.x.in` lines 179 to 186). It holds
-  `defmt-rtt`'s 1,024-byte buffer ([validation record](../testing.md#validation-record--2026-10-10))
+  `defmt-rtt`'s 1,024-byte buffer ([validation record](../validation-records.md#validation-record--2026-10-10))
   and the 24-byte stack overflow record, `OVERFLOW_RECORD` in
   [stack.rs](../../src/stack.rs) ([ADR 0026](0026-mpu-stack-guard.md)). The
   MPU stack guard sits between them and the stack, so an overflow faults

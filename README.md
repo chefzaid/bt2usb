@@ -27,7 +27,7 @@ works today is in [Features](docs/features.md); every task, done and open, is in
 - [Architecture overview and ADR index](docs/architecture.md)
 - [Data model reference](docs/data-model.md)
 - [Development guide](docs/development.md)
-- [Testing guide](docs/testing.md)
+- [Testing guide](docs/testing.md) and [validation records](docs/validation-records.md)
 - [Code quality](docs/code-quality.md)
 - [Deployment: releases, provenance and flashing](docs/deployment.md)
 - [Operations runbook](docs/operations.md)

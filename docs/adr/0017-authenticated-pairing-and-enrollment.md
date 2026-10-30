@@ -282,7 +282,7 @@ Negative:
 Cost estimates, none measured: about 15 to 30 KiB of flash for `p256` with
 ECDH and 4 to 8 KiB for the policy, window, screens, and hooks, against
 804 KiB of application flash of which `.text` used 109,584 bytes in the
-[2026-10-10 validation record](../testing.md#validation-record--2026-10-10);
+[2026-10-10 validation record](../validation-records.md#validation-record--2026-10-10);
 about 300 bytes of static RAM (a secret, a local public key, a 64-byte peer
 key per link, a DHKey) and 1 to 3 KiB more peak stack, which the stack
 high-water log would confirm.

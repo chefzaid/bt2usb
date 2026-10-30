@@ -56,7 +56,8 @@ chosen by who reads it:
 | `docs/hardware.md` | Builders: parts and wiring, buttons, OLED, USB, power, clocks and radio, compile-time configuration, the memory map, and porting to another nRF52840 board |
 | `docs/development.md` | Contributors: toolchain, build configurations and log levels, commands, devcontainer and WSL, and how to make a change |
 | `docs/code-quality.md` | Contributors and reviewers: the quality gates every change passes, lint and unsafe-code policy, coverage policy, dependency hygiene, size budgets, and the review checklist |
-| `docs/testing.md` | Contributors and release reviewers: verification layers, how to run tests and coverage, CI, and dated validation records |
+| `docs/testing.md` | Contributors and release reviewers: verification layers, how to run tests and coverage, and CI |
+| `docs/validation-records.md` | Release reviewers: the dated record of the software checks run for each change, split out of `testing.md` on 2026-10-30 so the guide stays a guide |
 | `docs/first-flash.md` | Whoever brings up a board: the self-test and the hardware acceptance checklist |
 | `docs/deployment.md` | Whoever ships a build: the release pipeline, provenance verification, flashing, and release gates |
 | `docs/operations.md` | Whoever runs or debugs a unit: the recovery and diagnostics runbook |
@@ -222,7 +223,7 @@ Follow-up obligations:
 - **Software-verified:** by a manual, repository-wide check that every
   relative link between Markdown files, including its `#anchor`, resolves.
   The 2026-10-09 check of the restructured documents found no broken link.
-  The [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  The [2026-09-28 validation record](../validation-records.md#validation-record--2026-09-28)
   also lists local links as validated for the earlier layout. Since
   2026-10-10 the documentation checker re-checks every link and anchor, the
   configuration table, named constants, the memory map, and commands on each

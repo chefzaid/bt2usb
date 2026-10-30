@@ -218,7 +218,7 @@ Useful log lines: `Loaded {} BLE bonds into security handler` at startup,
 
 - **Implemented:** everything above.
 - **Software-verified:** the
-  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  [2026-09-28 validation record](../validation-records.md#validation-record--2026-09-28)
   reports the firmware building and passing embedded Clippy locally, and the
   CI "Embedded build & clippy" job passed on GitHub-hosted runners in push runs
   36441995385 (`8a04b25`, 2026-09-28) and 37932436721 (`7fc99d6`, 2026-10-09)

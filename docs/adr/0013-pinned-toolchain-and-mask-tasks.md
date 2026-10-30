@@ -215,7 +215,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 - **Implemented:** everything above.
 - **Software-verified:** the
-  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  [2026-09-28 validation record](../validation-records.md#validation-record--2026-09-28)
   reports the host, embedded, and simulation checks passing locally with Rust
   1.95.0, 31 mask recipes validated, and the WSL-to-Windows Cargo fallback
   smoke check passing. That record does not include a hosted GitHub Actions

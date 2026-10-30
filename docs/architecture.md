@@ -13,7 +13,7 @@ in this repository. **Host-tested** means `cargo test --lib --tests` exercises
 the logic on a PC. **Simulated** means the Renode scenario exercises it on an
 emulated nRF52840. **Hardware-verified** requires a recorded
 [first-flash](first-flash.md) result. The repository holds no such record yet:
-the [2026-09-28 validation record](testing.md#validation-record--2026-09-28) lists
+the [2026-09-28 validation record](validation-records.md#validation-record--2026-09-28) lists
 board, radio, and USB acceptance as not performed. The commit history
 mentions fixes made during board bring-up (`f477d4c`), but without stored
 evidence. Every lifecycle below is therefore at most host-tested or simulated.

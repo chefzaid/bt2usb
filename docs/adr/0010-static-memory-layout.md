@@ -239,7 +239,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - **Software-verified:** every embedded build links against `memory_sd.x`
   (and so checks its regions and assertion), and every simulation build links
   against `memory_sim.x`. The
-  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  [2026-09-28 validation record](../validation-records.md#validation-record--2026-09-28)
   reports the release bridge, self-test, and simulation builds passing
   locally, and the combined-feature build being rejected by the guard. On
   GitHub-hosted runners, the embedded and simulation jobs linked both layouts

@@ -230,7 +230,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - **Software-verified:** `Recovery` has two host tests in `display_logic.rs`
   (`failures_back_off_and_cap_without_blocking_new_frames` and
   `deadlines_saturate_and_wait_never_underflows`). The
-  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  [2026-09-28 validation record](../validation-records.md#validation-record--2026-09-28)
   reports embedded Clippy and the release bridge and self-test builds passing
   locally. The CI "Embedded build & clippy" job runs the same checks and
   passed on GitHub-hosted runners in push runs 36441995385 (`8a04b25`,

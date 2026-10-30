@@ -219,9 +219,9 @@ Follow-up obligations:
   `cargo test --locked --lib --tests`: 422 unit tests, 3 integration tests,
   3 glyph-table tests, and 5 vendored-portal tests, which passed on
   2026-10-11 (the
-  [stack guard review fixes](../testing.md#validation-record--2026-10-11-stack-guard-review-fixes);
+  [stack guard review fixes](../validation-records.md#validation-record--2026-10-11-stack-guard-review-fixes);
   the [test map](../testing.md#test-map) lists what was added since the
-  [2026-10-09 validation record](../testing.md#validation-record--2026-10-09),
+  [2026-10-09 validation record](../validation-records.md#validation-record--2026-10-09),
   which ran 260 unit tests). Since 2026-10-10 the pure core also includes
   `ui::controller` and `ui::layout`, which took the UI loop's decisions and
   each screen's text out of the untested shells.

@@ -143,7 +143,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      # Baseline: 97.59% of lines on 2026-10-10 (docs/testing.md#validation-record--2026-10-10).
+      # Baseline: 97.59% of lines on 2026-10-10 (docs/validation-records.md#validation-record--2026-10-10).
       # Raise the floor as coverage grows; lower it only with a reason in the commit.
       COVERAGE_MIN_LINES: 97
     steps:

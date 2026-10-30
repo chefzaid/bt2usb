@@ -309,9 +309,9 @@ label.
   development identity, `init` builds the FICR serial, and every `Config`
   field it does not set is an `embassy-usb` default.
 - **Software-verified:** no host test covers the USB identity or the serial
-  format, and none of the 17 release helper tests inspects an identity; `init`
+  format, and none of the 18 release helper tests inspects an identity; `init`
   passes embedded Clippy with warnings denied (2026-10-10 validation record in
-  [testing](../testing.md#validation-record--2026-10-10)).
+  [testing](../validation-records.md#validation-record--2026-10-10)).
 - **Hardware-verified:** not yet. No descriptor dump is recorded, and the
   first-flash unit-identity step has no result.
 

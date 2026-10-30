@@ -27,7 +27,7 @@ Two things changed after ADR 0004 was written:
   change could move logic in without tests, or delete tests, and every check
   would stay green.
 - **A baseline now exists.** The
-  [2026-10-10 validation record](../testing.md#validation-record--2026-10-10)
+  [2026-10-10 validation record](../validation-records.md#validation-record--2026-10-10)
   measured the host library at `6e1b8b4` with cargo-llvm-cov 0.9.1 on Rust
   1.95.0: 97.59% of lines (59 of 2,452 not covered), 98.17% of regions, and
   98.67% of functions. Earlier figures in the guides (96.16%, then 97.48%)

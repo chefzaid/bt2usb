@@ -199,7 +199,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   exist as the self-test image, the first-flash checklist, and the
   hardware-result issue template.
 - **Software-verified:** the
-  [2026-09-28 validation record](../testing.md#validation-record--2026-09-28)
+  [2026-09-28 validation record](../validation-records.md#validation-record--2026-09-28)
   reports every software layer passing locally. On GitHub-hosted runners, the
   push run for `2479c79` (36441384244) failed at the actionlint installation
   step, which `8a04b25` replaced. Push runs 36441995385 (`8a04b25`,

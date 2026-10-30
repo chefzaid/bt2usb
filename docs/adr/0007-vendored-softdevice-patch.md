@@ -235,7 +235,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   GATT client, GAP, and connection changes are still reviewed, not tested.
   The event portal guard has five host tests in `tests/vendor_portal.rs`,
   three of which fail on the unpatched source
-  ([validation record](../testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)). The log gate was checked on 2026-10-10 by listing the defmt
+  ([validation record](../validation-records.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)). The log gate was checked on 2026-10-10 by listing the defmt
   format strings of `debug`, `trace`, and `info` builds with and without the
   feature ([logging and privacy](../security.md#logging-and-privacy)). The
   event-size check was tried against a 131-byte buffer, which fails the build,

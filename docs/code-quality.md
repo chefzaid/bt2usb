@@ -24,9 +24,9 @@ reconnect, lock-key, connection-parameter, and reserved-byte fixes. Counts say
 how they were taken. The builds, Clippy, tests, and audit were not re-run for
 this guide.
 The last recorded local run of the Rust checks is the
-[2026-10-09 validation record](testing.md#validation-record--2026-10-09); the
+[2026-10-09 validation record](validation-records.md#validation-record--2026-10-09); the
 last one that also ran Renode, the dependency audit, and actionlint is the
-[2026-09-28 validation record](testing.md#validation-record--2026-09-28). No
+[2026-09-28 validation record](validation-records.md#validation-record--2026-09-28). No
 figure in this guide was measured on a board.
 
 ## Quality Gates
@@ -793,7 +793,7 @@ the report that shows which files lost coverage.
 
 **The floor.** `COVERAGE_MIN_LINES` is 97, set on 2026-10-10 from the baseline
 of 97.59% of lines (98.17% of regions, 98.67% of functions) in the
-[validation record](testing.md#validation-record--2026-10-10). At that baseline
+[validation record](validation-records.md#validation-record--2026-10-10). At that baseline
 59 of 2,452 lines were not covered; about 15 more uncovered lines at the same
 size would cross the floor. It is a ratchet:
 

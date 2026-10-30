@@ -933,151 +933,19 @@ symptoms to checks.
 
 ## Development And Release Tooling
 
-### Host Tests And Simulation
+Each tool is described once, in the guide that owns it; this section only
+lists what exists.
 
-- The hardware-free modules are shared verbatim between the firmware and the
-  host library [`lib.rs`](../src/lib.rs): HID types and policies (including
-  host-LED forwarding), the BLE coordinator, the shared reconnect table, the
-  connection parameter policy, long-read assembly, management primitives,
-  advertisement parser, the paired-device store and its record codec, framing,
-  and validation, power policy, the stack guard's placement, register
-  values, and fault classification, and UI logic.
-- The source contains 433 `#[test]` functions, counted with
-  `grep -rh '#\[test\]' src tests | wc -l`: 422 unit tests, the 3
-  integration tests in [`tests/integration.rs`](../tests/integration.rs),
-  the 3 glyph-table tests in [`tests/oled_font.rs`](../tests/oled_font.rs),
-  and the 5 tests of the vendored SoftDevice crate's event portal in
-  [`tests/vendor_portal.rs`](../tests/vendor_portal.rs), all of which run
-  with `mask test`.
-  Coverage reports come from `mask coverage` with `cargo-llvm-cov` or
-  `cargo-tarpaulin` ([testing](testing.md#host-tests-and-coverage)), and CI
-  fails when host line coverage drops below 97%
-  ([coverage in CI](code-quality.md#coverage-in-ci)).
-- The `bt2usb-sim` binary boots without the SoftDevice or USB on Renode's
-  nRF52840 model. It runs the real button driver, the firmware's UI
-  controller and display task, and the real coordinator reducers, scan
-  merging, management barrier and commit, and paired-device list with its
-  flash record codec, against a scripted BLE scenario, writing to UART0.
-  Custom GPIO and GPIOTE models implement the pin SENSE, LATCH, and PORT event
-  chain that embassy-nrf waits on
-  ([ADR 0014](adr/0014-renode-gpio-models.md)), and custom TWIM and SSD1306
-  models carry the display task's I2C frames to a modelled panel whose text
-  the test reads back ([ADR 0024](adr/0024-renode-oled-models.md)). The
-  headless Robot test
-  `Sim Runs The UI Controller, Display, Coordinator, Management, And Store`
-  presses the three buttons through a scan and connect, a link loss that
-  keeps its slot reserved, a cancelled and a confirmed Forget, a Factory
-  reset, and an OLED that stops answering and comes back, and checks the
-  console output and the text on the panel (`mask sim-test`,
-  [testing](testing.md#renode-scenario-map)).
-
-### Builds, Toolchain And Tasks
-
-- Rust is pinned to 1.95.0 with Clippy, rustfmt, and the `thumbv7em-none-eabihf`
-  target in [`rust-toolchain.toml`](../rust-toolchain.toml). Dependencies are
-  locked in `Cargo.lock`, nrf-softdevice is pinned to Git revision
-  `47d6121c6e823120e8b883a7ac75f44ce7daa3aa`, and every build task passes
-  `--locked`. The Cargo license metadata is `GPL-3.0-only`, matching
-  [LICENSE](../LICENSE) ([ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)).
-- [`maskfile.md`](../maskfile.md) defines 34 tasks for building, flashing,
-  testing, coverage, linting (Rust, and the Python and shell scripts),
-  documentation checks, simulation, the SoftDevice, and the devcontainer. `mask softdevice` stops on a failed download or extraction
-  before flashing anything.
-- [`build.rs`](../build.rs) refuses to build the `embedded` and `sim` features
-  together and selects `memory_sd.x` or `memory_sim.x`. The SoftDevice layout
-  ends application flash before the pairing pages and asserts that `.data`
-  starts at the RAM origin with the stack at the top, because the SoftDevice
-  takes `__sdata` as the application RAM base
-  ([ADR 0010](adr/0010-static-memory-layout.md)).
-- Formatting and Clippy with warnings denied cover the host, embedded, and
-  simulation builds; see [code quality](code-quality.md).
-
-### Continuous Integration
-
-[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on pushes to
-`main` or `master`, `v*` tags, pull requests, manual dispatch, and every Monday
-at 07:23 UTC:
-
-| Job | What it checks |
-| --- | --- |
-| Host tests (ubuntu-24.04, windows-2025) | Formatting, the release helper's tests, tag/version match on tags, host tests, host Clippy, host rustdoc with warnings denied; on Linux only, the 500-line file limit, module comments, the Markdown checks, Ruff and ShellCheck over the scripts and mask recipes, and actionlint (actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 downloaded and SHA-256 verified) |
-| Host coverage | `cargo llvm-cov` over the host tests, report uploaded, fails below 97% of lines ([ADR 0023](adr/0023-host-coverage-floor.md)) |
-| Dependency security audit | `cargo deny --locked check` with cargo-deny 0.20.2; fails on any vulnerability, unmaintained, unsound, or yanked advisory except two ignored by ID, a license outside the allow list, or an unlisted crate source |
-| Embedded build & clippy | Embedded Clippy (also with the `log-sensitive-data` opt-in), firmware rustdoc with warnings denied, release build, staged firmware and build manifest |
-| Renode simulation test | Simulation Clippy, simulation rustdoc with warnings denied, build, headless Robot test, results uploaded |
-| Verify and attest release package; Prepare draft firmware release | Tags only; see below |
-
-The default token permission is read-only; only the two release jobs get more.
-Every action is pinned to a full commit SHA with a comment naming its exact
-upstream release, all on the Node 24 runtime or composite, and the jobs run on
-the pinned `ubuntu-24.04` and `windows-2025` images. Dependabot proposes weekly
-Cargo and Actions updates.
-Release inputs and Renode results are staged in the runner's temporary
-directory, not in the cached `target/`.
-
-GitHub Actions has run the check jobs: push runs 36441995385 (commit `8a04b25`,
-2026-09-28) and 37932436721 (commit `7fc99d6`, 2026-10-09) and scheduled run
-37338711407 (2026-10-05) passed all five check jobs. The push run for
-`2479c79` failed at the earlier actionlint installation step, which `8a04b25`
-replaced. No tag has been pushed, so the release jobs have never run.
-
-### Release Packaging
-
-Releases follow [ADR 0008](adr/0008-attested-draft-releases.md) and
-[deployment](deployment.md#artifact-flow):
-
-1. The tag must be exactly `v` plus the Cargo package version, including any
-   prerelease suffix, which also marks the draft as a prerelease.
-2. The embedded job stages the bridge and self-test ELFs, a HEX file, the
-   Cargo and toolchain files, and `BUILD-INFO.json`, plus a `SHA256SUMS`
-   manifest covering all of them. It refuses a modified tracked tree or a
-   commit other than the workflow's.
-3. The packaging job downloads that exact artifact by ID, verifies the
-   checksums, commit, repository, run ID, `info` log level, input hashes, and
-   pinned compiler against `SHA256SUMS` and `BUILD-INFO.json`, renames the
-   files with the tag, and creates a GitHub provenance attestation whose
-   bundle ships as `provenance.sigstore.json`.
-4. The packaging job fills the release notes template
-   ([`.github/release-notes.md`](../.github/release-notes.md)) from the
-   verified package and the tagged source: the exact SoftDevice prerequisite,
-   compiled connection, saved-device, and USB identity limits, the pairing
-   storage version, rollback constraints, and the checksums, with a `REVIEW:`
-   line for supported versions, tested hardware, migrations, and the oldest
-   rollback target ([release notes](deployment.md#release-notes)).
-5. The publishing job has no signing permission and runs no checked-out
-   script. It refuses to touch a release that is already published and creates
-   or refreshes only a draft, whose description is the filled notes followed by
-   GitHub's generated change list.
-
-Seventeen regression tests cover the helper in
-[`scripts/release_test.py`](../scripts/release_test.py). Hosted attestation
-issuance and verification of a downloaded release are open work.
-
-### Developer Environment
-
-- Mask tasks call Cargo and probe-rs through
-  [`scripts/run-tool.sh`](../scripts/run-tool.sh), which looks for the tool on
-  `PATH`, then in `CARGO_HOME`, `~/.cargo/bin`, and the current Windows user's
-  profile. Under WSL it asks Windows for the current `%USERPROFILE%` rather
-  than scanning other users' profiles.
-- The VS Code devcontainer ([`.devcontainer/`](../.devcontainer/)) installs the
-  ARM target, probe-rs, mask, cargo-llvm-cov, and cargo-binutils, writes probe
-  udev rules, and runs the host tests as a smoke check; setup stops if any
-  required step fails. `mask devcontainer-build` builds it from
-  `devcontainer.json` with `devcontainer build --workspace-folder .` (the
-  earlier recipe pointed at a Dockerfile that does not exist). It still runs
-  privileged; scoped probe access is open
-  work ([development](development.md#devcontainer-and-wsl2)).
-
-### Documentation And Records
-
-The documentation is organized by reader: a short [README](../README.md), the
-guides in `docs/`, an ADR log in [`docs/adr/`](adr/) indexed in
-[architecture](architecture.md), a [security reference](security.md) separate
-from the [reporting policy](../SECURITY.md), and [TODO.md](../TODO.md) as the
-complete work plan ([ADR 0001](adr/0001-documentation-structure.md)). GitHub
-issue templates cover bug reports, feature proposals, and hardware acceptance
-results, and route suspected vulnerabilities to the security policy.
+| Capability | What it gives | Owning guide |
+| --- | --- | --- |
+| Shared pure core | The firmware's hardware-free modules compile unchanged into the host library ([lib.rs](../src/lib.rs)) and run under `mask test`, with a CI line-coverage floor | [Testing](testing.md#host-tests-and-coverage), [ADR 0003](adr/0003-pure-core-and-task-shell.md) |
+| Renode simulation | `bt2usb-sim` runs the real button driver, UI controller, display task, coordinator, management, and paired-device list on a simulated nRF52840 with modelled GPIO, TWIM, and SSD1306 panel; a headless Robot test drives it | [Testing](testing.md#renode-simulation), [ADR 0014](adr/0014-renode-gpio-models.md), [ADR 0024](adr/0024-renode-oled-models.md) |
+| Board self-test | `bt2usb-selftest` checks each hardware stage on a new board and prints one PASS or FAIL line per stage | [First flash](first-flash.md#2-self-test-image) |
+| Pinned builds and tasks | Rust 1.95.0, `Cargo.lock` with `--locked`, the pinned `nrf-softdevice` revision, and the `maskfile.md` tasks; `build.rs` refuses mixed features and selects the linker script | [Development](development.md), [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md), [ADR 0010](adr/0010-static-memory-layout.md) |
+| Continuous integration | Host tests on Linux and Windows, coverage, the dependency audit, embedded and simulation builds, script and workflow lint, and the Markdown checks, on every push and weekly | [Testing](testing.md#continuous-integration), [code quality](code-quality.md) |
+| Attested draft releases | A `v*` tag stages the checked firmware, verifies it, attests its provenance, fills the release notes, and creates a draft release | [Deployment](deployment.md#artifact-flow), [ADR 0008](adr/0008-attested-draft-releases.md) |
+| Developer environment | `scripts/run-tool.sh` finds Cargo and probe-rs on Linux, macOS, and WSL; a VS Code devcontainer installs the toolchain | [Development](development.md#devcontainer-and-wsl2) |
+| Documentation set | README, guides in `docs/`, ADRs indexed in the architecture guide, `TODO.md` as the work plan, and GitHub issue templates | [ADR 0001](adr/0001-documentation-structure.md) |
 
 ## Current Technical Boundaries
 
@@ -1149,9 +1017,11 @@ implemented, so do not describe them as features.
 - **Power use is not measured.** The bridge keeps its radio and links active
   while the PC sleeps; whether a given hub accepts that current is untested
   ([power budget](../TODO.md#ui-display-and-power)).
-- **A hang needs a power cycle.** There is no watchdog, no recorded reset
-  cause, and no way to read the firmware version from the device
-  ([watchdog and diagnostics](../TODO.md#platform-memory-and-recovery)).
+- **A hang needs a power cycle.** There is no watchdog. The firmware logs its
+  version, source commit, and last reset cause at boot, but only over RTT, so
+  reading them needs a debug probe
+  ([watchdog](../TODO.md#platform-memory-and-recovery),
+  [reporting a defect](operations.md#reporting-a-defect)).
 - **Keys are readable with physical access.** Bond keys are stored
   unencrypted and readout protection is not enabled, so anyone with the board
   and a debug probe can read them

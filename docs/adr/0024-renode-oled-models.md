@@ -229,7 +229,7 @@ Negative:
 - **Software-verified:** the 12 layout tests and 3 glyph-table tests pass
   with `cargo test`, and both Robot test cases passed locally with Renode
   1.16.1 on Linux
-  ([2026-10-10 OLED record](../testing.md#validation-record--2026-10-10-oled-in-renode)).
+  ([2026-10-10 OLED record](../validation-records.md#validation-record--2026-10-10-oled-in-renode)).
   The noise check failed with 1,024 noisy frame bytes before the fix in
   `display::initialize`, and with 2 noisy bytes for a firmware that only
   turned the panel off after `init`.

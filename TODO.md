@@ -1213,7 +1213,7 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   not fail the job. Accept when the lockfile no longer selects these affected versions,
   the audit is clean without advisory suppression, the CI audit fails on
   unmaintained-crate warnings, and host/firmware/simulation regression checks
-  pass ([testing](docs/testing.md#validation-record--2026-09-28)).
+  pass ([testing](docs/validation-records.md#validation-record--2026-09-28)).
   Progress (2026-10-10): the audit (`deny.toml` since 2026-10-30) fails on
   unmaintained, unsound, and yanked crates, and ignores only these two
   advisories by ID, each with its chain and removal trigger, so any new
@@ -1747,7 +1747,7 @@ The checklist, adapted to this firmware:
 
 - Check an item only when its acceptance criterion is met with evidence. Add
   the implementing paths to the item when you check it.
-- Record the evidence in the [testing guide](docs/testing.md) validation record
+- Record the evidence in a [validation record](docs/validation-records.md)
   or in a [hardware-result issue](.github/ISSUE_TEMPLATE/hardware-result.md),
   and name the commit and artifact hash it covers. Record skipped tests as
   skipped, not passed.

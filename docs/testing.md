@@ -272,7 +272,7 @@ exercises.
 | `sim.rs`, `sim_ble.rs` | Simulation build and Clippy; the Renode scenario, which is their purpose. `sim_ble.rs` mirrors the order in which `ble/multi_conn.rs` calls the pure modules, but nothing checks that the two stay in step |
 | `ui/display.rs` | Embedded and simulation builds and Clippy; the screen layout (`ui::layout`) and the recovery policy are host-tested; the Renode scenario runs the display task on modelled TWIM and SSD1306 peripherals and reads every screen it draws back ([OLED checks](#oled-checks)); self-test OLED stages |
 | `stack.rs` | Embedded and simulation builds and Clippy; the guard's placement and register values (`stack_logic.rs`) are host-tested; the Renode case `A Stack Overflow Faults In The Guard And Is Reported` programs the MPU, takes a fault in the guard, and checks the report ([Robot test case](#robot-test-case)); self-test `stack` and `stack guard` stages and the optional deliberate overflow; the Renode case also resets the machine and checks the next boot's `previous boot` line from the record kept in `.uninit`; the high-water scan runs only on the board |
-| `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice stage |
+| `sd_setup.rs` | Embedded build and Clippy; self-test SoftDevice and HFXO stages |
 | `power.rs` | Embedded build and Clippy; its policy (`power_logic.rs`) is host-tested; hardware acceptance (sleep and wake) |
 
 ## Parser Fuzzing

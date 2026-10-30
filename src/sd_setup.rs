@@ -3,6 +3,7 @@
 
 use crate::config;
 use defmt::{info, warn};
+use embassy_time::{Duration, Instant};
 
 /// The link count as the SoftDevice's `u8` connection and role counts.
 const LINKS: u8 = {
@@ -75,6 +76,53 @@ pub struct FlashBuffer<const N: usize>(pub [u8; N]);
 impl<const N: usize> FlashBuffer<N> {
     pub const fn new() -> Self {
         Self([0; N])
+    }
+}
+
+/// How long [`request_hfxo`] waits for the crystal to run. The HFXO normally
+/// starts in well under a millisecond; the bound only keeps a board whose
+/// crystal never starts from hanging at boot.
+const HFXO_START_TIMEOUT: Duration = Duration::from_millis(50);
+
+/// Request the high-frequency crystal oscillator (HFXO) for as long as the
+/// firmware runs, and wait until it is running. Returns false if the
+/// SoftDevice refused the request or the crystal was not running within
+/// [`HFXO_START_TIMEOUT`]; either is logged.
+///
+/// The USB peripheral clocks from the HFXO and does not start it, and
+/// `embassy-nrf` leaves the high-frequency clock on the internal oscillator
+/// (`HfclkSource::Internal` in its default `Config`). With the SoftDevice
+/// enabled, the CLOCK peripheral is the SoftDevice's: it runs the crystal only
+/// around radio activity unless the application asks for it with
+/// `sd_clock_hfclk_request`, so without the request USB would lose its clock
+/// whenever the radio is idle. The request is never released. Must run after
+/// `Softdevice::enable` and before USB starts; it polls without yielding, so
+/// it delays nothing else.
+pub fn request_hfxo() -> bool {
+    use nrf_softdevice::raw;
+    let started = Instant::now();
+    // SAFETY: plain SoftDevice SVCs, valid once the SoftDevice is enabled;
+    // `running` outlives the call that writes it.
+    unsafe {
+        if raw::sd_clock_hfclk_request() != raw::NRF_SUCCESS {
+            warn!("HFXO request refused; USB may fail while the radio is idle");
+            return false;
+        }
+        loop {
+            let elapsed = started.elapsed();
+            let mut running: u32 = 0;
+            if raw::sd_clock_hfclk_is_running(&mut running) == raw::NRF_SUCCESS && running != 0 {
+                info!("HFXO running after {} us", elapsed.as_micros());
+                return true;
+            }
+            if elapsed > HFXO_START_TIMEOUT {
+                warn!(
+                    "HFXO not running after {} ms; USB may fail while the radio is idle",
+                    HFXO_START_TIMEOUT.as_millis()
+                );
+                return false;
+            }
+        }
     }
 }
 

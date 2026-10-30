@@ -134,6 +134,7 @@ previous boot: stack overflow: stack pointer 0x<sp>, guard 0x<base>..0x<top>, PC
 reset reason: <causes>
 softdevice RAM: N bytes
 You're giving more RAM to the softdevice than needed. You can change your app's RAM start address to X
+HFXO running after N us
 USB power: vbus=true ready=true
 USB HID composite device initialised (keyboard + mouse + consumer)
 SoftDevice started
@@ -168,6 +169,11 @@ UI and isolated OLED tasks started
   be at most 24576 (the `0x6000` reservation in [memory_sd.x](../memory_sd.x)).
 - The "giving more RAM" warning appears only when N is below 24576. It is
   harmless; see [Stack And Memory Checks](#stack-and-memory-checks).
+- `HFXO running after N us` means the high-frequency crystal USB clocks from
+  is running, requested from the SoftDevice for the whole run
+  ([Clocks And Radio](hardware.md#clocks-and-radio)). In its place,
+  `HFXO request refused; …` or `HFXO not running after 50 ms; …` means boot
+  went on without it, and USB cannot be relied on.
 - `USB power` shows `vbus=false ready=false` when the native USB port is not
   powered yet; enumeration starts when it is plugged in.
 - If the SoftDevice USB power events cannot be enabled, the `USB power` line is
@@ -311,6 +317,9 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 
 | Level | Message | Meaning | Action |
 | --- | --- | --- | --- |
+| info | `HFXO running after {} us` | The high-frequency crystal USB clocks from runs, and how long it took to start | Record N with the bring-up evidence |
+| warn | `HFXO request refused; USB may fail while the radio is idle` | The SoftDevice refused `sd_clock_hfclk_request` | Report it with the boot lines; USB may drop or fail to enumerate |
+| warn | `HFXO not running after {} ms; USB may fail while the radio is idle` | The crystal did not start within 50 ms; boot went on | Check the board's 32 MHz crystal; USB may drop or fail to enumerate |
 | info | `USB power: vbus={} ready={}` | USB regulator state read at boot | `false` means the native port was unpowered at boot |
 | warn | `failed to enable USB power events; assuming VBUS present` | SoftDevice USB power events could not be enabled | Unplug/replug will not be noticed; reset the board with the cable attached |
 | info | `USB HID composite device initialised (keyboard + mouse + consumer)` | Descriptors built | None |
@@ -613,6 +622,8 @@ design.
   of the `USB power` line). The firmware then treats VBUS as present from boot
   and never notices an unplug or a replug.
 - The firmware panicked before USB started (no `USB HID device started`).
+- The high-frequency crystal did not start (`HFXO not running after 50 ms`
+  or `HFXO request refused` in the boot log), so USB has no reliable clock.
 - The host or a hub blocks new USB devices, or the monitor's hub has no
   upstream cable to the PC.
 

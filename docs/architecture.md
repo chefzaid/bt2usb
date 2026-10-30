@@ -286,7 +286,11 @@ appear in the code and reach the host through RTT; see
    central links with `BLE_CONN_EVENT_LENGTH`, a 64-byte ATT MTU, no
    advertising or peripheral role, and two central security contexts. The
    vendored `nrf-softdevice` logs `"softdevice RAM: {:?} bytes"` and panics if
-   [memory_sd.x](../memory_sd.x) reserves too little RAM.
+   [memory_sd.x](../memory_sd.x) reserves too little RAM. `sd_setup::request_hfxo`
+   then asks the SoftDevice to keep the high-frequency crystal running, which
+   USB clocks from, and polls up to 50 ms until it runs (`"HFXO running after
+   {} us"`, or a warning and boot goes on); see
+   [Clocks And Radio](hardware.md#clocks-and-radio).
 4. `sd_setup::enable_usb_power_events` turns on the SoftDevice USB detected,
    removed, and power-ready events and reads `USBREGSTATUS`, logging
    `"USB power: vbus={} ready={}"`. If enabling the events fails it logs

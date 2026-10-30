@@ -198,6 +198,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Runner and link flags | `.cargo/config.toml`: `probe-rs run --chip nRF52840_xxAA`, `-Tlink.x`, `-Tdefmt.x`, `--nmagic`, and `DEFMT_LOG = "debug"`; CI sets `DEFMT_LOG: info` in [ci.yml](../../.github/workflows/ci.yml) |
 | Memory map | [memory_sd.x](../../memory_sd.x), selected by [build.rs](../../build.rs); the `ASSERT` keeps `.data` at the RAM origin because nrf-softdevice reports `__sdata` to the SoftDevice as the application RAM base |
 | SoftDevice configuration | `softdevice_config()` in [sd_setup.rs](../../src/sd_setup.rs), shared by the bridge and the self-test |
+| USB clock | `request_hfxo()` in `sd_setup.rs` requests the high-frequency crystal through the SoftDevice (`sd_clock_hfclk_request`) before USB starts, and never releases it ([Clocks And Radio](../hardware.md#clocks-and-radio)) |
 | USB power events | `enable_usb_power_events()` in `sd_setup.rs`; `softdevice_task` in [main.rs](../../src/main.rs) forwards `PowerUsbDetected`, `PowerUsbRemoved`, and `PowerUsbPowerReady` to the `SoftwareVbusDetect` used by [hid_device.rs](../../src/usb/hid_device.rs) |
 | Interrupt priorities | `main.rs` and `selftest.rs` set GPIOTE and the time driver through `embassy_nrf::config::Config`, then USBD and TWISPI0 explicitly, all to `Priority::P2` |
 | Tasks | `main.rs` spawns `softdevice_task`, `usb_device_task`, `hid_writer_task`, one `ble_slot_task` per link, `ble_task`, `ui::display::task` (from [display.rs](../../src/ui/display.rs)), and three button tasks; the UI loop runs in `main` |
@@ -207,6 +208,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 At boot the bridge logs `bt2usb firmware starting`, then nrf-softdevice prints
 `softdevice RAM: N bytes` (format string `softdevice RAM: {:?} bytes`),
+`request_hfxo()` logs `HFXO running after N us`,
 `enable_usb_power_events()` logs `USB power: vbus={} ready={}`, and
 `hid_device::init` logs
 `USB HID composite device initialised (keyboard + mouse + consumer)`. `main`

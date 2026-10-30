@@ -8,6 +8,25 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, HFXO Request
+
+This record covers the commit that fixes the FIXME "USB never requested the
+crystal it clocks from" in [TODO.md](../TODO.md#fixme): `request_hfxo` in
+`src/sd_setup.rs` requests the high-frequency crystal through the SoftDevice
+right after `Softdevice::enable` in the bridge and the self-test, and the
+self-test reports it as the `hfxo` stage
+([Clocks And Radio](hardware.md#clocks-and-radio)). The checks ran locally on
+Linux in a container on the working tree just before that commit; nothing ran
+on a board, so USB stability with the request stays an open hardware item.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed; 440 unit tests and the 13 integration, glyph, pairing-permission, and portal tests unchanged |
+| The request is in both images | `llvm-objdump -d` on the release `bt2usb` and `bt2usb-selftest`, counting `svc #0x42` (`sd_clock_hfclk_request`) and `svc #0x44` (`sd_clock_hfclk_is_running`) | One of each in both images; none of `svc #0x42` in the bridge built from the previous commit |
+| Release image size | `llvm-size` on the release `bt2usb` | Text grew from 138,848 to 139,076 bytes (+228); data and bss unchanged |
+| `unsafe` inventory | `grep -rnw unsafe src build.rs tests` | Fifteen lines, as [code quality](code-quality.md#inventory) now states with row 14 |
+| Board/radio/USB acceptance | Physical hardware | Not performed: the start time, the self-test's `hfxo` stage, and USB stability with the radio idle and active are [first-flash checks](first-flash.md#8-extended-acceptance-optional) |
+
 ## Validation Record — 2026-10-30, Parser Fuzzing
 
 This record covers the commit that checks off the P1 item "Parser fuzzing and

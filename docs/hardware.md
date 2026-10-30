@@ -246,7 +246,7 @@ The SoftDevice configuration is shared by the bridge and the self-test in
 | RC calibration interval | `rc_ctiv = 16` | In SoftDevice units of 0.25 s: every 4 s |
 | Temperature-based calibration | `rc_temp_ctiv = 2` | Calibrate when the temperature changed, and at least every second interval |
 | Declared LF accuracy | 500 ppm | Used by the SoftDevice for timing windows |
-| High-frequency crystal | Not requested by the application | The SoftDevice manages it around radio activity |
+| High-frequency crystal | Requested at boot by `request_hfxo` (`sd_clock_hfclk_request`) and never released | USB clocks from it; without the request the SoftDevice would run it only around radio activity |
 | Link count | `conn_count`, `central_role_count`, and `central_sec_count` all equal `BLE_MAX_CONNECTIONS` (2) | Two central links, both able to use security |
 | Advertising and peripheral role | `adv_set_count = 0`, `periph_role_count = 0` | The bridge never advertises |
 | Connection event length | 6 (`BLE_CONN_EVENT_LENGTH`), 7.5 ms | Short enough for two links to interleave |
@@ -260,10 +260,22 @@ The values are from `sd_setup.rs`; the meaning of the clock fields (units of
 The nRF52840-DK fits a 32.768 kHz crystal, but this firmware does not use it.
 A board with a crystal may switch to `NRF_CLOCK_LF_SRC_XTAL` with the crystal's
 accuracy and both calibration fields set to 0; that change needs its own
-hardware test. The application never starts the high-frequency crystal
-oscillator itself (there is no `sd_clock_hfclk_request` call). How the USB
-peripheral's clock requirement is met under this arrangement has not been
-verified on hardware; check USB stability during bring-up.
+hardware test.
+
+The USB peripheral needs the 64 MHz high-frequency crystal oscillator (HFXO)
+and does not start it, and `embassy-nrf` leaves the high-frequency clock on its
+internal oscillator (`HfclkSource::Internal` in its default `Config`). Once the
+SoftDevice is enabled the CLOCK peripheral is the SoftDevice's, and it runs the
+crystal only around radio events unless the application asks for it, so the
+bridge and the self-test call `request_hfxo` right after `Softdevice::enable`
+and before USB starts. It requests the crystal through the SoftDevice and polls
+until it runs, logging `HFXO running after N us`, or warns after 50 ms and
+boots on without it. The request is never released, so the crystal also runs
+while the host suspends the bus; its current is part of the
+[power budget](../TODO.md#ui-display-and-power) still to be measured. The radio
+needs the same crystal, so every nRF52840 board fits one. The request is
+verified only by the embedded build; USB stability with it is a
+[first-flash check](first-flash.md#8-extended-acceptance-optional).
 
 Radio parameters that are not in `config.rs` come from the vendored
 `nrf-softdevice` defaults ([ScanConfig in central.rs](../vendor/nrf-softdevice/src/ble/central.rs)):
@@ -451,8 +463,9 @@ another board yet.
       does for USBD and TWISPI0.
 - [ ] **Clocks.** The internal RC low-frequency source works without a
       crystal. Switch to a crystal only with a matching accuracy setting and a
-      hardware test. Check USB stability, given the open question above about
-      the high-frequency crystal.
+      hardware test. USB and the radio both need the 32 MHz crystal of the
+      high-frequency oscillator; the boot line `HFXO running after N us`
+      shows it started.
 - [ ] **SoftDevice and flash map.** Use S140 v7.3.0, or update `memory_sd.x`
       to the other version's flash and RAM requirements. Check that nothing on
       the board, such as a factory bootloader or settings page, uses

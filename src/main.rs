@@ -209,6 +209,9 @@ async fn main(spawner: Spawner) {
     interrupt::TWISPI0.set_priority(Priority::P2);
 
     let sd = nrf_softdevice::Softdevice::enable(&sd_setup::softdevice_config());
+    // USB clocks from the crystal, which the SoftDevice otherwise runs only
+    // around radio events.
+    sd_setup::request_hfxo();
 
     let (vbus_detected, usb_power_ready) = sd_setup::enable_usb_power_events();
     let usb = hid_device::init(p.USBD, vbus_detected, usb_power_ready);

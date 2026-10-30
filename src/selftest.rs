@@ -5,7 +5,8 @@
 //! the real firmware does — same SoftDevice config, same USB composite device,
 //! same pins — and reports one PASS / FAIL / SKIP line per stage over RTT:
 //!
-//! 1. SoftDevice enable (its RAM requirement is logged just above)
+//! 1. SoftDevice enable (its RAM requirement is logged just above), then the
+//!    request for the high-frequency crystal that USB clocks from
 //! 2. Flash storage round-trip in the pairing region, without touching the
 //!    saved pairings
 //! 3. USB enumeration by the PC, then one idle mouse report on the IN endpoint
@@ -151,6 +152,16 @@ async fn main(spawner: Spawner) {
         "softdevice",
         "enabled (the 'softdevice RAM' line above is what memory_sd.x must reserve)",
     );
+
+    // Then the crystal USB clocks from, requested as the firmware does.
+    if sd_setup::request_hfxo() {
+        tally.pass("hfxo", "crystal running for USB (start time logged above)");
+    } else {
+        tally.fail(
+            "hfxo",
+            "crystal not running: USB may fail while the radio is idle (cause logged above)",
+        );
+    }
 
     let (vbus_detected, usb_power_ready) = sd_setup::enable_usb_power_events();
     let mut usb = hid_device::init(p.USBD, vbus_detected, usb_power_ready);

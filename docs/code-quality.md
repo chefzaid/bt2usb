@@ -345,10 +345,10 @@ scripts are executable.
 
 ### Inventory
 
-The application has eleven `unsafe` blocks and one `unsafe fn` in five files,
+The application has twelve `unsafe` blocks and one `unsafe fn` in five files,
 and one `global_asm!` block. The `unsafe` lines were counted with
-`grep -rnw unsafe src build.rs tests`, which matches fourteen lines: these
-twelve, the comment in `lib.rs` that states the rule, and the doc comment
+`grep -rnw unsafe src build.rs tests`, which matches fifteen lines: these
+thirteen, the comment in `lib.rs` that states the rule, and the doc comment
 above `HardFault` in `stack.rs` that says why it is an `unsafe fn`;
 `build.rs`, `tests/`, and the Python and shell scripts contain no `unsafe`.
 There are no `unsafe impl`, `transmute`, `MaybeUninit`, or `#[no_mangle]` in
@@ -379,6 +379,7 @@ as the vector table's MemManage entry.
 | 11 | [sd_setup.rs](../src/sd_setup.rs) `enable_usb_power_events` | `sd_power_usbdetected_enable`, `sd_power_usbremoved_enable`, `sd_power_usbpwrrdy_enable`, `sd_power_usbregstatus_get` | Turn on the SoftDevice's USB power events and read the USB regulator state | The SoftDevice is enabled before the call (the function's doc comment says it must run after `Softdevice::enable`); `status` is a valid local the SVC writes | Yes | Bridge, self-test |
 | 12 | [selftest.rs](../src/selftest.rs) `check_ble_scan` closure | `core::slice::from_raw_parts(params.data.p_data, params.data.len as usize)` | Same as 8, in the self-test's scan stage | Same as 8 | Yes | Self-test |
 | 13 | [stack.rs](../src/stack.rs) `global_asm!` | The `MemoryManagement` exception handler in Thumb assembly: store 0 to `MPU_CTRL`, `dsb`, `isb`, `mov r0, sp`, `b _HardFault` | Reach the HardFault handler from a MemManage exception, which nothing enables but Renode 1.16.1 raises anyway, without touching the stack | It pushes nothing, because the stack pointer is in the guard and the MPU is still on when it starts; it writes only `MPU_CTRL`; it enters `_HardFault`, the entry point cortex-m-rt exports for row 6, in handler mode, where the stack pointer is the main stack the frame was pushed to | Comment above the block | Bridge, self-test, simulation |
+| 14 | [sd_setup.rs](../src/sd_setup.rs) `request_hfxo` | `sd_clock_hfclk_request`, `sd_clock_hfclk_is_running` | Ask the SoftDevice to keep the high-frequency crystal running for USB, and wait until it runs | The SoftDevice is enabled before the call, as for 11; `running` is a valid local the SVC writes | Yes | Bridge, self-test |
 
 The host library contains none of these blocks: `stack.rs`, `sd_setup.rs`,
 `scanner.rs`, and `bonder.rs` are not compiled into it, and neither is
@@ -411,9 +412,9 @@ stack for `high_water` and no self-test stage for `guard_is_on`.
   `!Sync` value as `&'static` is sound only while every access happens on that
   one executor in thread mode; a change that touches the `Bonder` from an
   interrupt handler would break the invariant.
-- **Block 11.** The block wraps the whole function body, including the
-  comparisons, the warning log, and the early returns, rather than only the
-  four SVC calls. Narrow it if the function changes.
+- **Blocks 11 and 14.** Each block wraps the whole function body, including
+  the comparisons, the logs, and the early returns (and in 14 the poll loop),
+  rather than only the SVC calls. Narrow them if the functions change.
 - **Block 1.** `_stack_end` and `_stack_start` are declared in an
   `extern "C"` block; taking their addresses with `core::ptr::addr_of!` needs
   no `unsafe` on the pinned toolchain, and their values are never read.
@@ -611,7 +612,7 @@ Each entry has one of three classes:
 | heapless capacity | `Vec::remove` in `DeviceList::without`, `DeviceList::add`, `BondTable::insert`, and the bonder's `LinkFlags::set` and `LinkFlags::take`; `collect()` into a fixed `Vec` in `DeviceStore::bonds`, `ble_task`, `handle_slot_event` (three), `publish_paired_devices`, and `SimBle::command` | Cannot fire | Each `remove` takes an index found by `position` on the same `Vec`, or index 0 of a full one. Each `collect` reads a source no longer than its target: `take(MAX_CONNECTIONS)` or `take(MAX_PAIRED_DEVICES)`, a `Vec` of capacity 1 or 2 collected into one of capacity 3, or a device list whose capacity is the target's |
 | `copy_from_slice` | `decode_address`, `encode_bond`, `decode_bond`, and `write_device` in `codec.rs`; the simulation's `Flash::save` in `sim_ble.rs` | Cannot fire | Both sides have the same length by construction: fixed ranges of fixed-size arrays, or parts split off to exactly the length copied |
 | Division by a runtime value | `max_latency_for` in `conn_params.rs`, while bounding a peer's connection parameter request | Cannot fire | It divides by the granted maximum interval, which `bound_request` keeps at or above the configured minimum interval, and it also returns early when that interval is 0, and when its timeout argument (the configured maximum supervision timeout) is 0, so `4 * timeout - 1` cannot underflow either. Every other `/` and `%` has a constant divisor |
-| embassy-time arithmetic | `Instant` plus `Duration`, including the one inside every `Timer::after`, `Ticker`, and `with_timeout`; `Duration::from_secs` and `from_millis`; and `Instant::elapsed`. In `scanner.rs`, `slot_worker.rs`, `buttons.rs`, `power.rs`, `display.rs`, the flash retry in `storage.rs`, the USB retry clock, the main loop's `Ticker`, the simulation loop, and the self-test | Cannot fire | The operands are small constants or capped values (delivery retries wait at most 1 s, display recovery at most 30 s). `elapsed` subtracts an earlier `Instant::now()` on a monotonic clock, and the 64-bit tick counter would take millions of years to overflow |
+| embassy-time arithmetic | `Instant` plus `Duration`, including the one inside every `Timer::after`, `Ticker`, and `with_timeout`; `Duration::from_secs` and `from_millis`; and `Instant::elapsed`. In `scanner.rs`, `slot_worker.rs`, `buttons.rs`, `power.rs`, `display.rs`, the flash retry in `storage.rs`, the USB retry clock, the main loop's `Ticker`, the HFXO wait in `sd_setup.rs`, the simulation loop, and the self-test | Cannot fire | The operands are small constants or capped values (delivery retries wait at most 1 s, display recovery at most 30 s). `elapsed` subtracts an earlier `Instant::now()` on a monotonic clock, and the 64-bit tick counter would take millions of years to overflow |
 | embassy-usb control handling | `UsbDevice::run_until_suspend`, `wait_resume`, and `remote_wakeup` in `run_usb_device`, which answer host requests; `HidWriter::write` in `UsbReportSink::write` | Cannot fire | The host chooses only a string index, and the longest string descriptor (42 bytes) fits the 128-byte control buffer. Out-of-range interfaces and OUT stages longer than the buffer are rejected. Reports are at most 8 bytes, the size each writer holds |
 | TWIM and SSD1306 drivers | `Twim::transaction` through `StopSafeI2c`; the ssd1306 flush | Cannot fire | The display sends single, non-empty writes and never reads. The TWIM raises its error event only together with an `ERRORSRC` bit, a rule the Renode model `renode/nrf52840_twim.cs` follows too. The panel driver drops pixels outside 128 by 64 |
 | Flash futures | `MapStorage::fetch_item` and `store_item` in `storage.rs`, the Factory reset `erase`, and `check_flash` | Cannot fire | The vendored `Flash::write` and `Flash::erase` arm a `DropBomb` that panics when the future is dropped before the SoftDevice reports completion. Every flash future is awaited directly; never put one in `select` or `with_timeout` |

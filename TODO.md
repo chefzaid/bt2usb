@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 54 | 0 | 0 |
+| [FIXME](#fixme) | 55 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 16 | 4 | 2 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **149** | **66** | **20** |
+| **Total** | **150** | **66** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -200,6 +200,11 @@ two what fixed it; its commit and validation record hold the details.
   others.**
   `enable_guard` turns other MPU regions off, `StackGuard::is_overflow` counts
   refused data accesses, and the self-test bounds its deliberate overflow
+  *(hardware evidence pending)*.
+- [x] **P1** **USB never requested the crystal it clocks from.** Neither
+  `embassy-nrf` nor the SoftDevice keeps the HFXO running for USB; the bridge
+  and the self-test now request it through the SoftDevice at boot
+  (`src/sd_setup.rs` `request_hfxo`), and the self-test reports it as a stage
   *(hardware evidence pending)*.
 
 ## Needs Your Input
@@ -494,14 +499,14 @@ Context: [features](docs/features.md#usb-hid-device) and
   transitions, and reject invalid control requests consistently. Accept when
   descriptor/request tests and USB captures from a real host demonstrate the
   supported behavior ([testing](docs/testing.md#known-verification-gaps)).
-- [ ] **P1** **Confirm USB stability without an explicit HFXO request.**
+- [ ] **P1** **Confirm USB stability with the explicit HFXO request.**
   *(hardware)* The USB peripheral needs the high-frequency crystal oscillator,
-  but nothing under `src/` calls `sd_clock_hfclk_request` or otherwise starts
-  it, so the USB clock depends on whatever the SoftDevice and `embassy-nrf`
-  start on their own. Accept when a bring-up log and a long enumeration and
-  typing run on a board show USB stays stable with the radio idle and active,
-  or the firmware requests the crystal explicitly and that change has the same
-  evidence ([hardware](docs/hardware.md#clocks-and-radio)).
+  which the firmware requests from the SoftDevice at boot
+  (`sd_setup::request_hfxo`, fixed in [FIXME](#fixme) on 2026-10-30). Accept
+  when a bring-up log shows `HFXO running after N us` and a long enumeration
+  and typing run on a board shows USB stays stable with the radio idle and
+  active ([hardware](docs/hardware.md#clocks-and-radio),
+  [first flash](docs/first-flash.md#8-extended-acceptance-optional)).
 
 ## Input Aggregation And Delivery
 

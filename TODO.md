@@ -35,11 +35,11 @@ probe, or USB host to close.
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 13 | 3 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 9 | 7 | 2 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 10 | 7 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **143** | **69** | **21** |
+| **Total** | **144** | **69** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -883,6 +883,8 @@ it becomes workable again.
 | [Security maintenance ownership](#release-provenance-and-supply-chain) (P0) | A private reporting channel, which versions get fixes, who triages, and how fast reporters hear back. SECURITY.md cannot name a channel until one exists | 1. Enable GitHub private vulnerability reporting as the only channel; fix only the latest release tag and `main`; you triage; acknowledge within 7 days and give a fix or plan within 30 days. 2. Publish a security email address instead, with the same policy |
 | [Replace unmaintained transitive dependencies](#release-provenance-and-supply-chain) (P1) | How to drop `proc-macro-error` (via `ssd1306`), and whether documented audit ignores may close the item while no released `cortex-m` drops `bare-metal`. The audit already fails on any other unmaintained crate | 1. Keep both ignores until upstream releases remove the crates, and accept "dropped, or ignored by ID with its chain and removal trigger" as the closing criterion; both are low risk (compile-time only, or stable core types). 2. Replace `ssd1306` with a small in-tree async driver for the 128x64 panel, under a new ADR, with host tests for the command bytes and a Renode and board display check; drops `proc-macro-error`, `maybe-async-cfg`, and their `syn` 1 tree. 3. Port `ssd1306` to `maybe-async-cfg` 0.2.5 and offer it upstream from your GitHub account, keeping the ignore until a release carries it |
 | [Hardware-evidence label and private reporting](#release-provenance-and-supply-chain) (P2) | Two repository settings no tool here can change: create the `hardware-evidence` label (Issues, Labels, New label) that the hardware-result template applies, and turn on private vulnerability reporting (Settings, Code security) | 1. Do both; the loop then updates SECURITY.md and checks a new hardware-result issue. 2. Create only the label and choose an email channel in the row above |
+| [Supply-chain and tooling maintenance](#release-provenance-and-supply-chain) (P1) | The SHA-256 of Nordic's `s140_nrf52_7.3.0.zip`. This environment's network policy refuses Nordic's download host, so the digest cannot be taken here, and a value copied from anywhere but the archive itself would be a guess | 1. Run `sha256sum s140_nrf52_7.3.0.zip` on a copy downloaded from nordicsemi.com and paste the digest; the loop then pins it in `mask softdevice`, which will refuse a mismatching archive. 2. Allow `nsscprodmedia.blob.core.windows.net` in the environment's network settings so the loop can take it |
+| [Nordic license of the SoftDevice bindings](docs/deployment.md#third-party-components-and-licenses) (P1) | `nrf-softdevice-s140`, compiled into the firmware, is under Nordic's 5-clause license, which allows use only with a Nordic chip and forbids reverse engineering binaries. GPL-3.0 does not let a combined work add such restrictions, so whether the `GPL-3.0-only` firmware may be distributed with those bindings linked in needs a legal call. The CI license check allows that one crate until then | 1. Add a GPL section 7 additional permission to `LICENSE` that allows linking Nordic's SoftDevice bindings and interface (the usual route for GPL firmware on vendor stacks). 2. Relicense bt2usb under a permissive license such as `MIT OR Apache-2.0`, as Embassy and nrf-softdevice are. 3. Keep things as they are and accept the risk while the firmware is not distributed |
 | [ADR 0017: authenticated pairing](docs/adr/0017-authenticated-pairing-and-enrollment.md) (P0) | Four answers before the ADR can be Accepted and implemented: how Just Works-only devices (most mice) are treated, whether LE legacy pairing is allowed, what happens to bonds made under ADR 0011, and the pairing-window length | 1. Allow Just Works-only devices with mouse reports only, after a SELECT; reject legacy pairing; mark ADR 0011 bonds "pair again"; 60 s window (the ADR's recommendation). 2. Reject Just Works-only devices outright. 3. Allow legacy pairing in the Just Works tier. 4. Keep ADR 0011 bonds with full input until forgotten. 5. A 30 s or 120 s window |
 | [ADR 0018: USB identity](docs/adr/0018-production-usb-identity.md) (P0) | Where the production VID/PID comes from, what serial release builds report, whether the product string changes, and when to request the PID | 1. Request a pid.codes PID now; keep the FICR factory serial; rename the product to "BLE HID Bridge" (the recommendation). 2. Buy a USB-IF vendor ID instead. 3. Report no serial, or a resettable one. 4. Keep "BT-to-USB HID Bridge". 5. Request the PID after hardware acceptance |
 | [ADR 0019: power-loss-safe persistence](docs/adr/0019-power-loss-safe-persistence.md) (P0) | The commit protocol, the `sequential-storage` version, what a future layout-changing container release may do, and when old frames are rewritten | 1. Generation anchor under a second key; pin `sequential-storage` 8.0.2; hold any layout-changing release; rewrite old frames lazily on the next save (the recommendation). 2. Frame CRC and generation without the anchor. 3. Raw A/B pages without the crate. 4. Stay on 7.2.0. 5. Adopt a layout change with a confirmed Factory reset, or migrate in place. 6. Rewrite at the first boot of the new firmware |
@@ -1854,13 +1856,24 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   label, the **Report a vulnerability** button opens a private advisory, and
   SECURITY.md names that channel. Waiting on the owner in
   [Needs Your Input](#needs-your-input).
-- [ ] **P1** **Supply-chain and tooling maintenance.** Extend the dependency
-  audit and update automation with license checks, an SBOM artifact, and
-  verified digests for downloaded non-Cargo tooling/SoftDevice inputs; today
-  `scripts/install-renode.sh` and `mask softdevice` download archives without a
-  digest check. Accept when a license conflict or digest mismatch fails the
-  relevant check with an actionable message and dependency alerts have an
-  assigned review process ([security](docs/security.md#supply-chain)).
+- [x] **P1** **License check and Renode digest.** The CI audit runs
+  `cargo deny --locked check` (cargo-deny 0.20.2, SHA-256 checked) with
+  `deny.toml`, which replaced `cargo audit` and its settings file: the same
+  advisory policy and two ignores, plus a license allow list for the whole
+  graph with every feature enabled and a crates.io-plus-pinned-Git source rule;
+  a crate under another license fails the job and names the crate and license
+  (`Cargo.toml` gained `publish = false`, so the pinned Git dependencies are not
+  treated as wildcards). `scripts/install-renode.sh` checks the Renode archive
+  against a pinned SHA-256 before extracting it, and needs `RENODE_SHA256` for
+  another version ([auditing](docs/code-quality.md#auditing),
+  [security](docs/security.md#supply-chain)).
+- [ ] **P1** **Supply-chain and tooling maintenance.** Add an SBOM artifact to
+  the release package and a verified digest for the SoftDevice archive that
+  `mask softdevice` downloads. Accept when a digest mismatch fails the recipe
+  with an actionable message, the release package carries an SBOM, and
+  dependency alerts have an assigned review process
+  ([security](docs/security.md#supply-chain)). The SoftDevice digest and the
+  review owner wait on [Needs Your Input](#needs-your-input).
 - [ ] **P1** **Replace unmaintained transitive dependencies.** The 2026-09-28
   audit reported `bare-metal 0.2.5` (`RUSTSEC-2026-0110`) and
   `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained; both are still
@@ -1871,7 +1884,7 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   the audit is clean without advisory suppression, the CI audit fails on
   unmaintained-crate warnings, and host/firmware/simulation regression checks
   pass ([testing](docs/testing.md#validation-record--2026-09-28)).
-  Progress (2026-10-10): `.cargo/audit.toml` now makes `cargo audit` fail on
+  Progress (2026-10-10): the audit (`deny.toml` since 2026-10-30) fails on
   unmaintained, unsound, and yanked crates, and ignores only these two
   advisories by ID, each with its chain and removal trigger, so any new
   advisory fails CI. Neither crate can be dropped by an upgrade today:

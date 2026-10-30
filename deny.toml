@@ -1,0 +1,67 @@
+# cargo-deny settings, read by `cargo deny check` in CI and locally
+# (docs/code-quality.md#auditing).
+
+[graph]
+# Check the firmware's dependency tree too, not only the host library's.
+all-features = true
+
+[advisories]
+# Fail on unmaintained, unsound, and yanked crates, not only on
+# vulnerabilities. Unmaintained crates that no released dependency lets bt2usb
+# drop yet are ignored by ID; each entry names the chain and what removes it.
+# Delete an entry as soon as `Cargo.lock` stops selecting the crate (TODO.md,
+# "Replace unmaintained transitive dependencies").
+unmaintained = "all"
+yanked = "deny"
+ignore = [
+    # bare-metal 0.2.5, deprecated: cortex-m 0.7.9, the newest release and
+    # cortex-m's main branch, depends on it, and every Embassy crate and
+    # nrf-softdevice use cortex-m 0.7. No patched version exists.
+    "RUSTSEC-2026-0110",
+    # proc-macro-error 1.0.4, unmaintained: ssd1306 0.10.0 pins
+    # maybe-async-cfg =0.2.4; maybe-async-cfg 0.2.5 replaced it with manyhow,
+    # but neither the ssd1306 release nor its main branch allows 0.2.5 yet,
+    # and ssd1306 does not compile against 0.2.5 without porting.
+    "RUSTSEC-2024-0370",
+]
+
+[licenses]
+# bt2usb is GPL-3.0-only, so every dependency must be under a license that
+# GPL-3.0 can incorporate. A crate under any other license fails the check.
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "GPL-3.0-only",
+    "MIT",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.9
+
+# nrf-softdevice-s140, the Rust bindings to the S140 API, names only a license
+# file: Nordic's 5-clause license, which allows use only with a Nordic
+# integrated circuit. It is allowed for this one crate; whether it may be
+# linked into a GPL-3.0-only binary is an open question (TODO.md, "Needs Your
+# Input"). A change to the file's text changes the hash and fails the check.
+[[licenses.clarify]]
+crate = "nrf-softdevice-s140"
+expression = "LicenseRef-Nordic-5-Clause"
+license-files = [{ path = "LICENSE-NORDIC", hash = 0xe7401bed }]
+
+[[licenses.exceptions]]
+crate = "nrf-softdevice-s140"
+allow = ["LicenseRef-Nordic-5-Clause"]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# The crate's own path dependencies (the vendored nrf-softdevice) are not
+# wildcards.
+allow-wildcard-paths = true
+
+[sources]
+# Crates come from crates.io, and the two git crates from the pinned
+# nrf-softdevice revision; anything else fails.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = ["https://github.com/embassy-rs/nrf-softdevice"]

@@ -10,12 +10,21 @@
 #   mask sim-build && mask sim        # GUI
 #   mask sim-build && mask sim-test   # headless / CI
 #
-# Override the version or install location with env vars:
-#   RENODE_VERSION=1.16.1 RENODE_DIR=$HOME/.local/share/renode ./scripts/install-renode.sh
+# Override the version or install location with env vars. The archive's SHA-256
+# is checked before extraction; another version needs its digest too:
+#   RENODE_VERSION=1.16.1 RENODE_SHA256=<digest> RENODE_DIR=$HOME/.local/share/renode \
+#     ./scripts/install-renode.sh
 #
 set -euo pipefail
 
 RENODE_VERSION="${RENODE_VERSION:-1.16.1}"
+if [ -z "${RENODE_SHA256:-}" ]; then
+    if [ "${RENODE_VERSION}" != "1.16.1" ]; then
+        echo "ERROR: set RENODE_SHA256 to the digest of Renode ${RENODE_VERSION}'s portable archive." >&2
+        exit 1
+    fi
+    RENODE_SHA256="00e113cdbd0f5354cf2f64bbe3f5a070d8958409542fca66e45ac97d982938c0"
+fi
 RENODE_DIR="${RENODE_DIR:-$HOME/.local/share/renode}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 
@@ -36,7 +45,12 @@ if [ -x "${EXTRACT_DIR}/renode" ]; then
     echo "    already extracted, skipping download"
 else
     echo "    downloading ${PORTABLE} ..."
-    curl -fsSL -o "${RENODE_DIR}/${PORTABLE}" "${URL}"
+    curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "${RENODE_DIR}/${PORTABLE}" "${URL}"
+    if ! echo "${RENODE_SHA256}  ${RENODE_DIR}/${PORTABLE}" | sha256sum --check --strict --quiet; then
+        rm -f "${RENODE_DIR}/${PORTABLE}"
+        echo "ERROR: ${PORTABLE} does not match SHA-256 ${RENODE_SHA256}; not installed." >&2
+        exit 1
+    fi
     echo "    extracting ..."
     tar xzf "${RENODE_DIR}/${PORTABLE}" -C "${RENODE_DIR}"
     rm -f "${RENODE_DIR}/${PORTABLE}"

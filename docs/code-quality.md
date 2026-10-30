@@ -52,7 +52,7 @@ Clippy warning into an error.
 | Release firmware build | `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` | `mask ci`, `mask build-release` | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest` |
 | Simulation build | `cargo build --locked --features sim --target thumbv7em-none-eabihf` | `mask ci`, `mask sim-build` | Renode simulation test | Fails the job |
 | Renode scenario | `renode-test --results-dir "$RUNNER_TEMP/renode-results" renode/bt2usb-sim.robot` | `mask sim-test` (needs `renode-test` on PATH; `mask sim-setup` installs it on Linux or WSL) | Renode simulation test | Fails the job; results upload even on failure |
-| Dependency audit | `cargo audit`, cargo-audit 0.22.2, with [.cargo/audit.toml](../.cargo/audit.toml) | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory or an unmaintained, unsound, or yanked crate, except the two advisories ignored by ID ([auditing](#auditing)) |
+| Dependency audit | `cargo deny --locked check`, cargo-deny 0.20.2 (SHA-256 checked), with [deny.toml](../deny.toml) | None; install it as in [development](development.md#toolchain) | Dependency security audit | Fails on a vulnerability advisory, an unmaintained, unsound, or yanked crate (except the two advisories ignored by ID), a license outside the allow list, or a crate from an unlisted source ([auditing](#auditing)) |
 | Workflow lint | `actionlint`, 1.7.12, with ShellCheck 0.11.0 on `PATH` for the `run:` scripts; both SHA-256 checked before use | `actionlint` | Host tests, Linux only | Fails the Linux job |
 | Python lint and formatting | `ruff check` and `ruff format --check` over every tracked `*.py` file, Ruff 0.16.9, settings in `ruff.toml`, run by `python scripts/lint_scripts.py` ([Python And Shell Checks](#python-and-shell-checks)) | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job and lists each finding |
 | Shell lint | `shellcheck` 0.11.0 over every tracked `*.sh` file and every Bash recipe in `maskfile.md`, run by the same script | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job; a recipe finding names its `maskfile.md` line and recipe |
@@ -114,7 +114,7 @@ the tag check, or release staging. Run the ones your change can affect:
 | `.github/workflows/ci.yml` | `actionlint`, with `shellcheck` on `PATH` so it checks the `run:` scripts |
 | A Python file, a `*.sh` script, a `maskfile.md` recipe, or `ruff.toml` | `mask lint-scripts` |
 | `scripts/release.py` or the release jobs | `python -m unittest discover -s scripts -p "release_test.py" -v` |
-| `Cargo.toml` or `Cargo.lock` | `cargo audit` |
+| `Cargo.toml`, `Cargo.lock`, or `deny.toml` | `cargo deny --locked check` |
 | UI, buttons, coordinator, management, BLE messages, the pure `storage` modules, `sim.rs`, `sim_ble.rs`, `memory_sim.x`, or `renode/` | `mask sim-test` |
 
 The [testing guide](testing.md#local-and-ci-coverage-compared) has the full
@@ -846,9 +846,10 @@ its commit and scope cannot be checked and goes stale silently.
 | `nrf-softdevice`, `nrf-softdevice-s140` | Git `rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa"`; `nrf-softdevice` is replaced by `vendor/nrf-softdevice` through `[patch]` | Enforced by Cargo |
 | GitHub Actions | Each `uses:` names a full commit SHA, never an annotated tag object, with a comment naming the exact release that SHA is | Enforced by the SHA; the comment is informational |
 | Runner images | `ubuntu-24.04` for every Linux job and `windows-2025` for the Windows host job, instead of the moving `ubuntu-latest` and `windows-latest` labels | Enforced by the label; GitHub still updates the image's software weekly within that release |
-| cargo-audit, actionlint, Ruff, ShellCheck | `cargo-audit@0.22.2` through `taiki-e/install-action`; actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 downloaded from their GitHub releases and checked against a SHA-256 before use | Enforced in CI. Ruff publishes a `.sha256` file per archive, and the recorded digest matches it; ShellCheck publishes none, so its digest was computed from the release archive on 2026-10-10. Ruff 0.16.9 was the newest release more than two weeks old on that date |
+| cargo-deny, actionlint, Ruff, ShellCheck | cargo-deny 0.20.2, actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 downloaded from their GitHub releases and checked against a SHA-256 before use | Enforced in CI. cargo-deny and Ruff publish a `.sha256` file per archive, and the recorded digests match them; ShellCheck publishes none, so its digest was computed from the release archive on 2026-10-10 |
 | Developer tools | `cargo install --locked` with an exact `--version` in `mask deps`, `mask coverage-install`, and the devcontainer setup; the tarpaulin hint `mask coverage` prints uses the same form | Pinned by hand: the versions repeat in `maskfile.md`, `post-create.sh`, and the [development guide](development.md#toolchain), cargo-llvm-cov 0.9.1 also in the CI coverage job, and nothing checks that they agree |
-| SoftDevice, Renode, Robot Framework | Download URLs and versions without digests | Gap; see [security](security.md#supply-chain) |
+| Renode | Version 1.16.1 and the portable archive's SHA-256 in [install-renode.sh](../scripts/install-renode.sh), checked before extraction | Enforced; another version needs `RENODE_SHA256` |
+| SoftDevice, Robot Framework | Download URL and versions without digests | Gap; see [security](security.md#supply-chain) |
 
 The action pins and their comments are:
 
@@ -877,24 +878,39 @@ checkout; `draft`, `prerelease`, `target_commitish`, `files`,
 
 ### Auditing
 
-`cargo audit` runs in every CI run, including the weekly schedule, with the
-settings in [.cargo/audit.toml](../.cargo/audit.toml). Since 2026-10-10
-`deny = ["warnings"]` makes it fail on unmaintained, unsound, and yanked crates
-as well as on vulnerability advisories, so a new advisory against any crate in
-`Cargo.lock` fails the next push or weekly run. Two advisories are ignored by
-ID, each with a comment naming the chain and what would remove it; an ignore
-covers that advisory only, so a different advisory against the same crate
-still fails.
+`cargo deny --locked check` runs in every CI run, including the weekly
+schedule, with the settings in [deny.toml](../deny.toml). It checks the whole
+graph with every feature enabled, so the firmware's crates count, not only the
+host library's:
+
+- **Advisories.** It fails on unmaintained, unsound, and yanked crates as well
+  as on vulnerability advisories, so a new advisory against any crate in
+  `Cargo.lock` fails the next push or weekly run. Two advisories are ignored by
+  ID, each with a comment naming the chain and what would remove it; an ignore
+  covers that advisory only, so a different advisory against the same crate
+  still fails.
+- **Licenses.** Every crate must declare a license on the allow list
+  (`Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `GPL-3.0-only`, `MIT`,
+  `Unicode-3.0`), each of which GPL-3.0 can incorporate. A new crate under any
+  other license fails the job and names the crate and its license.
+  `nrf-softdevice-s140` declares only a license file, Nordic's 5-clause
+  license; `deny.toml` names it and allows it for that crate alone, pinned to
+  the file's hash. Whether that license may be linked into a `GPL-3.0-only`
+  binary is an open question in
+  [TODO.md](../TODO.md#needs-your-input) ([licenses](deployment.md#third-party-components-and-licenses)).
+- **Sources.** Crates come from crates.io, or from the pinned
+  `nrf-softdevice` Git repository; any other registry or Git source fails.
+
+The job replaced `cargo audit` with the same two ignores on 2026-10-30.
 
 | Crate | Advisory (ignored) | Pulled in by | What removes it |
 | --- | --- | --- | --- |
 | `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. 0.7.9 is the newest release, and cortex-m's main branch still depends on `bare-metal` 0.2 (checked 2026-10-10, commit `f259e37`) |
 | `proc-macro-error 1.0.4` | `RUSTSEC-2024-0370` (unmaintained) | `maybe-async-cfg 0.2.4`, which `ssd1306 0.10.0` pins with `=0.2.4` | `maybe-async-cfg 0.2.5` replaced it with `manyhow`, but neither the `ssd1306` 0.10.0 release nor its main branch (commit `79cb629`, checked 2026-10-10) accepts 0.2.5. Raising the pin alone does not work: `ssd1306` then fails to compile with 19 errors, because 0.2.5 generates the async variants differently (tried on 2026-10-10 with a patched copy), so `ssd1306` itself needs porting or replacing |
 
-The 2026-10-10 run of cargo-audit 0.22.2 against the then-current advisory
-database (1296 advisories, 169 locked crates) found no vulnerabilities and only
-these two warnings; with the configuration it exits 0, and with either ignore
-removed it exits 1. Removing them means upgrading or replacing other crates,
+On 2026-10-30 cargo-deny 0.20.2 found no vulnerabilities and only these two
+warnings; with the configuration it exits 0, and with either ignore or the
+`BSD-2-Clause` allowance removed it exits 1. Removing them means upgrading or replacing other crates,
 not changing bt2usb code; the options are in
 [TODO.md](../TODO.md#release-provenance-and-supply-chain).
 
@@ -922,7 +938,7 @@ code change:
 
 Adding a dependency needs a reason in the pull request, a check that it
 supports `no_std` without an allocator if the firmware uses it, its license
-(the crate is `GPL-3.0-only`), and a `cargo audit` run.
+(the crate is `GPL-3.0-only`), and a `cargo deny --locked check` run.
 
 ## Binary Size And Memory Budgets
 
@@ -1059,7 +1075,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) (P1) for the parsers; the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
 | No size, stack, or SoftDevice RAM budget is measured or enforced | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0); release size budgets in [Reproducible firmware evidence](../TODO.md#release-provenance-and-supply-chain) (P1). Since 2026-10-11 an overflow faults in the MPU guard instead of corrupting statics ([ADR 0026](adr/0026-mpu-stack-guard.md)); the guard's hardware evidence is the self-test's `stack guard` stage and optional deliberate overflow |
 | Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
-| No license check, SBOM, or digest check for SoftDevice and Renode downloads | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| No SBOM or digest check for the SoftDevice download | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 
 ## Related Guides

@@ -46,7 +46,7 @@ produce a draft, and only a person publishes it.
 | Event | Jobs in [ci.yml](../.github/workflows/ci.yml) | Result |
 | --- | --- | --- |
 | Push to `main` or `master`, pull request | Host tests (Linux, Windows), dependency audit, embedded build and Clippy, Renode simulation | Checks only; the embedded job also uploads a staged `bt2usb-checked-firmware-<attempt>` workflow artifact, which is not attested or released |
-| Weekly schedule (Mondays, 07:23 UTC) and manual dispatch | Same as a push | Re-runs every check, including `cargo audit` against the current advisory database |
+| Weekly schedule (Mondays, 07:23 UTC) and manual dispatch | Same as a push | Re-runs every check, including `cargo deny` against the current advisory database |
 | Push of a tag matching `v*` | All of the above, then `release-package` and `release` | An attested draft release for that tag |
 
 Runs for the same ref cancel an older in-progress run, except for tags: a tag
@@ -596,12 +596,15 @@ Installation](#softdevice-installation)). A release package contains the
 firmware, its build inputs, and the provenance files, but not `LICENSE` or any
 third-party license text.
 
-No tool checks licenses today, and this guide does not assess whether these
-licenses permit distributing the firmware under `GPL-3.0-only`. That review is
-part of the dependency and license gate above; a license inventory and an
-automated license check are the open items "Security maintenance ownership" and
-"Supply-chain and tooling maintenance" in
-[TODO.md](../TODO.md#release-provenance-and-supply-chain).
+Since 2026-10-30 the CI audit checks every crate's declared license against
+an allow list of licenses GPL-3.0 can incorporate
+([auditing](code-quality.md#auditing)). `nrf-softdevice-s140` is the one
+exception: Nordic's 5-clause license in its `LICENSE-NORDIC` allows use only
+with a Nordic integrated circuit and forbids reverse engineering binaries,
+which are further restrictions GPL-3.0 does not let a combined work add. This
+guide does not decide whether linking those bindings into a `GPL-3.0-only`
+binary is permitted; that question is listed under
+[Needs Your Input](../TODO.md#needs-your-input).
 
 ## Validation Limits
 

@@ -176,6 +176,7 @@ jobs:
       - name: Fail below the line-coverage floor
         run: cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"
 
+  # Advisories, licenses, and crate sources, with the settings in deny.toml.
   audit:
     name: Dependency security audit
     runs-on: ubuntu-24.04
@@ -184,16 +185,24 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # `cargo audit` runs through the rustup proxy, so install the pinned
+      # `cargo deny` runs through the rustup proxy, so install the pinned
       # toolchain explicitly instead of letting rustup auto-install it.
       - name: Install pinned Rust toolchain
         run: |
           rustup install
           rustup show active-toolchain
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
-        with:
-          tool: cargo-audit@0.22.2
-      - run: cargo audit
+      - name: Install pinned cargo-deny
+        env:
+          DENY_VERSION: 0.20.2
+          DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+        run: |
+          name="cargo-deny-${DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 -o "$RUNNER_TEMP/$name.tar.gz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${DENY_VERSION}/$name.tar.gz"
+          echo "$DENY_SHA256  $RUNNER_TEMP/$name.tar.gz" | sha256sum --check --strict
+          tar -xzf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP" --strip-components=1 "$name/cargo-deny"
+          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
+      - run: cargo deny --locked check
 
   # Embedded clippy (deny warnings) + release build for the nRF52840 target.
   embedded:

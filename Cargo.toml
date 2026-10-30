@@ -6,6 +6,7 @@ rust-version = "1.95"
 authors = ["bt2usb contributors"]
 description = "Bluetooth-to-USB HID bridge for nRF52840 - converts BLE keyboard/mouse input to USB HID output"
 license = "GPL-3.0-only"
+publish = false
 readme = "README.md"
 keywords = ["bluetooth", "usb", "hid", "embedded", "nrf52840"]
 categories = ["embedded", "no-std", "hardware-support"]

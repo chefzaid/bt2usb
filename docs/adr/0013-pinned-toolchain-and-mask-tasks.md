@@ -169,7 +169,7 @@ Negative:
   every build since 2026-10-10. CI also runs the release-helper unit tests,
   actionlint, Ruff, and ShellCheck (Linux; `mask lint-scripts` runs the last
   two locally), the tag and version check on tags, the host coverage
-  floor ([ADR 0023](0023-host-coverage-floor.md)), `cargo audit`, the Renode
+  floor ([ADR 0023](0023-host-coverage-floor.md)), `cargo deny`, the Renode
   simulation test, a Windows host job, and release staging. Run `mask sim-test` locally when touching the simulation or
   shared reducers.
 - Local and released firmware differ in log level. `.cargo/config.toml` sets
@@ -181,8 +181,8 @@ Negative:
   with an exact `--version`; the versions repeat in `maskfile.md`,
   `post-create.sh`, and the development guide, and cargo-llvm-cov's also in
   the CI coverage job, with no check that they agree.
-  The devcontainer base image tag `1-bookworm` still moves, and
-  `scripts/install-renode.sh` downloads Renode 1.16.1 without a checksum.
+  The devcontainer base image tag `1-bookworm` still moves; since 2026-10-30
+  `scripts/install-renode.sh` checks Renode's archive against a SHA-256.
 - The privileged devcontainer has broad access to the host. Review it before
   using it on a shared machine.
 
@@ -190,8 +190,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 - "Development environment hardening": pin the container inputs, and replace
   blanket container privilege with scoped probe access.
-- "Supply-chain and tooling maintenance": add license checks, an SBOM, and
-  verified digests for downloaded non-Cargo tools and the SoftDevice.
+- "Supply-chain and tooling maintenance": add an SBOM and a verified digest
+  for the SoftDevice download (license checks and the Renode digest landed on
+  2026-10-30).
 - "Reproducible firmware evidence": compare artifacts from two clean
   environments and document remaining nondeterminism.
 

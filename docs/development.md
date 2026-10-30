@@ -128,7 +128,7 @@ versions are pinned in three places that must change together: the `deps` and
 | cargo-tarpaulin | 0.37.5 in the install hint `mask coverage` prints; optional, Linux only | Coverage fallback |
 | cargo-binutils | 0.4.0 in `mask deps` and the devcontainer setup | `mask size` |
 | cargo-bloat | 0.12.1 in `mask deps` (the devcontainer does not install it) | `mask bloat` |
-| cargo-audit | 0.22.2 in the CI `audit` job | Dependency audit |
+| cargo-deny | 0.20.2 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml); settings in [deny.toml](../deny.toml) | Dependency audit |
 | actionlint | 1.7.12 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml) | Workflow lint |
 | Ruff | 0.16.9 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml); settings in [ruff.toml](../ruff.toml) | Python lint and formatting (`mask lint-scripts`) |
 | ShellCheck | 0.11.0 plus SHA-256 in [ci.yml](../.github/workflows/ci.yml) | Shell script and recipe lint (`mask lint-scripts`), and actionlint's `run:` checks |
@@ -154,13 +154,12 @@ rustup toolchain install 1.95.0 --profile minimal \
 Release packaging refuses build metadata whose recorded compiler is not the
 pinned 1.95.0, so do not override the toolchain (`cargo +stable`,
 `RUSTUP_TOOLCHAIN`) for anything that becomes evidence. To reproduce CI's audit
-locally, install the same version; it reads
-[.cargo/audit.toml](../.cargo/audit.toml), so it fails on the same warnings and
-ignores the same two advisories:
+locally, install the same version; it reads [deny.toml](../deny.toml), so it
+fails on the same advisories, licenses, and sources:
 
 ```sh
-cargo install --locked cargo-audit --version 0.22.2
-cargo audit
+cargo install --locked cargo-deny --version 0.20.2
+cargo deny --locked check
 ```
 
 ## Build Configurations
@@ -394,7 +393,7 @@ keeps the SoftDevice. The scenario and assertions are described in
 
 | Task | Runs | Notes |
 | --- | --- | --- |
-| `mask deps` | `rustup target add thumbv7em-none-eabihf`; `cargo install --locked` of probe-rs-tools 0.32.0, cargo-binutils 0.4.0, cargo-bloat 0.12.1, and mask 0.11.7; `mask coverage-install`; `rustup component add llvm-tools` | Needs mask already. Does not install Renode, cargo-audit, or actionlint |
+| `mask deps` | `rustup target add thumbv7em-none-eabihf`; `cargo install --locked` of probe-rs-tools 0.32.0, cargo-binutils 0.4.0, cargo-bloat 0.12.1, and mask 0.11.7; `mask coverage-install`; `rustup component add llvm-tools` | Needs mask already. Does not install Renode, cargo-deny, or actionlint |
 | `mask devcontainer` | `code --folder-uri "vscode-remote://dev-container+<hex of $PWD>/workspaces/bt2usb"` | Opens the folder in the devcontainer; needs VS Code's `code` CLI and `xxd` |
 | `mask devcontainer-build` | `devcontainer build --workspace-folder .` | Needs the Dev Containers CLI |
 
@@ -519,7 +518,7 @@ USB port attached to the PC whose enumeration/input behavior you are testing.
 5. prints tool versions and runs `cargo test --locked --lib --tests`; setup
    fails if the host tests fail
 
-It does not install Renode, cargo-bloat, cargo-audit, actionlint, Ruff, or
+It does not install Renode, cargo-bloat, cargo-deny, actionlint, Ruff, or
 ShellCheck; run
 `mask sim-setup` inside the container for the simulation.
 
@@ -607,7 +606,7 @@ in a public issue. See the [security policy](../SECURITY.md).
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
 | `sim.rs`, `sim_ble.rs`, `stack.rs`, `ui/buttons.rs`, `ui/display.rs`, or `renode/` | `mask ci`, `mask sim-test` | For `stack.rs`, also the self-test's stack guard and deliberate overflow stages on a board ([first flash](first-flash.md#2-self-test-image)) |
 | The display font, or the `embedded-graphics` version | `cargo test --locked --test oled_font`, which also checks that `display.rs` draws in `FONT_6X10`; when only the glyphs changed, `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font` rewrites [oled-font-6x10.txt](../renode/oled-font-6x10.txt); then `mask sim-test` | Review the glyph table diff. A font with another cell size also needs the test's font, the text reader's cell size in [ssd1306.cs](../renode/ssd1306.cs), and the baselines in `ui::layout` changed ([OLED checks](testing.md#oled-checks)) |
-| `Cargo.toml`, `Cargo.lock`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo audit` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
+| `Cargo.toml`, `Cargo.lock`, `deny.toml`, or `vendor/` | `mask ci`, `mask sim-test`, `cargo deny --locked check` | Board checks when a HAL, USB, SoftDevice, or storage crate moved |
 | `memory_sd.x`, storage constants, or `build.rs` | `mask ci` (its Markdown check compares the documented memory map), `mask size` | Self-test flash stage and the `softdevice RAM` log |
 | `.github/workflows/ci.yml` | `actionlint` with `shellcheck` on `PATH` | A hosted run |
 | `scripts/release.py` or `.github/release-notes.md` | Release-helper tests, `mask lint-scripts` | The first hosted tag run ([deployment](deployment.md#validation-limits)) |

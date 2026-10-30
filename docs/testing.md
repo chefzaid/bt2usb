@@ -66,14 +66,14 @@ PowerShell, use the direct command.
 | API documentation, every build, warnings denied | `mask rustdoc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
 | Workflow lint | — | `actionlint` |
 | Python and shell lint | `mask lint-scripts` | `python scripts/lint_scripts.py` (Ruff and ShellCheck), and its tests with `python -m unittest discover -s scripts -p "lint_scripts_test.py" -v` |
-| Dependency audit | — | `cargo audit` |
+| Dependency audit | — | `cargo deny --locked check` |
 | Board self-test | `mask selftest` | `cargo run --locked --features embedded --target thumbv7em-none-eabihf --release --bin bt2usb-selftest -- --no-catch-hardfault` |
 | Local software gate | `mask ci` | See [what `mask ci` covers](#local-and-ci-coverage-compared) |
 
 `mask sim-setup` installs Renode and the `renode-test` dependencies, and
 `mask coverage-install` installs `cargo-llvm-cov`. `actionlint`, Ruff,
-ShellCheck, and `cargo audit` are not installed by any mask recipe; CI pins
-actionlint 1.7.12, Ruff 0.16.9, ShellCheck 0.11.0, and cargo-audit 0.22.2. [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)
+ShellCheck, and cargo-deny are not installed by any mask recipe; CI pins
+actionlint 1.7.12, Ruff 0.16.9, ShellCheck 0.11.0, and cargo-deny 0.20.2. [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md)
 explains the pinned toolchain, `--locked`, and the mask wrappers.
 
 ## Host Tests And Coverage
@@ -627,7 +627,7 @@ Cargo command and install no toolchain.
 | --- | --- | --- |
 | Host tests (`ubuntu-24.04`, `windows-2025`) | Both, 20 min, `fail-fast: false` | `cargo fmt --package bt2usb -- --check`; on Linux, the 500-line limit for every `.rs` file under `src/`, `tests/`, and `build.rs` and every `.rs` or `.py` file under `scripts/`, and a `//!` module comment for every `.rs` file; release-helper tests; on Linux, the documentation checker's tests and `scripts/check_docs.py` ([Markdown checks](code-quality.md#markdown-checks)); on Linux, install actionlint 1.7.12, Ruff 0.16.9, and ShellCheck 0.11.0 (each SHA-256 verified), run the script linter's tests and `scripts/lint_scripts.py` ([Python and shell checks](code-quality.md#python-and-shell-checks)), and run actionlint; on `v*` tags, `release.py validate-tag`; `cargo test --locked --lib --tests`; host Clippy with `-D warnings`; host rustdoc with private items and `RUSTDOCFLAGS=-D warnings` |
 | Host coverage | Ubuntu, 20 min | Add the `llvm-tools` component; install cargo-llvm-cov 0.9.1; `cargo llvm-cov --locked --lib --tests --no-report`; write the summary, lcov, and HTML reports; upload them; fail when line coverage is below `COVERAGE_MIN_LINES` (97) |
-| Dependency security audit | Ubuntu, 10 min | `rustup install`; `cargo audit` with cargo-audit 0.22.2 and [.cargo/audit.toml](../.cargo/audit.toml), which denies warnings and ignores two advisories by ID |
+| Dependency security audit | Ubuntu, 10 min | `rustup install`; install cargo-deny 0.20.2 (SHA-256 verified); `cargo deny --locked check` with [deny.toml](../deny.toml): advisories (two ignored by ID), licenses, and sources ([auditing](code-quality.md#auditing)) |
 | Embedded build & clippy | Ubuntu, 25 min | Embedded Clippy with `-D warnings`, without and with the `log-sensitive-data` opt-in; rustdoc with private items and warnings denied for the embedded library, then for `bt2usb` and `bt2usb-selftest`; release build (firmware and self-test); `release.py stage` with `llvm-objcopy` into the runner's temporary directory; upload |
 | Renode simulation test | Ubuntu, 20 min | Simulation Clippy with `-D warnings`; rustdoc with private items and warnings denied for `bt2usb-sim`; simulation build; `scripts/install-renode.sh`; `renode-test --results-dir` on the Robot file; upload results even on failure |
 | Verify and attest release package | Ubuntu, 10 min, `v*` tag pushes only, after every check job | `validate-tag`; download this run's embedded artifact by ID with digest checking; `release.py package` against the expected commit, repository, and run ID; GitHub provenance attestation; add `provenance.sigstore.json`; upload; `release.py notes` from the package; upload the notes separately |
@@ -824,7 +824,7 @@ Specific to the current workflow and test tree:
   that job installs them; no mask recipe installs them locally.
 - rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
   documentation is not built or checked.
-- `cargo audit` ignores two unmaintained-crate advisories by ID, because no
+- `cargo deny` ignores two unmaintained-crate advisories by ID, because no
   released dependency lets the graph drop them; any other warning fails the
   job ([auditing](code-quality.md#auditing)).
 - Connection workers, the security handler, the GATT HID and Device

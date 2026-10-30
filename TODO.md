@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 17 | 0 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 17 | 1 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
-| [Documentation](#documentation) | 8 | 0 | 0 |
-| [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **156** | **63** | **20** |
+| [Documentation](#documentation) | 8 | 1 | 0 |
+| [Product Extensions](#product-extensions) | 0 | 32 | 0 |
+| **Total** | **156** | **69** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -240,8 +240,10 @@ it becomes workable again.
 - Keep this file the single plan. Add new work here before starting it, as an
   unchecked item with a priority and an acceptance criterion; do not track open
   work only in a guide, an issue, or a code comment.
-- Close hardware and security gates before adding product features. A P2 item
-  must not weaken a guarantee that a P0 or P1 item depends on.
+- Close hardware and security gates before adding product features, except the
+  [Clearer Bridge Screens](#clearer-bridge-screens) items, which need neither a
+  board nor a decision and change no gate. A P2 item must not weaken a
+  guarantee that a P0 or P1 item depends on.
 - Put decisions in hardware-free modules with host tests and keep task code thin
   ([ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)). Bound and validate
   every peer- or flash-controlled value before use.
@@ -1153,6 +1155,16 @@ Host tests, simulation, and code-health work. Context:
   ([code quality](docs/code-quality.md#file-length); `src/ble/bonder.rs`,
   `src/ble/slot_worker.rs`, `src/usb/host_requests.rs`,
   `src/hid_classify_tests.rs`, `.github/workflows/ci.yml`).
+- [ ] **P1** **Run the simulation on the coordinator loop.** `src/sim_ble.rs`
+  repeats `ble::coordinator_loop`'s order of reducer calls by hand (its
+  `command`, `execute`, and `manage`), so the Renode scenario checks a copy
+  that can drift from the loop the firmware runs. Implement `CoordinatorIo`
+  for the simulation, with connection workers that answer at once and the
+  RAM-backed pairing item it already has, and run `coordinator_loop::run`
+  itself. Accept when `sim_ble.rs` keeps no copy of the loop's dispatch, the
+  scripted steps reach the loop as slot events and UI commands, and the Renode
+  scenario passes with the same checks
+  ([Renode simulation](docs/testing.md#renode-simulation)).
 
 ## Release, Provenance And Supply Chain
 
@@ -1447,6 +1459,11 @@ Guides, ADRs, and this plan. Context:
   count in the real guide failed it
   ([Markdown checks](docs/code-quality.md#markdown-checks),
   [validation record](docs/validation-records.md#validation-record--2026-10-30-test-count-check)).
+- [ ] **P2** **Check the Status At A Glance counts.** The table at the top of
+  this plan is kept by hand and must change with every item checked or added.
+  Accept when the documentation checker fails on a section whose done, open,
+  or open P0 count differs from its items, and on a wrong total, with a
+  regression test ([Markdown checks](docs/code-quality.md#markdown-checks)).
 
 ## Product Extensions
 
@@ -1480,6 +1497,59 @@ that purpose and follows these rules:
 None of these items is started. Each needs its decision first where an "ADR:"
 item is listed. Context:
 [features](docs/features.md#current-technical-boundaries).
+
+### Clearer Bridge Screens
+
+Small, software-only changes to what the bridge's own screen shows, added on
+2026-10-30 at the owner's request. Each needs neither a board nor an owner
+decision, changes no radio, USB, or storage behavior, and leaves every gate
+above as it is, so the loop takes them before those gates close. Host tests
+and the Renode scenario, which reads each screen back from the modelled panel,
+verify them; a board confirms them with the rest of the
+[first-flash checklist](docs/first-flash.md).
+
+- [ ] **P2** **List scan results strongest first.** The Select device list
+  keeps the order in which the scan first heard each HID advertiser
+  (`merge_advertisement` in `src/ble/scan_list.rs` appends a newcomer, or puts
+  it in the weakest one's place when the list is full), so the keyboard in
+  pairing mode next to the bridge can sit below a neighbour's. Sort the list
+  strongest first when the scan ends, before it is reported, so the screen and
+  the index that `Command::Connect` carries see the same order; equal signals
+  keep the order heard, and a device without a measured signal goes last.
+  Accept when scan-list tests cover the order, ties, and an unmeasured signal,
+  and the Renode scenario, whose scan hears its weaker mouse first, lists the
+  keyboard first ([features](docs/features.md#scanning)).
+- [ ] **P2** **Name both connected devices.** With two links up, the Connected
+  screen shows `2 devices` (`connection_summary` in `src/ble/coordinator.rs`),
+  so a glance cannot tell whether the mouse came back after it slept. Show
+  each connected device's name on its own line, in slot order, and keep the
+  screen's buttons as they are. Accept when coordinator, controller, and layout
+  tests cover one link, two links, and the loss of either, and the Renode
+  scenario reads both names back from the modelled panel
+  ([features](docs/features.md#screens-and-buttons)).
+- [ ] **P2** **Show that saved devices are reconnecting.** Home reads
+  `bt2usb / Idle` while the bridge is still reconnecting saved devices at
+  power-up or after a link drops, so nothing tells the user to wake the
+  keyboard. Show `bt2usb / Reconnecting` while any slot holds a saved device
+  without a link (occupied but inactive in `ConnManager`), and `Idle` again
+  once none does: the device connects, its retry stops with an error such as
+  `Pair device again`, or a scan, Disconnect, Forget, or Factory reset frees
+  the slot. Accept when coordinator and controller tests cover power-up, link
+  loss, a stopped retry, and each command that frees a slot, and the Renode
+  scenario reads it back from the modelled panel
+  ([features](docs/features.md#boot-and-reconnect)).
+- [ ] **P2** **Bridge information screen.** The firmware version, source
+  commit, and last reset cause reach only the RTT log (`src/diagnostics.rs`),
+  so reading them needs a debug probe, which a user reporting a defect from a
+  bridge behind a monitor does not have. Add a screen, reachable from Home and
+  Connected without disconnecting anything, that shows the version, the
+  commit's first eight characters with its `-dirty` mark, and the last reset
+  cause, and goes back on SELECT. It shows no device name, address, or key.
+  Accept when reducer and layout tests cover the screen, a dirty commit, and
+  several reset causes, the Renode scenario reads the version back from the
+  modelled panel, and the
+  [defect-reporting steps](docs/operations.md#reporting-a-defect) say where to
+  find it.
 
 ### Shared Decisions
 
@@ -1574,14 +1644,15 @@ from its own controls, and frequent actions also from the keyboard.
   reducer tests cover each setting, a corrupt settings item restores defaults
   while saved devices still reconnect, and settings survive a reboot on a board
   ([features](docs/features.md#screens-and-buttons)).
-- [ ] **P2** **Link status screen.** *(hardware)* The Connected screen shows one
-  device name or `2 devices`. Add a status view that lists each slot's device,
-  whether it delivers keyboard, mouse, or consumer input, and its live signal
-  strength, so the bridge can be placed where a monitor stand does not block
-  the radio; the stored `last_rssi` is a scan-time hint only. The view also
-  shows the firmware version from "Diagnostics without sensitive input" and
-  whether a slot is retrying in the background. Accept when reducer tests cover connected, retrying, and empty
-  slots and a board shows the signal strength change as a peripheral moves
+- [ ] **P2** **Link status screen.** *(hardware)* Add a status view that lists
+  each slot's device, whether it delivers keyboard, mouse, or consumer input,
+  whether it is retrying in the background, and its live signal strength, so
+  the bridge can be placed where a monitor stand does not block the radio; the
+  stored `last_rssi` is a scan-time hint only. The device names on the
+  Connected screen and the firmware version come first, under
+  [Clearer Bridge Screens](#clearer-bridge-screens). Accept when reducer tests
+  cover connected, retrying, and empty slots and a board shows the signal
+  strength change as a peripheral moves
   ([features](docs/features.md#screens-and-buttons)).
 - [ ] **P2** **Peripheral battery level.** *(hardware)* Discover the Battery
   Service (`0x180F`) and subscribe to Battery Level (`0x2A19`) when a

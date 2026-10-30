@@ -25,6 +25,11 @@ fn mgr() -> ConnManager<Addr> {
     ConnManager::new()
 }
 
+/// The `Connected` event naming these devices.
+fn shows(names: &[&str]) -> UiEvent {
+    UiEvent::Connected(names.iter().map(|&name| dev(0, name).name).collect())
+}
+
 // ── ConnManager state machine ──────────────────────────────────────────
 
 #[test]
@@ -97,15 +102,20 @@ fn find_empty_slot_fills_then_returns_none() {
 }
 
 #[test]
-fn summary_reflects_connection_count() {
+fn link_state_names_each_connected_device_in_slot_order() {
     let mut m = mgr();
-    assert_eq!(connection_summary(&m).as_str(), "Connected");
-
-    m.connect_slot(0, &dev(1, "Keyboard"));
-    assert_eq!(connection_summary(&m).as_str(), "Keyboard");
+    assert_eq!(link_state(&m), UiEvent::Disconnected);
 
     m.connect_slot(1, &dev(2, "Mouse"));
-    assert_eq!(connection_summary(&m).as_str(), "2 devices");
+    assert_eq!(link_state(&m), shows(&["Mouse"]));
+
+    m.reserve_slot(0, &dev(1, "Keyboard"));
+    assert_eq!(link_state(&m), shows(&["Mouse"]));
+    m.connect_slot(0, &dev(1, "Keyboard"));
+    assert_eq!(link_state(&m), shows(&["Keyboard", "Mouse"]));
+
+    m.disconnect_slot(1);
+    assert_eq!(link_state(&m), shows(&["Keyboard"]));
 }
 
 // ── Reducers ────────────────────────────────────────────────────────────
@@ -167,10 +177,7 @@ fn plan_connect_already_connected_acknowledges_without_duplicate_connect() {
     m.connect_slot(0, &dev(7, "kb"));
     let devices = [dev(7, "kb")];
     let acts = plan_connect(&mut m, &devices, 0, PartialEq::eq);
-    assert_eq!(
-        acts.as_slice(),
-        &[Action::Emit(UiEvent::Connected(dev(7, "kb").name))]
-    );
+    assert_eq!(acts.as_slice(), &[Action::Emit(shows(&["kb"]))]);
     assert_eq!(m.active_count(), 1);
     assert_eq!(m.occupied_count(), 1);
 }
@@ -216,14 +223,7 @@ fn on_slot_connected_persists_and_emits_summary() {
     let acts = on_slot_connected(&mut m, 0, attempt, &kb);
     assert_eq!(acts.len(), 2);
     assert!(matches!(acts[0], Action::PersistDevice(_)));
-    assert_eq!(
-        acts[1],
-        Action::Emit(UiEvent::Connected({
-            let mut s: String<32> = String::new();
-            let _ = s.push_str("Keyboard");
-            s
-        }))
-    );
+    assert_eq!(acts[1], Action::Emit(shows(&["Keyboard"])));
     assert_eq!(m.active_count(), 1);
 }
 
@@ -243,14 +243,7 @@ fn on_slot_disconnected_with_other_link_emits_summary() {
     m.connect_slot(1, &dev(2, "Mouse"));
     let acts = on_slot_disconnected(&mut m, 0, attempt);
     // Slot 0 gone, slot 1 ("Mouse") remains.
-    assert_eq!(
-        acts[0],
-        Action::Emit(UiEvent::Connected({
-            let mut s: String<32> = String::new();
-            let _ = s.push_str("Mouse");
-            s
-        }))
-    );
+    assert_eq!(acts[0], Action::Emit(shows(&["Mouse"])));
 }
 
 #[test]
@@ -328,14 +321,7 @@ fn on_slot_link_lost_with_other_link_reports_summary() {
     let attempt = m.connect_slot(0, &kb);
     m.connect_slot(1, &dev(2, "Mouse"));
     let acts = on_slot_link_lost(&mut m, 0, attempt, &kb);
-    assert_eq!(
-        acts[0],
-        Action::Emit(UiEvent::Connected({
-            let mut s: String<32> = String::new();
-            let _ = s.push_str("Mouse");
-            s
-        }))
-    );
+    assert_eq!(acts[0], Action::Emit(shows(&["Mouse"])));
     assert_eq!(m.occupied_count(), 2);
 }
 

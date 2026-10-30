@@ -229,8 +229,8 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Wait For Line On Uart     cmd: Connect(1)
     Wait For Line On Uart     action: ConnectSlot slot=1 addr=0xb2
     Wait For Line On Uart     holds 2 device(s); reload matches
-    Wait For Line On Uart     event: Connected '2 devices' -> screen Connected (selected 0)    pauseEmulation=true
-    Oled Should Show          Connected    2 devices    SEL:add DOWN:disc    UP:saved devices
+    Wait For Line On Uart     event: Connected 'Keyboard', 'Mouse' -> screen Connected (selected 0)    pauseEmulation=true
+    Oled Should Show          Connected    Keyboard    Mouse    SEL:add DOWN:disc    UP:saved devices
 
     # Step 1: the mouse is already connected, so plan_connect only reports the
     # links again. Step 2: the keyboard's link drops; on_slot_link_lost keeps

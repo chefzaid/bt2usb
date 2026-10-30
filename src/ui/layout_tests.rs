@@ -191,16 +191,27 @@ fn reset_confirmation_warns_that_every_link_drops() {
 }
 
 #[test]
-fn status_screens_show_the_name_or_message_under_the_title() {
+fn status_screens_show_the_names_or_message_under_the_title() {
     let mut connected = state(Screen::Connected);
-    connected.connected_name = name("2 devices");
+    connected.connection_status(&[name("Keyboard"), name("Mouse")]);
     assert_eq!(
         shown(&connected),
         [
             (10, "Connected".into()),
-            (24, "2 devices".into()),
-            (40, "SEL:add DOWN:disc".into()),
-            (54, "UP:saved devices".into()),
+            (23, "Keyboard".into()),
+            (33, "Mouse".into()),
+            (46, "SEL:add DOWN:disc".into()),
+            (58, "UP:saved devices".into()),
+        ]
+    );
+    connected.connection_status(&[name("Mouse")]);
+    assert_eq!(
+        texts(&connected),
+        [
+            "Connected",
+            "Mouse",
+            "SEL:add DOWN:disc",
+            "UP:saved devices"
         ]
     );
     let mut error = state(Screen::Error);

@@ -165,8 +165,8 @@ impl<A: Clone> UiController<A> {
                 }
             }
             Event::ScanComplete => self.state.scan_complete(),
-            Event::Connected(name) => self.state.connection_status(Some(name)),
-            Event::Disconnected => self.state.connection_status(None),
+            Event::Connected(names) => self.state.connection_status(&names),
+            Event::Disconnected => self.state.connection_status(&[]),
             Event::Error(tag) => self.state.error(error_message(tag)),
             Event::Notice(notice) => self.state.paired(notice_message(notice)),
             Event::PairedDevices { id, devices } => {

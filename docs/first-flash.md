@@ -220,7 +220,7 @@ currently unauthenticated Just Works bonding; see
       pick it with UP/DOWN and press SELECT. The OLED shows it connected and
       typing reaches the PC.
 - [ ] **Pair a mouse** the same way (SELECT on the Connected screen starts
-      another scan). Both keep working at once, and the OLED shows "2 devices".
+      another scan). Both keep working at once, and the OLED names both.
 - [ ] **Media keys** (volume, play/pause) work, if the keyboard has them.
 - [ ] **PnP ID:** for each peripheral, record its `slot N PnP ID: …` line,
       which follows `HID notification loop started`, or the line saying it

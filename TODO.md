@@ -38,8 +38,8 @@ probe, or USB host to close.
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
-| [Product Extensions](#product-extensions) | 1 | 31 | 0 |
-| **Total** | **158** | **67** | **20** |
+| [Product Extensions](#product-extensions) | 2 | 30 | 0 |
+| **Total** | **159** | **66** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1527,14 +1527,20 @@ verify them; a board confirms them with the rest of the
   and `src/sim_ble.rs` before the list is reported
   ([validation record](docs/validation-records.md#validation-record--2026-10-30-strongest-first-scan-list))
   *(hardware evidence pending)*.
-- [ ] **P2** **Name both connected devices.** With two links up, the Connected
-  screen shows `2 devices` (`connection_summary` in `src/ble/coordinator.rs`),
-  so a glance cannot tell whether the mouse came back after it slept. Show
+- [x] **P2** **Name both connected devices.** With two links up, the Connected
+  screen showed `2 devices` (`connection_summary` in `src/ble/coordinator.rs`),
+  so a glance could not tell whether the mouse came back after it slept. Show
   each connected device's name on its own line, in slot order, and keep the
   screen's buttons as they are. Accept when coordinator, controller, and layout
   tests cover one link, two links, and the loss of either, and the Renode
   scenario reads both names back from the modelled panel
-  ([features](docs/features.md#screens-and-buttons)).
+  ([features](docs/features.md#screens-and-buttons)). Done 2026-10-30: the
+  coordinator reports `Connected(LinkNames)`, each connected device's name
+  in slot order (`link_state` in `src/ble/coordinator.rs`,
+  `src/ble/messages.rs`), which `UiState::connected_names` keeps and
+  `src/ui/layout.rs` draws one per row
+  ([validation record](docs/validation-records.md#validation-record--2026-10-30-both-device-names-on-connected))
+  *(hardware evidence pending)*.
 - [ ] **P2** **Show that saved devices are reconnecting.** Home reads
   `bt2usb / Idle` while the bridge is still reconnecting saved devices at
   power-up or after a link drops, so nothing tells the user to wake the

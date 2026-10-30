@@ -484,7 +484,7 @@ which can be too late for a firmware setup key.
     slot's current one; otherwise it
     marks the slot connected and returns two actions in order: persist the
     device with its bond (`store.add`, then `save_to_flash`), then emit the
-    connection summary. Persisting marks the bond saved in `Bonder`, and when
+    connected devices' names. Persisting marks the bond saved in `Bonder`, and when
     the store evicts its oldest record to make room, drops that record's keys
     too (`Bonder::forget_identity`), so the keys in RAM follow the store. The UI shows Connected after the flash write finishes;
     a failed write shows "Kept until power-off" for a new or changed device
@@ -526,7 +526,7 @@ sequenceDiagram
     W->>P: discover HID, read Report Map, enable notifications
     W-->>C: SlotEvent Connected
     C->>C: persist device and bond to flash
-    C-->>UI: Connected summary
+    C-->>UI: Connected names
 ```
 
 DOWN on Connected sends `Disconnect`. `plan_disconnect` sends

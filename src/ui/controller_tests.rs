@@ -110,7 +110,7 @@ fn scan_results_are_listed_and_connect_sends_the_highlighted_index() {
     assert_eq!(ui.button(ButtonEvent::Down, 0), None);
     assert_eq!(ui.button(ButtonEvent::Select, 0), Some(Command::Connect(1)));
     assert_eq!(ui.state.screen, Screen::Connecting);
-    ui.event(Event::Connected(name("Mouse")));
+    ui.event(Event::Connected([name("Mouse")].into_iter().collect()));
     assert_eq!(ui.state.screen, Screen::Connected);
     assert_eq!(ui.button(ButtonEvent::Down, 0), Some(Command::Disconnect));
 }
@@ -181,7 +181,7 @@ fn forget_names_the_listed_address_and_reports_the_stored_result() {
     assert_eq!(address, 9);
     assert_eq!(ui.state.screen, Screen::Managing);
     // The coordinator reports the remaining link before the result.
-    ui.event(Event::Connected(name("Keyboard")));
+    ui.event(Event::Connected([name("Keyboard")].into_iter().collect()));
     assert_eq!(ui.state.screen, Screen::Managing);
     ui.event(Event::ManagementResult { id, result: Ok(()) });
     assert_eq!(ui.state.screen, Screen::Notice);
@@ -337,10 +337,10 @@ fn a_saved_pairing_tells_what_it_did_to_another_device() {
         assert_eq!(ui.button(ButtonEvent::Select, 0), Some(Command::Connect(0)));
         // The coordinator saves the device before it reports the link.
         ui.event(Event::Notice(notice));
-        ui.event(Event::Connected(name("Keyboard")));
+        ui.event(Event::Connected([name("Keyboard")].into_iter().collect()));
         assert_eq!(ui.state.screen, Screen::Paired);
         assert_eq!(ui.state.message, notice_message(notice));
-        assert_eq!(ui.state.connected_name, "Keyboard");
+        assert_eq!(ui.state.connected_names, [name("Keyboard")]);
         assert_eq!(ui.button(ButtonEvent::Select, 0), None);
         assert_eq!(ui.state.screen, Screen::Connected);
         assert!(ui.state.message.is_empty());
@@ -371,4 +371,23 @@ fn key_and_pairing_failures_read_apart_from_a_failed_link() {
     // holds no keys for is paired by selecting it again.
     assert_eq!(error_message(ErrorTag::KeysRejected), "Forget, pair again");
     assert_eq!(error_message(ErrorTag::KeysMissing), "Pair device again");
+}
+
+#[test]
+fn the_connected_screen_names_each_link_until_the_last_one_ends() {
+    let mut ui = UiController::<Addr>::new();
+    let names = |values: &[&str]| values.iter().map(|&value| name(value)).collect();
+    ui.event(Event::Connected(names(&["Keyboard", "Mouse"])));
+    assert_eq!(ui.state.screen, Screen::Connected);
+    assert_eq!(ui.state.connected_names, [name("Keyboard"), name("Mouse")]);
+    // Either link may end first; the other's name stays.
+    ui.event(Event::Connected(names(&["Mouse"])));
+    assert_eq!(ui.state.connected_names, [name("Mouse")]);
+    ui.event(Event::Connected(names(&["Keyboard", "Mouse"])));
+    ui.event(Event::Connected(names(&["Keyboard"])));
+    assert_eq!(ui.state.screen, Screen::Connected);
+    assert_eq!(ui.state.connected_names, [name("Keyboard")]);
+    ui.event(Event::Disconnected);
+    assert_eq!(ui.state.screen, Screen::Home);
+    assert!(ui.state.connected_names.is_empty());
 }

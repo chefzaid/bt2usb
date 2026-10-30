@@ -138,13 +138,13 @@ fn empty_store_still_offers_deliberate_factory_reset() {
 fn error_survives_followup_status_and_acknowledges_to_current_link() {
     let mut state = UiState::new();
     state.error("Connect failed");
-    state.connection_status(Some(heapless::String::try_from("Keyboard").unwrap()));
+    state.connection_status(&[heapless::String::try_from("Keyboard").unwrap()]);
     assert_eq!(state.screen, Screen::Error);
     assert_eq!(state.message, "Connect failed");
     assert_eq!(state.button(ButtonEvent::Down), Some(UiCommand::Dismiss));
     assert_eq!(state.screen, Screen::Connected);
     state.error("Flash write failed");
-    state.connection_status(None);
+    state.connection_status(&[]);
     assert_eq!(state.screen, Screen::Error);
     state.button(ButtonEvent::Down);
     assert_eq!(state.screen, Screen::Home);
@@ -155,7 +155,7 @@ fn background_status_and_scan_do_not_dismiss_confirmation() {
     let mut state = UiState::new();
     state.screen = Screen::ConfirmReset;
     state.selected = 1;
-    state.connection_status(None);
+    state.connection_status(&[]);
     state.scan_started();
     state.scan_complete();
     assert_eq!(state.screen, Screen::ConfirmReset);
@@ -180,7 +180,7 @@ fn timed_out_management_claims_no_outcome_and_reopens_the_list() {
         // The old snapshot may no longer match flash; it is read again.
         assert!(state.paired_names.is_empty());
         // A link update does not hide the notice.
-        state.connection_status(Some(heapless::String::try_from("Mouse").unwrap()));
+        state.connection_status(&[heapless::String::try_from("Mouse").unwrap()]);
         assert_eq!(state.screen, Screen::NoReply);
         assert_eq!(state.button(ButtonEvent::Up), Some(UiCommand::ListPaired));
         assert_eq!(state.screen, Screen::Managing);
@@ -308,7 +308,7 @@ fn a_new_link_returns_home_screens_to_connected_and_clears_the_list() {
     let mut state = UiState::new();
     let _ = state.devices.push(name("Keyboard"));
     state.selected = 1;
-    state.connection_status(Some(name("Keyboard")));
+    state.connection_status(&[name("Keyboard")]);
     assert_eq!(state.screen, Screen::Connected);
     assert!(state.devices.is_empty());
     assert_eq!(state.selected, 0);
@@ -323,11 +323,11 @@ fn a_background_link_change_keeps_a_user_scan_and_its_list() {
         let _ = state.devices.push(name("Mouse"));
         state.selected = 1;
         // A saved device reconnects, then drops, while the user picks.
-        state.connection_status(Some(name("Saved keyboard")));
+        state.connection_status(&[name("Saved keyboard")]);
         assert_eq!(state.screen, screen);
         assert_eq!(state.devices.len(), 2);
         assert_eq!(state.selected, 1);
-        state.connection_status(None);
+        state.connection_status(&[]);
         assert_eq!(state.screen, screen);
         assert_eq!(state.devices.len(), 2);
         assert_eq!(state.selected, 1);
@@ -340,7 +340,7 @@ fn a_dropped_link_returns_connecting_to_home_and_clears_the_list() {
     state.screen = Screen::Connecting;
     let _ = state.devices.push(name("Keyboard"));
     state.selected = 1;
-    state.connection_status(None);
+    state.connection_status(&[]);
     assert_eq!(state.screen, Screen::Home);
     assert!(state.devices.is_empty());
     assert_eq!(state.selected, 0);
@@ -381,7 +381,7 @@ fn a_pairing_notice_is_acknowledged_with_select_or_opens_the_saved_list() {
     state.paired("Oldest device removed");
     assert_eq!(state.screen, Screen::Paired);
     // A link update does not hide it.
-    state.connection_status(Some(heapless::String::try_from("Keyboard").unwrap()));
+    state.connection_status(&[heapless::String::try_from("Keyboard").unwrap()]);
     assert_eq!(state.screen, Screen::Paired);
     assert_eq!(state.button(ButtonEvent::Down), None);
     assert_eq!(state.screen, Screen::Paired);

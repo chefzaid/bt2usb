@@ -104,7 +104,7 @@ state behind these screens is in the
 | Scanning | `Scanning` | `Scanning` and a dot animation that advances once per second | — | — | — |
 | Select device | `DeviceList` | `Select device`, up to four device names, `>` on the highlighted row | Move up, stopping at the first | Move down, stopping at the last | Connect to the highlighted device |
 | Connecting | `Connecting` | `Connecting...` | — | — | — |
-| Connected | `Connected` | `Connected`, the device name or `2 devices`, `SEL:add DOWN:disc`, `UP:saved devices` | Open saved devices | Disconnect every link and return to Home | Scan to add another device |
+| Connected | `Connected` | `Connected`, each connected device's name on its own row in slot order, `SEL:add DOWN:disc`, `UP:saved devices` | Open saved devices | Disconnect every link and return to Home | Scan to add another device |
 | ERROR | `Error` | `ERROR`, the message, `SEL:retry DOWN:back`, `UP:saved devices` | Open saved devices | Acknowledge: return to Connected if a link is up, otherwise Home | Start a new scan |
 | Please wait... | `Managing` | `Please wait...` while a management request runs | — | — | — |
 | Saved devices | `SavedDevices` | `Saved devices`, saved names newest first, a final `Factory reset` entry, `UP at first: back` | Move up; on the first entry, go back to Home or Connected | Move down, stopping at `Factory reset` | Open the confirmation for the highlighted entry |
@@ -191,7 +191,7 @@ pending stays on screen when the request times out.
    encrypted link, and discovers its HID reports. The screen then shows
    Connected and input reaches the PC.
 4. To add a second device, press SELECT on Connected, then choose the other
-   device. Both links stay up and the screen shows `2 devices`.
+   device. Both links stay up and the screen names both devices.
 5. The device is saved when its link comes up, unless the bridge shows
    `Pairing not saved` ([notices and errors](#notices-and-errors)). A saved
    device reconnects automatically after a restart and after it sleeps.

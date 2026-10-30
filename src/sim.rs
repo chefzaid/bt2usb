@@ -163,7 +163,14 @@ fn describe(out: &mut impl core::fmt::Write, event: &Event<SimAddr>) -> core::fm
             device.name, device.address, device.rssi
         ),
         Event::ScanComplete => write!(out, "ScanComplete"),
-        Event::Connected(summary) => write!(out, "Connected '{}'", summary),
+        Event::Connected(names) => {
+            write!(out, "Connected ")?;
+            for (index, name) in names.iter().enumerate() {
+                let separator = if index == 0 { "" } else { ", " };
+                write!(out, "{}'{}'", separator, name)?;
+            }
+            Ok(())
+        }
         Event::Disconnected => write!(out, "Disconnected"),
         Event::Error(tag) => write!(out, "Error {:?}", tag),
         Event::Notice(notice) => write!(out, "Notice {:?}", notice),

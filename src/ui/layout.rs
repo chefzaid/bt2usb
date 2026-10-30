@@ -17,6 +17,12 @@ pub const MAX_LINES: usize = 6;
 /// Device-list rows that fit between a list's title and its footer.
 pub const LIST_ROWS: usize = 4;
 
+// The Connected screen has a name row for each link above its two hints.
+const _: () = assert!(
+    crate::config::BLE_MAX_CONNECTIONS <= 2,
+    "the Connected screen names at most two devices"
+);
+
 /// Characters of the 6-pixel-wide font that fit across the 128-pixel panel;
 /// the panel cuts off the rest of a longer line. Tests check fixed text
 /// against it.
@@ -76,9 +82,12 @@ pub fn lines(state: &UiState) -> Vec<Line, MAX_LINES> {
         }
         Screen::Connected => {
             push(&mut out, 10, "Connected");
-            push(&mut out, 24, &state.connected_name);
-            push(&mut out, 40, "SEL:add DOWN:disc");
-            push(&mut out, 54, "UP:saved devices");
+            // Each connected device's name on its own row, in slot order.
+            for (row, name) in state.connected_names.iter().enumerate() {
+                push(&mut out, 23 + row as i32 * 10, name);
+            }
+            push(&mut out, 46, "SEL:add DOWN:disc");
+            push(&mut out, 58, "UP:saved devices");
         }
         Screen::Error => {
             push(&mut out, 10, "ERROR");

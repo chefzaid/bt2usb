@@ -237,9 +237,6 @@ fn a_bonded_peer_at_a_new_address_uses_the_slot_that_holds_it() {
     let mut m = mgr();
     m.connect_slot(1, &dev(0x13, "kb"));
     let acts = plan_connect(&mut m, &devices, 0, same_bonded_peer);
-    assert_eq!(
-        acts.as_slice(),
-        &[Action::Emit(UiEvent::Connected(dev(0x13, "kb").name))]
-    );
+    assert_eq!(acts.as_slice(), &[Action::Emit(shows(&["kb"]))]);
     assert_eq!(m.occupied_count(), 1);
 }

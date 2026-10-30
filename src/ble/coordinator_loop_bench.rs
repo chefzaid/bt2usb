@@ -34,8 +34,9 @@ pub fn device(address: u8) -> DeviceInfo<u8> {
     }
 }
 
-pub fn shows(summary: &str) -> Event<u8> {
-    Event::Connected(summary.try_into().unwrap())
+/// The `Connected` event naming these devices.
+pub fn shows(names: &[&str]) -> Event<u8> {
+    Event::Connected(names.iter().map(|&name| name.try_into().unwrap()).collect())
 }
 
 /// What the loop did, in order.

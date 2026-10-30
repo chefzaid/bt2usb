@@ -13,7 +13,6 @@
 //! It is generic over the BLE address type so tests can substitute a trivial
 //! stand-in for `nrf_softdevice::ble::Address`.
 
-use core::fmt::Write;
 use heapless::{String, Vec};
 
 /// Maximum simultaneous BLE connections ([`crate::config::BLE_MAX_CONNECTIONS`]).
@@ -271,8 +270,8 @@ impl<A: Clone + PartialEq> ConnManager<A> {
         }
     }
 
-    /// Names of all connected (not merely connecting) devices.
-    pub fn get_connected_names(&self) -> Vec<String<32>, MAX_CONNECTIONS> {
+    /// Names of all connected (not merely connecting) devices, in slot order.
+    pub fn get_connected_names(&self) -> LinkNames {
         let mut names = Vec::new();
         for slot in &self.slots {
             if slot.connected {
@@ -283,38 +282,23 @@ impl<A: Clone + PartialEq> ConnManager<A> {
     }
 }
 
-/// A short human-readable summary of the current connections for the UI.
-pub fn connection_summary<A: Clone + PartialEq>(manager: &ConnManager<A>) -> String<32> {
-    let names = manager.get_connected_names();
-    match names.as_slice() {
-        [] => {
-            let mut s = String::new();
-            let _ = s.push_str("Connected");
-            s
-        }
-        [name] => name.clone(),
-        many => {
-            let mut s = String::new();
-            let _ = write!(&mut s, "{} devices", many.len());
-            s
-        }
-    }
-}
-
 /// The UI event that reports the links now up: `Disconnected` when none is,
-/// otherwise `Connected` with the [`connection_summary`].
+/// otherwise `Connected` with each connected device's name.
 pub fn link_state<A: Clone + PartialEq>(manager: &ConnManager<A>) -> UiEvent {
     if manager.active_count() == 0 {
         UiEvent::Disconnected
     } else {
-        UiEvent::Connected(connection_summary(manager))
+        UiEvent::Connected(manager.get_connected_names())
     }
 }
+
+/// The names of the devices whose links are up, in slot order.
+pub type LinkNames = Vec<String<32>, MAX_CONNECTIONS>;
 
 /// UI-facing events the coordinator wants emitted.
 #[derive(Clone, PartialEq, Debug)]
 pub enum UiEvent {
-    Connected(String<32>),
+    Connected(LinkNames),
     Disconnected,
     Error(ErrorTag),
 }
@@ -394,9 +378,9 @@ pub fn plan_connect<A: Clone + PartialEq>(
             // Selecting an established peer must finish the UI's Connecting
             // state even though no new worker operation (or flash write) is
             // necessary.
-            let _ = actions.push(Action::Emit(UiEvent::Connected(connection_summary(
-                manager,
-            ))));
+            let _ = actions.push(Action::Emit(UiEvent::Connected(
+                manager.get_connected_names(),
+            )));
         } else if held.retrying {
             // A background reconnect reports nothing until it succeeds, which
             // it never does for a peer that rejects the keys it holds, so

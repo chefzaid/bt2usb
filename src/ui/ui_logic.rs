@@ -237,7 +237,9 @@ pub struct UiState {
     pub selected: usize,
     pub devices: heapless::Vec<heapless::String<32>, { crate::config::BLE_MAX_DISCOVERED }>,
     pub paired_names: heapless::Vec<heapless::String<32>, { crate::config::MAX_PAIRED_DEVICES }>,
-    pub connected_name: heapless::String<32>,
+    /// The connected devices' names, in slot order; empty when no link is up.
+    pub connected_names:
+        heapless::Vec<heapless::String<32>, { crate::config::BLE_MAX_CONNECTIONS }>,
     pub message: heapless::String<32>,
     pub scan_dots: u8,
 }
@@ -255,7 +257,7 @@ impl UiState {
             selected: 0,
             devices: heapless::Vec::new(),
             paired_names: heapless::Vec::new(),
-            connected_name: heapless::String::new(),
+            connected_names: heapless::Vec::new(),
             message: heapless::String::new(),
             scan_dots: 0,
         }
@@ -278,7 +280,7 @@ impl UiState {
             self.scan_dots = 0;
         }
         if outcome.command == Some(UiCommand::Dismiss) {
-            self.screen = on_connection_status(Screen::Home, !self.connected_name.is_empty());
+            self.screen = on_connection_status(Screen::Home, !self.connected_names.is_empty());
             self.message.clear();
         }
         outcome.command
@@ -312,11 +314,16 @@ impl UiState {
         }
     }
 
-    pub fn connection_status(&mut self, name: Option<heapless::String<32>>) {
-        self.connected_name = name.unwrap_or_default();
+    /// The links now up: each connected device's name, none when no link is.
+    pub fn connection_status(&mut self, names: &[heapless::String<32>]) {
+        self.connected_names.clear();
+        for name in names {
+            // The coordinator names at most one device per link.
+            let _ = self.connected_names.push(name.clone());
+        }
         // Every scan is one the user started, so its picker stays on screen
         // even if a saved device reconnects in the background meanwhile.
-        self.screen = on_connection_status(self.screen, !self.connected_name.is_empty());
+        self.screen = on_connection_status(self.screen, !self.connected_names.is_empty());
         if matches!(self.screen, Screen::Home | Screen::Connected) {
             self.devices.clear();
             self.selected = 0;

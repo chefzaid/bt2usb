@@ -8,6 +8,23 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Both Device Names On Connected
+
+This record covers the commit that checks off the P2 item "Name both
+connected devices" in [TODO.md](../TODO.md#clearer-bridge-screens): the
+coordinator's `Connected` event carries each connected device's name in slot
+order instead of one name or `2 devices` (`connection_summary` is removed),
+and the Connected screen draws one name per row, with its two hints moved
+down to make room. The simulation logs the event as
+`Connected 'Keyboard', 'Mouse'`.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Local CI script | Format, host and three firmware Clippy configurations, host tests, rustdoc, documentation checks, release and simulation builds | Passed |
+| Host tests | `cargo test --locked --lib` | 484 passed, 1 new controller test; the coordinator `link_state` test and the layout test now cover one link, two links, and the loss of either |
+| Renode | `renode-test renode/bt2usb-sim.robot` with the local platform copy without `ApplySVD` | 3 of 3 passed; with both links up the panel reads `Connected`, `Keyboard`, `Mouse`, and both hints |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed after the Test Map row (21) and totals (497, 484) were updated |
+
 ## Validation Record — 2026-10-30, Strongest-First Scan List
 
 This record covers the commit that checks off the P2 item "List scan results

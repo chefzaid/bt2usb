@@ -5,9 +5,9 @@
 //! the SoftDevice `Address`), the host tests, and the Renode simulation, which
 //! uses a `u32` stand-in.
 
-use heapless::{String, Vec};
+use heapless::Vec;
 
-use crate::ble::coordinator::{DeviceInfo, ErrorTag, UiEvent};
+use crate::ble::coordinator::{DeviceInfo, ErrorTag, LinkNames, UiEvent};
 use crate::config::MAX_PAIRED_DEVICES;
 
 /// A request from the UI to the BLE coordinator.
@@ -63,8 +63,8 @@ pub enum Event<A> {
     DeviceFound(DeviceInfo<A>),
     /// Scan completed (no more results forthcoming).
     ScanComplete,
-    /// At least one link is up; the summary names it or counts them.
-    Connected(String<32>),
+    /// At least one link is up: each connected device's name, in slot order.
+    Connected(LinkNames),
     /// No link is up.
     Disconnected,
     /// An error the UI shows until the user acknowledges it.
@@ -98,7 +98,7 @@ impl<A> Event<A> {
 impl<A> From<UiEvent> for Event<A> {
     fn from(event: UiEvent) -> Self {
         match event {
-            UiEvent::Connected(summary) => Self::Connected(summary),
+            UiEvent::Connected(names) => Self::Connected(names),
             UiEvent::Disconnected => Self::Disconnected,
             UiEvent::Error(tag) => Self::Error(tag),
         }
@@ -109,10 +109,11 @@ impl<A> From<UiEvent> for Event<A> {
 mod tests {
     use super::*;
 
-    fn name(value: &str) -> String<32> {
-        let mut name = String::new();
-        let _ = name.push_str(value);
-        name
+    fn names(values: &[&str]) -> LinkNames {
+        values
+            .iter()
+            .map(|&value| value.try_into().unwrap())
+            .collect()
     }
 
     #[test]
@@ -139,7 +140,7 @@ mod tests {
     #[test]
     fn link_state_comes_only_from_connected_and_disconnected() {
         assert_eq!(
-            Event::<u8>::Connected(name("Keyboard")).link_up(),
+            Event::<u8>::Connected(names(&["Keyboard"])).link_up(),
             Some(true)
         );
         assert_eq!(Event::<u8>::Disconnected.link_up(), Some(false));
@@ -164,8 +165,8 @@ mod tests {
     #[test]
     fn coordinator_ui_events_map_to_the_same_ui_events() {
         assert_eq!(
-            Event::<u8>::from(UiEvent::Connected(name("2 devices"))),
-            Event::Connected(name("2 devices"))
+            Event::<u8>::from(UiEvent::Connected(names(&["Keyboard", "Mouse"]))),
+            Event::Connected(names(&["Keyboard", "Mouse"]))
         );
         assert_eq!(
             Event::<u8>::from(UiEvent::Disconnected),

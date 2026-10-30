@@ -52,7 +52,10 @@ fn power_up_reports_an_unwritable_store_and_reconnects_the_newest_saved_devices(
     bench.connected(&mut coordinator, 1, KEYBOARD_NOW);
     assert_eq!(
         bench.take(),
-        [Call::Persist(KEYBOARD_NOW), Call::Emit(shows("Keyboard"))]
+        [
+            Call::Persist(KEYBOARD_NOW),
+            Call::Emit(shows(&["Keyboard"]))
+        ]
     );
     // A report from an attempt the slot does not serve is ignored.
     let stale = SlotEvent::Error {
@@ -109,7 +112,7 @@ fn a_scan_frees_both_busy_slots_and_selections_index_its_results_until_one_fails
     assert_eq!(
         bench.take(),
         [
-            Call::Emit(shows("Keyboard")),
+            Call::Emit(shows(&["Keyboard"])),
             Call::Emit(Event::Disconnected)
         ]
     );
@@ -174,7 +177,10 @@ fn a_selection_is_handled_before_a_queued_report_and_takes_the_retrying_slot() {
     bench.connected(&mut coordinator, 0, KEYBOARD_NOW);
     assert_eq!(
         bench.take(),
-        [Call::Persist(KEYBOARD_NOW), Call::Emit(shows("Keyboard"))]
+        [
+            Call::Persist(KEYBOARD_NOW),
+            Call::Emit(shows(&["Keyboard"]))
+        ]
     );
 }
 
@@ -225,7 +231,7 @@ fn forget_quiesces_only_the_slot_holding_the_device_and_drops_its_late_reports()
         device: device(MOUSE),
     };
     bench.report(&mut coordinator, mouse_lost);
-    assert_eq!(bench.take(), [Call::Emit(shows("Keyboard"))]);
+    assert_eq!(bench.take(), [Call::Emit(shows(&["Keyboard"]))]);
 
     // Then the store changes, the UI hears the result, and the waiting
     // Disconnect reaches only the mouse's slot.
@@ -359,7 +365,7 @@ fn a_failed_store_write_reports_storage_failed_and_keeps_the_device() {
         [
             Call::Send(1, SlotCommand::Quiesce(1)),
             Call::Forget(Some(MOUSE)),
-            Call::Emit(shows("Keyboard")),
+            Call::Emit(shows(&["Keyboard"])),
             result(3, Err(ErrorTag::StorageFailed)),
         ]
     );

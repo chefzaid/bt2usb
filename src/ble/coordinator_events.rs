@@ -36,9 +36,9 @@ pub fn on_slot_connected<A: Clone + PartialEq>(
     }
     manager.connect_slot(slot, device);
     let _ = actions.push(Action::PersistDevice(device.clone()));
-    let _ = actions.push(Action::Emit(UiEvent::Connected(connection_summary(
-        manager,
-    ))));
+    let _ = actions.push(Action::Emit(UiEvent::Connected(
+        manager.get_connected_names(),
+    )));
     actions
 }
 

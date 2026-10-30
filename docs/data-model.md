@@ -605,7 +605,7 @@ converts into it with `From`.
 | `ScanStarted` | — | A user scan begins; reconnect scans send no UI events |
 | `DeviceFound(DiscoveredDevice)` | Address, name (`"Unknown"` if none advertised), RSSI | Once per HID device at the end of a scan, up to 8 |
 | `ScanComplete` | — | The scan window closed |
-| `Connected(String<32>)` | One device's name, or `"2 devices"` | A slot connected, or a slot changed while another stays connected |
+| `Connected(LinkNames)` | Each connected device's name, in slot order (`Vec<String<32>, 2>`) | A slot connected, or a slot changed while another stays connected |
 | `Disconnected` | — | No slot is connected |
 | `Error(BleErrorTag)` | Error tag | A user-visible failure; see the table below |
 | `PairedDevices { id, devices }` | Request ID, up to 4 `DiscoveredDevice`, newest first | Reply to `ListPaired` |
@@ -774,7 +774,7 @@ power flag to the display task after every event
 | `selected` | `usize` | Cursor in the current list or dialog |
 | `devices` | `Vec<String<32>, 8>` | Names from the current scan, in scan order |
 | `paired_names` | `Vec<String<32>, 4>` | Names from the last `PairedDevices` reply |
-| `connected_name` | `String<32>` | Link summary; empty when nothing is connected |
+| `connected_names` | `Vec<String<32>, 2>` | The connected devices' names, in slot order; empty when nothing is connected |
 | `message` | `String<32>` | Error or notice text, truncated by characters |
 | `scan_dots` | `u8` | Scanning animation, advanced once per second while scanning with the display on |
 
@@ -789,7 +789,7 @@ SELECT do on it are listed once, in
 [features: screens and buttons](features.md#screens-and-buttons).
 
 Dismissing an error, a notice, or the saved-device list returns to
-`Connected` when a link summary exists, otherwise `Home`, and clears the
+`Connected` when a link is up, otherwise `Home`, and clears the
 message. Events change screens as follows:
 
 | Event | Effect |
@@ -797,7 +797,7 @@ message. Events change screens as follows:
 | `ScanStarted` | From `Home` or `Scanning`: enter `Scanning` and clear the list; other screens are kept |
 | `DeviceFound` | Name appended only while `Scanning` |
 | `ScanComplete` | From `Scanning`: `DeviceList`, or `Error` with `No devices found` |
-| `Connected` / `Disconnected` | Update `connected_name`; `Home`, `Connecting` and `Connected` follow the link state; a scan's `Scanning` or `DeviceList`, dialogs, and errors are kept |
+| `Connected` / `Disconnected` | Update `connected_names`; `Home`, `Connecting` and `Connected` follow the link state; a scan's `Scanning` or `DeviceList`, dialogs, and errors are kept |
 | `Error(tag)` | `Error` with the tag's message |
 | `Notice(notice)` | `Paired` with the notice's message unless an error is showing |
 | `PairedDevices` (matching ID) | Store names; enter `SavedDevices` unless an error is showing |

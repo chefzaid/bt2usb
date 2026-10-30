@@ -29,7 +29,7 @@ pub fn keyboard() -> DeviceInfo<u8> {
 }
 
 pub fn shows_keyboard() -> UiEvent {
-    UiEvent::Connected("Keyboard".try_into().unwrap())
+    UiEvent::Connected(["Keyboard".try_into().unwrap()].into_iter().collect())
 }
 
 /// What the UI is sent when the slot's attempt fails: the error, then that no

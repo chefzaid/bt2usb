@@ -16,9 +16,12 @@ memory    The memory-map tables, address ranges, and pairing page numbers
           match ``memory_sd.x``, ``memory_sim.x``, and the storage constants.
 commands  ``mask`` recipes, ``--bin`` and ``--features`` names, and file
           paths written in code spans exist in the repository.
+tests     Each Test Map row in ``docs/testing.md`` gives its file's
+          ``#[test]`` count, every Rust file with tests has a row, and the
+          totals sentence adds up.
 
 A line ending in ``<!-- check-docs: ignore -->`` is skipped by the config,
-memory, and commands checks, for a sentence that quotes an old value on
+memory, commands, and tests checks, for a sentence that quotes an old value on
 purpose. Validation records (headings that start with "Validation Record")
 are skipped by the same checks, because they describe the tree as it was.
 """
@@ -29,15 +32,16 @@ import argparse
 import sys
 from pathlib import Path
 
-from docs_checks import commands, config, links, memory
+from docs_checks import commands, config, counts, links, memory
 from docs_checks.model import Finding, load_documents
 
-CHECKS = ("links", "config", "memory", "commands")
+CHECKS = ("links", "config", "memory", "commands", "tests")
 RUNNERS = {
     "links": links.check,
     "config": config.check,
     "memory": memory.check,
     "commands": commands.check,
+    "tests": counts.check,
 }
 
 

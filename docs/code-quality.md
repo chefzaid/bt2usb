@@ -59,7 +59,7 @@ Clippy warning into an error.
 | Script linter tests | `python -m unittest discover -s scripts -p "lint_scripts_test.py" -v` | `mask lint-scripts` | Host tests, Linux only | Fails the Linux job; 7 tests (`grep -c 'def test' scripts/lint_scripts_test.py`) |
 | File length | `find src tests build.rs scripts \( -name '*.rs' -o -name '*.py' \) -exec wc -l {} +`, failing above 500 lines ([File Length](#file-length)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file over the limit |
 | Documentation checks | `python scripts/check_docs.py` ([Markdown Checks](#markdown-checks)) | `mask ci`, `mask docs-check` | Host tests, Linux only | Fails the Linux job and lists each finding as file, line, and the value or name the repository has instead |
-| Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 27 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
+| Documentation checker tests | `python -m unittest discover -s scripts -p "check_docs_test.py" -v` | `mask docs-check` | Host tests, Linux only | Fails the Linux job; 28 tests (`grep -c 'def test' scripts/check_docs_test.py`) |
 | Module comments | `find src tests build.rs -name '*.rs' -exec grep -L '^//!' {} +`, failing when it lists a file ([Documentation Comments](#documentation-comments)) | Run the same command | Host tests, Linux only | Fails the Linux job and lists each file without a `//!` line |
 | Parser fuzzing | `cargo test --locked --lib fuzz_ -- --nocapture` with `BT2USB_FUZZ_CASES=20000000` and the run ID as `BT2USB_FUZZ_SEED` ([parser fuzzing](testing.md#parser-fuzzing)) | `mask fuzz` (a million cases) | Parser fuzzing, weekly schedule and manual dispatch only | Fails the job and prints the target, input, and settings that reproduce it; ordinary host test runs check 5,000 cases per target |
 | Release helper tests | `python -m unittest discover -s scripts -p "release*_test.py" -v` | None | Host tests, Linux and Windows | Fails the job; 30 tests (`grep -c 'def test' scripts/release*_test.py`: 21 for the helper, 5 for the SBOM builder, 4 for the image module) |
@@ -272,7 +272,7 @@ modules carry `///` comments that state units, bounds, and error meanings.
 | `.github/workflows/ci.yml` | actionlint 1.7.12 in the Linux host job, which passes each `run:` script to the pinned ShellCheck 0.11.0 | Enforced |
 | Python: `scripts/release.py` with `scripts/release_sbom.py` and `scripts/release_image.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 30 release-helper, 27 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
 | `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash recipes in `maskfile.md` | ShellCheck 0.11.0 ([Python And Shell Checks](#python-and-shell-checks)) | Enforced |
-| Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, and commands ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
+| Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, commands, and the Test Map's test counts ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
 | Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job, which compiles the C# models when it loads them; not linted | Partial |
 
 ### Markdown Checks
@@ -289,9 +289,10 @@ both what the document says and what the repository has.
 | `config` | A `pub const` in [config.rs](../src/config.rs) missing from the [Configuration Defaults](hardware.md#configuration-defaults) table, a table name that is not a constant, a table value that differs from the evaluated constant (derived values such as `STORAGE_FLASH_END` included), and an inline mention of the form ``` `NAME` (8 s) ``` or ``` 4 seconds (`NAME`) ``` whose number disagrees. Inline values in seconds or milliseconds are converted with the constant's unit: `_SECS`, `_MS`, 10 ms for the supervision timeouts, 1.25 ms for connection intervals and event length, and 0.625 ms for the scan interval and window |
 | `memory` | A memory-map table row (Application flash, Pairing/bond storage, Application RAM, and the other region labels in [hardware](hardware.md#memory-layout) and [ADR 0010](adr/0010-static-memory-layout.md)) whose range or KiB size differs from `memory_sd.x`, `memory_sim.x`, and the storage constants; a code-formatted address range that starts at a region's first address but ends elsewhere; and "pages N–M" near the words pairing, bond, or storage that differ from `STORAGE_FLASH_PAGE_START`/`COUNT` |
 | `commands` | `mask <name>` in code with no such recipe, `--bin` or `--features` names that `Cargo.toml` does not define, and a code-formatted path (with a directory, or a `.rs` file name) that matches no tracked file |
+| `tests` | A row of the [Test Map](testing.md#test-map) whose first link names a file and whose count is not that file's number of lines containing `#[test]`; a Rust file under `src/` or `tests/` with a test but no row; and the Test Map's sentence "The tree holds N `#[test]` functions: M in files compiled into the host library, K in `tests/…`" when N, M, or a K disagrees ([counts.py](../scripts/docs_checks/counts.py)) |
 
-Two kinds of text are exempt from the `config`, `memory`, and `commands`
-checks, because they quote the tree as it was: everything under a heading that
+Two kinds of text are exempt from the `config`, `memory`, `commands`, and
+`tests` checks, because they quote the tree as it was: everything under a heading that
 starts with "Validation Record", and a line ending in
 `<!-- check-docs: ignore -->`. A proposed ADR is exempt from the path check,
 since it names files it would add. File names that may appear although no
@@ -299,7 +300,7 @@ tracked file has them, such as a removed module that an ADR's history
 discusses, are listed in `KNOWN_ABSENT` in the script with the reason for each.
 
 What it does not check: values written without the constant's name ("a 7.5 ms
-interval"), test and file counts, firmware sizes, coverage figures, and the
+interval"), test counts in prose and file counts, firmware sizes, coverage figures, and the
 content of external links. Those remain the reviewer's job, as the
 [review checklist](#review-checklist) says.
 
@@ -315,7 +316,7 @@ after running every check when any of them reports a finding.
 | `ruff check` | Every tracked `*.py` file | [ruff.toml](../ruff.toml): Python 3.11 target (the helpers use `tomllib`), 100-character lines, and Ruff's default rule set, which includes pyflakes, the pycodestyle errors, import sorting, bugbear, pyupgrade, and the simplify and Ruff-specific rules. The en dash is allowed in strings, because the documentation checker matches ranges written with it |
 | `ruff format --check` | The same files | Ruff's formatter at the same line length; `ruff format scripts/` applies it |
 | `shellcheck` | Every tracked `*.sh` file: `scripts/install-renode.sh`, `scripts/run-tool.sh`, `.devcontainer/post-create.sh` | ShellCheck's defaults, every severity down to style; each script's shebang selects the shell |
-| `shellcheck` on recipes | Every recipe in [maskfile.md](../maskfile.md) whose code block is `bash` or `sh` (all 34) | The recipe is checked as its own script under that shell |
+| `shellcheck` on recipes | Every recipe in [maskfile.md](../maskfile.md) whose code block is `bash` or `sh` (every one) | The recipe is checked as its own script under that shell |
 
 Mask runs the first code block under each heading as the recipe and passes its
 options and positional arguments as environment variables, with dashes turned

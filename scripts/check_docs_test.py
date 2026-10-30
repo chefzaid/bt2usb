@@ -418,6 +418,41 @@ class CheckDocsTests(unittest.TestCase):
         self.edit("docs/adr/0099-new.md", "Proposed", "Accepted")
         self.assertEqual(len(self.findings("commands")), 1)
 
+    def test_test_counts(self):
+        self.write("src/a_tests.rs", "//! A.\n#[test]\nfn a() {}\n#[test]\nfn b() {}\n")
+        self.write("src/b.rs", "//! B.\n#[test]\nfn d() {}\n")
+        self.write("tests/it.rs", "//! It.\n#[test]\nfn c() {}\n")
+        self.write(
+            "docs/testing.md",
+            textwrap.dedent("""\
+            # Testing
+
+            ## Test Map
+
+            The tree holds 4 `#[test]` functions: 3 in
+            files compiled into the host library and 1 in `tests/it.rs`.
+
+            | Location | Tests | Covered |
+            | --- | --- | --- |
+            | [a_tests.rs](../src/a_tests.rs), for [a.rs](../src/a.rs) | 2 | A |
+            | [tests/it.rs](../tests/it.rs) | 1 | It |
+            """),
+        )
+        missing = "docs/testing.md:3: src/b.rs has tests but no Test Map row"
+        self.assertEqual(self.messages("tests"), [missing])
+        self.edit("docs/testing.md", "| 2 |", "| 3 |")
+        self.edit("docs/testing.md", "holds 4", "holds 5")
+        self.edit("docs/testing.md", "1 in `tests/it.rs`", "2 in `tests/it.rs`")
+        self.assertEqual(
+            self.messages("tests"),
+            [
+                missing,
+                "docs/testing.md:5: the tree holds 4 #[test] functions, not 5",
+                "docs/testing.md:6: tests/it.rs has 1 #[test] functions, not 2",
+                "docs/testing.md:10: src/a_tests.rs has 2 #[test] functions, not 3",
+            ],
+        )
+
     def test_main_reports_and_exits(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):

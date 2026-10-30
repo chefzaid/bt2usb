@@ -289,8 +289,8 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask docs-check` | Check Markdown links, documented constants, memory map, and commands |
 | `mask lint-scripts` | Lint the Python helpers, shell scripts, and recipes with Ruff and ShellCheck |
 
-The [mask command reference](#mask-command-reference) below lists all 34
-recipes with their exact commands and options.
+The [mask command reference](#mask-command-reference) below lists every
+recipe with its exact commands and options.
 
 Flashing the bridge requires S140 to have been installed. Complete
 [First flash](first-flash.md) before treating a successful download as a working
@@ -338,8 +338,9 @@ The target triple below is always `thumbv7em-none-eabihf`, abbreviated as
 
 | Task | Runs | Notes |
 | --- | --- | --- |
-| `mask test` | `cargo test --locked --lib --tests` | Native host; library unit tests and the three files in `tests/` |
+| `mask test` | `cargo test --locked --lib --tests` | Native host; library unit tests and the four files in `tests/` |
 | `mask test-verbose` | Same with `-- --nocapture` | Shows test output |
+| `mask fuzz` | `cargo test --locked --lib fuzz_ -- --nocapture` with `BT2USB_FUZZ_CASES` set to 1,000,000 unless already set | The parser fuzz targets with a million inputs each; set `BT2USB_FUZZ_SEED` to search other inputs or reproduce a failure ([parser fuzzing](testing.md#parser-fuzzing)) |
 | `mask clippy` | `cargo clippy --locked --features embedded --target <arm> -- -D warnings`, then the same with `--features embedded,log-sensitive-data` | Embedded configuration only; host and simulation Clippy run in `mask ci` |
 | `mask fmt` | `cargo fmt` | Formats the bt2usb package only |
 | `mask fmt-check` | `cargo fmt -- --check` | Same files as CI's `--package bt2usb` with the current manifest |

@@ -189,7 +189,8 @@ Follow-up obligations:
   gate without board evidence.
 - Keep [scripts/check_docs.py](../../scripts/check_docs.py) passing: since
   2026-10-10 a broken link or anchor, or a documented constant, memory-map
-  value, command, or file path that disagrees with the repository, fails CI
+  value, command, or file path that disagrees with the repository, fails CI,
+  and since 2026-10-30 so does a Test Map test count
   ([Markdown checks](../code-quality.md#markdown-checks)).
 
 ## Implementation
@@ -207,7 +208,7 @@ Follow-up obligations:
   `src/selftest.rs`, `src/ble/coordinator.rs` and `src/ui/ui_logic.rs`, three
   recipes in `maskfile.md`, and the closing message of
   `.devcontainer/post-create.sh`.
-- Checks: `scripts/check_docs.py` and its 27 tests in
+- Checks: `scripts/check_docs.py` and its 28 tests in
   `scripts/check_docs_test.py` run in the Linux host job of
   [ci.yml](../../.github/workflows/ci.yml); `mask docs-check` runs both, and
   `mask ci` runs the checker.

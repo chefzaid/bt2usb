@@ -37,9 +37,9 @@ probe, or USB host to close.
 | [Verification And Code Quality](#verification-and-code-quality) | 17 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
-| [Documentation](#documentation) | 7 | 0 | 0 |
+| [Documentation](#documentation) | 8 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **155** | **63** | **20** |
+| **Total** | **156** | **63** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1438,6 +1438,15 @@ Guides, ADRs, and this plan. Context:
   ([Markdown checks](docs/code-quality.md#markdown-checks);
   `scripts/check_docs.py`, `scripts/check_docs_test.py`,
   `.github/workflows/ci.yml`, `maskfile.md`).
+- [x] **P2** **Check the Test Map's test counts.** The testing guide's
+  per-file test counts and totals were kept by hand and went stale after
+  most test changes. Accept when the documentation checker fails on a row
+  whose count differs from the file, a file with tests but no row, and a
+  wrong total. Done 2026-10-30: the `tests` check in
+  `scripts/docs_checks/counts.py`, with a regression test; a changed row
+  count in the real guide failed it
+  ([Markdown checks](docs/code-quality.md#markdown-checks),
+  [validation record](docs/validation-records.md#validation-record--2026-10-30-test-count-check)).
 
 ## Product Extensions
 

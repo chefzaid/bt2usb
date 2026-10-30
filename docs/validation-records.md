@@ -8,6 +8,24 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Test Count Check
+
+This record covers the commit that checks off the P2 item "Check the Test
+Map's test counts" in [TODO.md](../TODO.md#documentation): a `tests` check in
+the new `scripts/docs_checks/counts.py` compares each
+[Test Map](testing.md#test-map) row and the totals sentence with the number
+of lines containing `#[test]` in each file, and finds files with tests but no
+row. The Test Map's "checked on" date sentence is replaced by a pointer to
+the check. No firmware code changes.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Checker on the tree | `python3 scripts/check_docs.py` | Passed, with the five checks over 49 Markdown files: the 49 rows and the totals (495, 482 in the host library) match |
+| Mutant | The coordinator loop row changed from 8 to 9, then restored | Failed with `docs/testing.md:202: [tests] src/ble/coordinator_loop_tests.rs has 8 #[test] functions, not 9` |
+| Checker tests | `python3 -m unittest discover -s scripts -p "check_docs_test.py"` | 28 passed, 1 new: a missing row, then a wrong row count, total, and `tests/` count |
+| Script linters | `python3 scripts/lint_scripts.py` | Passed: Ruff over 17 Python files, ShellCheck over 3 shell scripts and 36 recipes |
+| Recipe references | The 36 `maskfile.md` recipes against the [mask command reference](development.md#mask-command-reference) | `mask fuzz` had no row, and two guides still said 34 recipes; the row is added and the guides no longer give a number. The `mask test` row now says four files in `tests/` |
+
 ## Validation Record — 2026-10-30, Coverage Floor Ratchet
 
 This record covers the commit that raises `COVERAGE_MIN_LINES` in

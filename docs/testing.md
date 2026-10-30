@@ -62,7 +62,7 @@ PowerShell, use the direct command.
 | Headless Renode test | `mask sim-test` | `renode-test renode/bt2usb-sim.robot` |
 | Interactive Renode | `mask sim` | `renode renode/bt2usb-sim.resc` |
 | Release helper tests | — | `python -m unittest discover -s scripts -p "release*_test.py" -v` |
-| Markdown links, constants, memory map, and commands | `mask docs-check` | `python scripts/check_docs.py`, and its tests with `python -m unittest discover -s scripts -p "check_docs_test.py" -v` |
+| Markdown links, constants, memory map, commands, and test counts | `mask docs-check` | `python scripts/check_docs.py`, and its tests with `python -m unittest discover -s scripts -p "check_docs_test.py" -v` |
 | Format check | `mask fmt-check` | `cargo fmt --package bt2usb -- --check` |
 | API documentation, every build, warnings denied | `mask rustdoc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
 | Workflow lint | — | `actionlint` |
@@ -149,9 +149,10 @@ recorded in the
 
 ## Test Map
 
-Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-30, in the commit that runs the coordinator task's loop on a scripted
-bench. The tree holds 495 `#[test]` functions: 482 in
+Counts below are what `grep -c '#\[test\]' <file>` gives for each file. The
+[documentation checker](code-quality.md#markdown-checks) fails when a row's
+count, a file with tests but no row, or a total in this paragraph disagrees
+with the tree. The tree holds 495 `#[test]` functions: 482 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
 `tests/oled_font.rs`, 2 in `tests/vendor_pairing_gate.rs`, and 5 in
 `tests/vendor_portal.rs`, and every one of
@@ -889,8 +890,9 @@ Not yet first-class:
 - USB conformance captures and a peripheral/host/hub compatibility matrix
 - soak, latency, and reconnect-time measurements
 - documentation checks beyond links, the configuration table, named
-  constants, the memory map, and commands: prose values without a constant's
-  name, test counts, sizes, and coverage figures are checked by hand
+  constants, the memory map, commands, and the Test Map's test counts: prose
+  values without a constant's name, test counts in prose, sizes, and coverage
+  figures are checked by hand
   ([Markdown checks](code-quality.md#markdown-checks))
 - a second build in another environment on every push: staging refuses an
   image that names a build path, but other causes of difference are found

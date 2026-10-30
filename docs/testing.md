@@ -92,9 +92,9 @@ the coverage percentage measures only the instrumented selection. Report the
 commit, toolchain, command, and excluded modules with coverage results. Avoid
 putting an undated coverage percentage or test count in the README.
 
-`--lib --tests` selects the library's unit tests and the three files in
-`tests/`: `integration.rs`, `oled_font.rs`, and `vendor_portal.rs`.
-The three binaries are skipped because their `embedded` or `sim` feature is not
+`--lib --tests` selects the library's unit tests and the four files in
+`tests/`: `integration.rs`, `oled_font.rs`, `vendor_pairing_gate.rs`, and
+`vendor_portal.rs`. The three binaries are skipped because their `embedded` or `sim` feature is not
 enabled. Doctests are not selected; the library's fenced doc blocks are all
 `text` blocks, which rustdoc would not run anyway. Host tests build for the native
 platform because [.cargo/config.toml](../.cargo/config.toml) deliberately sets
@@ -148,10 +148,11 @@ baseline it was set from is 97.59% of lines, recorded in the
 ## Test Map
 
 Counts below were checked with `grep -c '#\[test\]' <file>` on each file on
-2026-10-30, in the commit that adds the capacity-change test. The tree holds
-434 `#[test]` functions: 423 in
+2026-10-30, in the commit that adds the pairing permission. The tree holds
+436 `#[test]` functions: 423 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
-`tests/oled_font.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
+`tests/oled_font.rs`, 2 in `tests/vendor_pairing_gate.rs`, and 5 in
+`tests/vendor_portal.rs`, and every one of
 them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
@@ -236,6 +237,7 @@ protect.
 | --- | --- | --- |
 | [tests/integration.rs](../tests/integration.rs) | 3 | Keyboard (report ID 1), mouse (ID 2), and consumer (ID 3) notifications classified and serialized through the crate's public `bt2usb::hid` API, as an external crate sees it. |
 | [tests/vendor_portal.rs](../tests/vendor_portal.rs) | 5 | The vendored nrf-softdevice event portal, compiled from `vendor/nrf-softdevice/src/util/portal.rs` and `util/on_drop.rs` on a thread named `main` (the firmware's thread-mode mutex accepts no other on the host): a wait that a disconnect completed, or that is dropped afterwards, leaves a wait registered after it in place for both `wait_many` and `wait_once`, so the next link on a reused connection handle still gets its response; a cancelled wait clears its own registration; and a `wait_many` closure that skips an event stays registered. Three of the five fail on the unpatched upstream portal ([ADR 0007](adr/0007-vendored-softdevice-patch.md)). It uses `embassy-sync` 0.8, renamed `portal-embassy-sync`, and a std `critical-section` as dev-dependencies. |
+| [tests/vendor_pairing_gate.rs](../tests/vendor_pairing_gate.rs) | 2 | The vendored nrf-softdevice pairing permission, compiled from `vendor/nrf-softdevice/src/ble/pairing_gate.rs`: a new link ignores a peer's Security Request for keys the bridge does not hold, and a link the application allowed to pair answers it by pairing ([ADR 0007](adr/0007-vendored-softdevice-patch.md), [ADR 0011](adr/0011-interim-just-works-pairing.md)). The `SEC_REQUEST` arm that applies the answer runs only on the board. |
 | [tests/oled_font.rs](../tests/oled_font.rs) | 3 | The glyph table the Renode panel model reads text with, [oled-font-6x10.txt](../renode/oled-font-6x10.txt), equals `FONT_6X10` as embedded-graphics draws it (rewrite it with `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font`); every printable ASCII glyph is distinct, so text reads back unambiguously; and the font's 6×10 cell, zero spacing, and baseline 7 are what `ui::layout` and the text reader assume, and `display.rs` draws in no other font. It uses `embedded-graphics` as a dev-dependency. |
 
 ### Tests That Do Not Run

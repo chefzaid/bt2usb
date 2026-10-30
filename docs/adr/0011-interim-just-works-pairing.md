@@ -126,8 +126,8 @@ an attacker can use that gap:
   has started a scan, and has selected a device.
 - Background reconnects never start a pairing from the application, and the
   coordinator persists a device only after its link is secured and connected.
-  The binding's own Security Request path is the remaining gap (see
-  Consequences).
+  Since 2026-10-30 the binding's Security Request handler pairs only on a link
+  the application allowed to pair (see Consequences).
 - No HID data is read or forwarded over an unencrypted link.
 - One peer's re-pairing cannot overwrite another peer's keys.
 
@@ -154,22 +154,18 @@ Negative:
   later traffic on that bond.
 - The application does not check the negotiated encryption key size; the
   binding's defaults accept 7 to 16 bytes.
-- The application gates only the pairing it starts. The binding's own handler
-  for a peripheral's Security Request
-  (`BLE_GAP_EVTS_BLE_GAP_EVT_SEC_REQUEST` in `gap.rs`) calls
-  `request_pairing()` when no keys are found for that connection, whatever
-  the slot's `allow_pairing` says. On a background reconnect the slot's own
-  `encrypt()` call fails with `PeerKeysNotFound`, pairing is not allowed, and
-  the slot closes the link; but a pairing the binding has already started can
-  run until the disconnect completes, and a completed one reaches `on_bonded`,
-  which updates the in-memory bond cache. Since 2026-10-11 a background
-  reconnect starts an attempt only while `Bonder` holds the device's keys
-  (power-up skips a stored peer without a bond, and each attempt checks
-  first), so this arises only when saving a device on the other slot evicts
-  this peer's record and keys during an attempt or while the link it opened
-  is up; on a link already
-  up the slot does not close it. Whether such a pairing can complete has not
-  been tested or observed; the TODO item below exists to close this path.
+- Until 2026-10-30 the application gated only the pairing it starts: the
+  binding's handler for a peripheral's Security Request
+  (`BLE_GAP_EVTS_BLE_GAP_EVT_SEC_REQUEST` in `gap.rs`) called
+  `request_pairing()` whenever no keys were found, whatever the slot's
+  `allow_pairing` said, which a background reconnect met when saving a device
+  on the other slot evicted this peer's keys during an attempt. A vendored
+  patch now gives every link a pairing permission that starts denied
+  (`pairing_gate.rs`); the slot worker grants it only for a user's
+  connection, the handler pairs only with it, and `Bonder::on_bonded` refuses
+  a bond on a link without it. Host tests in `tests/vendor_pairing_gate.rs`
+  pin the permission's answers; the handler's use of it is checked by the
+  embedded builds and Clippy, not on air.
 - The connect path tries stored keys first and requests pairing only when no
   keys are stored. A peripheral that has discarded its side of the bond is
   therefore expected to fail to connect until it is forgotten in the Saved
@@ -185,9 +181,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 - "ADR: authenticated pairing and enrollment" (P0): the decision record that
   supersedes this one, choosing between passkey entry and numeric comparison
   per device class.
-- "Refuse peer-initiated pairing on background reconnects" (P0): make a
-  Security Request on a link that does not allow pairing unable to create or
-  replace a bond, shown by a test or on-air evidence.
+- "Refuse peer-initiated pairing on background reconnects" (P0): done on
+  2026-10-30 as described above; on-air evidence is still pending.
 - "Authenticated pairing and enrollment policy" (P0): decide per device class
   whether authenticated pairing is required, how user presence is checked, and
   whether weaker devices are rejected; add a bounded pairing window and visible

@@ -202,9 +202,10 @@ Follow-up obligations:
   `unpolled_consumer_allows_actual_keyboard_and_mouse_workers_to_write`),
   in-module tests such as those in `aggregate.rs` and `management.rs`,
   [tests/integration.rs](../../tests/integration.rs),
-  [tests/oled_font.rs](../../tests/oled_font.rs), and
-  [tests/vendor_portal.rs](../../tests/vendor_portal.rs), which compiles the
-  vendored crate's event portal on the host.
+  [tests/oled_font.rs](../../tests/oled_font.rs),
+  [tests/vendor_pairing_gate.rs](../../tests/vendor_pairing_gate.rs), and
+  [tests/vendor_portal.rs](../../tests/vendor_portal.rs), which compile the
+  vendored crate's pairing permission and event portal on the host.
 - CI runs `cargo test --locked --lib --tests`, `cargo clippy --locked --lib
   --tests -- -D warnings`, and `cargo doc --locked --no-deps --lib` with
   warnings denied on `ubuntu-24.04` and `windows-2025`

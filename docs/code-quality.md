@@ -133,11 +133,11 @@ component).
 
 `cargo fmt` formats the bt2usb package only. `cargo fmt -v -- --check` lists
 its roots as `build.rs`, `src/lib.rs`, `src/main.rs`, `src/selftest.rs`,
-`src/sim.rs`, `tests/integration.rs`, `tests/oled_font.rs`, and
-`tests/vendor_portal.rs`; rustfmt follows each root's module tree, including
-the inline modules in `lib.rs`. `tests/vendor_portal.rs` marks its two
-`#[path]` modules into `vendor/` with `#[rustfmt::skip]`, so rustfmt does not
-follow them.
+`src/sim.rs`, `tests/integration.rs`, `tests/oled_font.rs`,
+`tests/vendor_pairing_gate.rs`, and `tests/vendor_portal.rs`; rustfmt follows
+each root's module tree, including the inline modules in `lib.rs`. The two
+vendor test files mark their `#[path]` modules into `vendor/` with
+`#[rustfmt::skip]`, so rustfmt does not follow them.
 
 The vendored crate under `vendor/nrf-softdevice` is excluded. It is a path
 dependency, not a workspace member (`cargo metadata --no-deps` lists only
@@ -183,7 +183,7 @@ different code:
 
 | Configuration | Targets checked | Code only this configuration sees |
 | --- | --- | --- |
-| Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs`, `tests/oled_font.rs`, and `tests/vendor_portal.rs` | `#[cfg(test)]` modules and test files; the vendored portal source, which `tests/vendor_portal.rs` compiles with Clippy's groups and rustc's unused lints allowed on the two modules, since it keeps upstream's code |
+| Host (`--lib --tests`) | Library and its unit tests; `tests/integration.rs`, `tests/oled_font.rs`, `tests/vendor_pairing_gate.rs`, and `tests/vendor_portal.rs` | `#[cfg(test)]` modules and test files; the vendored pairing gate and portal sources, which the two vendor test files compile with Clippy's groups and rustc's unused lints allowed on their `#[path]` modules, since the portal keeps upstream's code |
 | Embedded (`--features embedded`) | Library; `bt2usb`; `bt2usb-selftest` | `main.rs`, `selftest.rs`, SoftDevice setup, USB, storage, power, stack, and the scanner, connection-worker, security-handler, GATT HID client, and Device Information client modules |
 | Simulation (`--features sim`) | Library; `bt2usb-sim` | `src/sim.rs`, `src/sim_ble.rs`, and their UART output path |
 | Embedded with the opt-in (`--features embedded,log-sensitive-data`) | Library; `bt2usb`; `bt2usb-selftest` | No bt2usb code. It compiles the opt-in branches of three log lines in the vendored `nrf-softdevice` ([dependency logs](security.md#dependency-logs)); Clippy does not lint that crate, which is a path dependency rather than a workspace member |
@@ -734,8 +734,9 @@ Coverage measures only the code that host tests compile:
 
 The test code in separate files is compiled with instrumentation but left out
 of the llvm-cov report: `tests/integration.rs`, `tests/oled_font.rs`,
-`tests/vendor_portal.rs` with the vendored portal source it compiles (the
-totals did not change when it was added on 2026-10-11), the `src/*_tests.rs` files
+`tests/vendor_portal.rs` and `tests/vendor_pairing_gate.rs` with the vendored
+sources they compile (the totals did not change when they were added on
+2026-10-11 and 2026-10-30), the `src/*_tests.rs` files
 that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
 `coordinator_attempt_tests.rs`, `scan_list_tests.rs`, `bond_table_tests.rs`,
 `diagnostics_tests.rs`,

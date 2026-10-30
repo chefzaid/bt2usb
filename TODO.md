@@ -25,7 +25,7 @@ probe, or USB host to close.
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
 | [FIXME](#fixme) | 54 | 0 | 0 |
-| [BLE Central And Pairing](#ble-central-and-pairing) | 15 | 5 | 3 |
+| [BLE Central And Pairing](#ble-central-and-pairing) | 16 | 4 | 2 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **145** | **68** | **21** |
+| **Total** | **146** | **67** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -358,20 +358,15 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   pairing, short-key, unsolicited pairing, timeout, and reconnect cases have
   automated tests plus representative real-device evidence
   ([security](docs/security.md#pairing-and-authentication)).
-- [ ] **P0** **Refuse peer-initiated pairing on background reconnects.**
-  *(hardware)* The application starts pairing only for an explicit user
-  connection, but the vendored crate answers a peer's Security Request by
-  requesting pairing when no keys are found
-  (`BLE_GAP_EVTS_BLE_GAP_EVT_SEC_REQUEST` in
-  `vendor/nrf-softdevice/src/ble/gap.rs`). Since 2026-10-11 a background
-  reconnect starts an attempt only while `Bonder` holds the device's keys, so
-  the crate answers such a request by encrypting with them; a pairing can
-  still start when saving a device on the other slot evicts this device's
-  record and keys during an attempt or while the link it opened is up.
-  Accept when a
-  Security Request on a link whose request does not allow pairing cannot create
-  or replace a bond, shown by a test or by recorded on-air evidence
-  ([security](docs/security.md#threat-model)).
+- [x] **P0** **Refuse peer-initiated pairing on background reconnects.** Every
+  link starts without permission to pair (`PairingPermission::NEW_LINK` in
+  the vendored `src/ble/pairing_gate.rs`); `connect_and_run_secure` grants it
+  with `Connection::allow_pairing` only for a user's connection; the vendored
+  `SEC_REQUEST` arm pairs only with it and otherwise logs `peer security
+  request ignored: this link may not pair`; and `Bonder::on_bonded` refuses a
+  bond on a link without it. Host tests in `tests/vendor_pairing_gate.rs`
+  ([security](docs/security.md#pairing-and-authentication))
+  *(hardware evidence pending)*.
 - [ ] **P1** **Report Map interoperability and legacy policy.** *(hardware)*
   Validate the implemented 512-byte fragmented GATT reader against real
   peripherals with long maps and different MTUs, including one that offers an

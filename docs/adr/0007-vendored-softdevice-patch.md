@@ -220,6 +220,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | ATT MTU | `ATT_MTU = 64` in [sd_setup.rs](../../src/sd_setup.rs); the vendor notes explain why one discovery response can then carry eight declarations |
 | Panic fixes ([ADR 0025](0025-panic-lints-and-inventory.md)) | `evt-max-size-256` in [Cargo.toml](../../Cargo.toml) and the event-size `const` assertion in [sd_setup.rs](../../src/sd_setup.rs); the timeout arm of `gap::on_evt`; `ConnectionState::disconnect_with_reason` and `Connection::drop` in `connection.rs`; the waiters in `discover_service`, `discover_characteristics`, `discover_descriptors`, and `att_mtu_exchange`. Each source change is marked `bt2usb patch:` |
 | Event portal guard (since 2026-10-11) | `Portal::closure_address` and `Portal::clear_if_registered`, called from the drop guards of `wait_once` and `wait_many`, in `vendor/nrf-softdevice/src/util/portal.rs`, marked `bt2usb patch:`; five host tests in [tests/vendor_portal.rs](../../tests/vendor_portal.rs), which compiles that file and `util/on_drop.rs` with `embassy-sync` 0.8 and a std `critical-section` as dev-dependencies |
+| Pairing permission (since 2026-10-30; [ADR 0011](0011-interim-just-works-pairing.md)) | `PairingPermission` and `SecurityRequestAnswer` in `vendor/nrf-softdevice/src/ble/pairing_gate.rs`, held in `EncryptionState` and set by `Connection::allow_pairing` (read back by `Connection::may_pair`) in `connection.rs`, and consulted by the `SEC_REQUEST` arm of `gap::on_evt`, each marked `bt2usb patch:`; granted in `connect_and_run_secure` in [slot_link.rs](../../src/ble/slot_link.rs) and checked in `Bonder::on_bonded`; two host tests in [tests/vendor_pairing_gate.rs](../../tests/vendor_pairing_gate.rs) |
 | Formatting | CI checks formatting of the application package only: `cargo fmt --package bt2usb -- --check` in [ci.yml](../../.github/workflows/ci.yml) |
 
 ### Verification Status
@@ -235,7 +236,9 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   GATT client, GAP, and connection changes are still reviewed, not tested.
   The event portal guard has five host tests in `tests/vendor_portal.rs`,
   three of which fail on the unpatched source
-  ([validation record](../validation-records.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)). The log gate was checked on 2026-10-10 by listing the defmt
+  ([validation record](../validation-records.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)). The pairing
+  permission's decision has two host tests in `tests/vendor_pairing_gate.rs`;
+  its use in the `SEC_REQUEST` arm is reviewed, not tested. The log gate was checked on 2026-10-10 by listing the defmt
   format strings of `debug`, `trace`, and `info` builds with and without the
   feature ([logging and privacy](../security.md#logging-and-privacy)). The
   event-size check was tried against a 131-byte buffer, which fails the build,

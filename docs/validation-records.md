@@ -8,6 +8,29 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Pairing Permission
+
+This record covers the commit that fixes the P0 item "Refuse peer-initiated
+pairing on background reconnects" in
+[TODO.md](../TODO.md#ble-central-and-pairing): the vendored crate's
+`SEC_REQUEST` arm now pairs only on a link the application allowed to pair
+(`PairingPermission` in `vendor/nrf-softdevice/src/ble/pairing_gate.rs`,
+`Connection::allow_pairing`), the slot worker grants that only for a user's
+connection, and `Bonder::on_bonded` refuses a bond on any other link
+([ADR 0007](adr/0007-vendored-softdevice-patch.md),
+[ADR 0011](adr/0011-interim-just-works-pairing.md)). The checks ran locally
+on Linux in a container on the working tree just before that commit; nothing
+ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 423 unit tests, 3 integration tests, 3 glyph-table tests, 2 new pairing-permission tests, and 5 vendored-portal tests. With `NEW_LINK` set to grant pairing, `a_new_link_ignores_a_security_request_without_keys` fails |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed |
+| Host coverage | Not rerun | The change adds no code to the host library; the new test file is outside the report like `tests/vendor_portal.rs` |
+| Headless Renode tests | Not run | The simulation does not run the SoftDevice, so it cannot reach the changed arm |
+| The `SEC_REQUEST` arm on air | A peripheral that sends a Security Request after losing its keys | Not performed; the arm is reviewed, not tested |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-30, License Gate, Cleanup, And Storage Versions
 
 This record covers commits `2660200` to `fc9a597`: the CI audit moved from

@@ -184,6 +184,8 @@ pub(crate) const CONNS_MAX: usize = 20;
 #[derive(Clone, Copy)]
 pub(crate) struct EncryptionState {
     pub handler: Option<&'static dyn SecurityHandler>,
+    // bt2usb patch: whether a peer's Security Request may start pairing.
+    pub pairing: crate::ble::pairing_gate::PairingPermission,
 
     pub own_enc_key: raw::ble_gap_enc_key_t,
     pub peer_enc_key: raw::ble_gap_enc_key_t,
@@ -211,6 +213,7 @@ const NEW_GAP_ID_KEY: raw::ble_gap_id_key_t = raw::ble_gap_id_key_t {
 #[cfg(feature = "ble-sec")]
 const NEW_ENCRYPTION_STATE: EncryptionState = EncryptionState {
     handler: None,
+    pairing: crate::ble::pairing_gate::PairingPermission::NEW_LINK,
     own_enc_key: NEW_GAP_ENC_KEY,
     peer_enc_key: NEW_GAP_ENC_KEY,
     peer_id: NEW_GAP_ID_KEY,
@@ -562,6 +565,20 @@ impl Connection {
     #[cfg(feature = "ble-sec")]
     pub fn security_handler(&self) -> Option<&dyn SecurityHandler> {
         with_state(self.index, |s| s.security.handler)
+    }
+
+    /// bt2usb patch: let a peer's Security Request start pairing on this link.
+    /// A new link starts without this permission, so such a request is left
+    /// unanswered when no keys are held for the peer.
+    #[cfg(feature = "ble-sec")]
+    pub fn allow_pairing(&self) {
+        with_state(self.index, |s| s.security.pairing = crate::ble::pairing_gate::PairingPermission::GRANTED)
+    }
+
+    /// bt2usb patch: whether [`Self::allow_pairing`] was called for this link.
+    #[cfg(feature = "ble-sec")]
+    pub fn may_pair(&self) -> bool {
+        with_state(self.index, |s| s.security.pairing.allows_pairing())
     }
 
     /// Set the connection params.

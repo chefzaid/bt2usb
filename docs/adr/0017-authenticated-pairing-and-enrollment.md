@@ -33,8 +33,10 @@ match arm or function):
   `SecurityMode::try_from_raw` (`types.rs`) calls every Level 2
   link, legacy or LESC, `JustWorks`; the `CONN_SEC_UPDATE` arm only traces
   the key size.
-- **Security Request.** The `SEC_REQUEST` arm calls `encrypt()`, or
-  `request_pairing()` when no keys are found, whatever the slot allows. It
+- **Security Request.** The `SEC_REQUEST` arm calls `encrypt()`, or, when no
+  keys are found, `request_pairing()` only on a link the slot granted
+  pairing (`Connection::allow_pairing`, since 2026-10-30; before that,
+  whatever the slot allowed). It
   can beat the slot's own call, which waits for the MTU exchange (the
   `central::connect_with_security` call in `connect_and_run_secure`): the S140 header text in the
   `nrf-softdevice-s140` 0.1.2 bindings gives `NRF_ERROR_BUSY` from

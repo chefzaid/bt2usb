@@ -5,13 +5,14 @@ This crate is copied from embassy-rs/nrf-softdevice commit
 licenses. Sibling crates remain git dependencies at the same commit.
 
 The GATT client changes are all in `src/ble/gatt_client.rs`, followed by the
-GATT server events bt2usb answers without the GATT server feature. Five
+GATT server events bt2usb answers without the GATT server feature. Six
 further changes are described at the end: a connection-parameter hook in
 `src/ble/security.rs` and `src/ble/gap.rs`, a `log-sensitive-data` feature
 that keeps peer addresses, passkeys, and notification bytes out of the logs by
 default, fixes for panics a peer could reach in `src/ble/gap.rs` and
 `src/ble/connection.rs`, security handler calls moved outside the connection
-state, and the event portal fix in `src/util/portal.rs`. All but the log
+state, the event portal fix in `src/util/portal.rs`, and a per-link pairing
+permission in `src/ble/pairing_gate.rs`. All but the log
 feature are marked `bt2usb patch:` in the source. The first GATT change adds
 `gatt_client::read_by_offset` and makes `read`
 delegate to it with offset zero. It exposes the SoftDevice's ATT Read Blob
@@ -142,6 +143,21 @@ an address, and a waiter's closure outlives its guard. bt2usb's
 `tests/vendor_portal.rs` compiles this file and `src/util/on_drop.rs` on the
 host and tests the guard; three of its five tests fail on the upstream code.
 
+Pairing permission (2026-10-30): when a peripheral sends a Security Request
+and the security handler holds no keys for it, upstream's `SEC_REQUEST` arm
+in `gap::on_evt` starts pairing. bt2usb reconnects bonded devices in the
+background, so a peer at a bonded address that claimed to have lost its keys
+could pair a new bond, and replace the stored one, without the user choosing
+the device. Each connection's `EncryptionState` now carries a
+`PairingPermission` from `src/ble/pairing_gate.rs`; every new link starts
+with `NEW_LINK`, and `Connection::allow_pairing` grants it. Without the
+permission the arm logs `peer security request ignored: this link may not
+pair` and leaves the link as it is; the peer may disconnect. A request for
+keys the handler holds still encrypts the link, and `Connection::may_pair`
+lets the application check the permission again in `on_bonded`. bt2usb
+grants it only on a connection the user chose in the device list.
+`tests/vendor_pairing_gate.rs` compiles the gate file on the host.
+
 Remove this patch only when the pinned upstream provides equivalent offset
 reads, timeout errors, bounded discovery, a way for the application to
 answer connection parameter requests, a way to keep peer addresses,
@@ -150,6 +166,7 @@ on an unexpected timeout source or a disconnect error, an ATT MTU that
 matches the one the SoftDevice uses, a connect that survives a refused
 MTU exchange, answers to a peer's Exchange MTU Request and system
 attribute access without the GATT server feature, security handler
-calls made outside the connection state, and a portal whose ended wait
-clears only its own registration. Do not edit the Cargo checkout to deploy this change; the root Cargo
+calls made outside the connection state, a portal whose ended wait
+clears only its own registration, and a way for the application to keep a
+peer's Security Request from starting pairing. Do not edit the Cargo checkout to deploy this change; the root Cargo
 patch and committed vendor sources make builds reproducible.

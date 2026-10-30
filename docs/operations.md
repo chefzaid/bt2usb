@@ -350,6 +350,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | warn | `sd_ble_gatts_exchange_mtu_reply err {:?}`, `sd_ble_gatts_sys_attr_set err {:?}` (vendor) | The SoftDevice rejected the bridge's answer to a peripheral's own MTU exchange or to its access of the bridge's Service Changed CCCD; the peripheral's request then times out after 30 s, and it may stop sending reports on that link | Record the peripheral and the error; if its input stops about 30 s after connecting, report it |
 | warn | `sd_ble_gap_disconnect err {:?}` (vendor) | The bridge asked to disconnect a link the SoftDevice no longer accepts a disconnect for, because it is already gone; the disconnect event that follows ends it as usual | None |
 | warn | `unhandled timeout src {:?}` (vendor) | The SoftDevice reported a GAP timeout the bridge does not act on. Source 3 is the authenticated payload timeout: an encrypted link carried no packet with a valid MIC for 480 s, which a compliant peripheral prevents by answering LE Ping. The link stays up, and every report that arrives is still authenticated | Record the peripheral and this line for the compatibility baseline |
+| warn | `peer security request ignored: this link may not pair` (vendor) | A peripheral asked to pair on a link the user did not choose, such as a background reconnect, and the bridge holds no keys for it; nothing is paired or stored, and the peer may disconnect | If it repeats for a saved device, its keys were lost on one side: Forget it and select it from a scan to pair it again |
 
 ### HID Discovery And Input
 
@@ -388,6 +389,7 @@ line. Lines from the vendored SoftDevice wrapper are marked "(vendor)".
 | info | `Updated existing paired device` | Address, name, or keys changed | A save follows |
 | warn | `Paired device store full - evicting oldest entry` | A fifth peer replaced the oldest-added one | Expected at capacity (4) |
 | warn | `Bond refused: identity address is not public or random static` | The peer named a private, anonymous, or reserved identity address during pairing, or distributed no identity key while connecting from a private address (the vendored crate then uses that address as the identity); the security handler kept no keys, nothing is stored for the device, and the OLED shows `Pairing not saved` | Record the peripheral and report it. Once the link ends, background reconnects cannot bring it back, because they never pair; select the device from a scan to pair it again |
+| warn | `Bond refused: this link was not opened for pairing` | A pairing completed on a link the user did not choose, which the pairing permission should prevent; no keys were kept and nothing was stored | Report it with the log around it |
 | warn | `Device store refused a bond whose identity is not public or random static` | Should be impossible: the security handler refuses such a bond first. The store refused the device and its keys were dropped from the security handler | Report as a defect with the preceding log |
 | error | `Paired device address has a reserved type; not stored` | Should be impossible: the SoftDevice gives every link a defined address type | Report as a defect |
 | info | `Saved {} devices to flash` | The store was written | None |
@@ -668,12 +670,8 @@ reboot or after it slept.
   and the bridge still holds keys for this peer, so this does not resolve on
   its own. Selecting the device from a scan turns the retry into a user
   connection, which shows `Connect failed` while the slot keeps retrying;
-  forget it and pair it again. (Separately, the vendored crate answers a
-  peer's Security Request by requesting pairing when it finds no keys, which
-  a background reconnect meets only when saving another device evicts this
-  one's record and keys while its attempt is under way or while the link it
-  opened is up; refusing that is open work in
-  [TODO.md](../TODO.md#ble-central-and-pairing).)
+  forget it and pair it again. A peer's request to pair on such a link is
+  left unanswered (`peer security request ignored: this link may not pair`).
 - Only the two most recently added saved peers with a bond get a slot at
   boot. A third or fourth stored peer, or one saved without a bond because it
   paired without bonding, is connected only when selected from a scan.

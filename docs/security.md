@@ -19,10 +19,9 @@ Implemented controls:
 
 - BLE bonding with an encrypted link required before HID discovery
 - the firmware itself requests new pairing only for an explicit user
-  connection, never for a background reconnect (a peer-sent Security Request
-  is a separate, untested path; see
-  [Pairing And Authentication](#pairing-and-authentication) and TODO:
-  [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing))
+  connection, never for a background reconnect, and a peer's Security Request
+  starts pairing only on a link the user chose
+  ([Pairing And Authentication](#pairing-and-authentication))
 - no fallback to fresh pairing when encryption with stored keys fails
 - bond lookup and replacement scoped to the peer's identity, not only the
   encryption master ID
@@ -144,7 +143,7 @@ implemented in the source cited; none is hardware-verified.
 | Nearby attacker | Record a pairing exchange, then decrypt later traffic | HID discovery requires an encrypted link (`wait_for_secure_link`, [slot_link.rs](../src/ble/slot_link.rs)) | Legacy Just Works pairing does not protect the key exchange from a passive recording; LE Secure Connections is not requested and a 7-byte key is accepted. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Advertise a look-alike HID device so the user selects and pairs it, then inject input | Pairing only after an explicit Connect from the device list (`allow_pairing`, [slot_worker.rs](../src/ble/slot_worker.rs)); only advertisements carrying the HID UUID are listed (`merge_advertisement` in [scan_list.rs](../src/ble/scan_list.rs)) | Names are attacker-chosen and the list shows names only; no confirmation code, allowlist, or pairing window. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Nearby attacker | Act as a man in the middle during pairing | None: `IoCapabilities::None` offers no user-confirmed authentication | TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing); [ADR 0011](adr/0011-interim-just-works-pairing.md) records the interim decision |
-| Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. Since 2026-10-11 a background reconnect runs only while `Bonder` holds the device's keys, so a peer's Security Request on it is answered by encrypting with them; if saving a device on the other slot evicts this device's record and keys while an attempt is under way or while the link it opened is up, a Security Request makes the vendored crate request pairing; untested. TODO: [Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing) |
+| Nearby attacker | Impersonate a bonded peripheral during reconnect | Background reconnects never start pairing; the stored LTK must encrypt the link before discovery; key lookup needs both master ID and identity match (`Bonder::get_key`) | Keys exposed by a recorded pairing (first row) defeat this check. A background reconnect runs only while `Bonder` holds the device's keys; if they are evicted during the attempt, a peer's Security Request is left unanswered, because only a link the user chose may pair (`Connection::allow_pairing`, a vendored patch), and `Bonder::on_bonded` refuses a bond on any other link. Shown by host tests of the permission, not yet on air |
 | Nearby attacker | Fill the scan list with fake HID advertisers, or jam the radio | Scan list bounded to `BLE_MAX_DISCOVERED` (8), keeping the eight HID advertisers received most strongly (`merge_advertisement` in [scan_list.rs](../src/ble/scan_list.rs)); scan window 8 s plus a 2 s backstop; connect attempts bounded to 6 s ([config.rs](../src/config.rs), [scanner.rs](../src/ble/scanner.rs)) | Fake advertisers received more strongly than the intended device, such as a transmitter closer to the bridge, can still push it out of the list, and a listed name is whatever the advertiser chooses ([ADR 0011](adr/0011-interim-just-works-pairing.md)); jamming cannot be prevented |
 | Nearby attacker | Crash or hang the bridge with malformed advertisements | Bounded AD-structure walk and UTF-8 name handling ([adv_parser.rs](../src/ble/adv_parser.rs)) | No fuzzing. TODO: [Parser fuzzing and property tests](../TODO.md#verification-and-code-quality) |
 | Paired peripheral (malicious or compromised) | Type or click anything, including consumer usages and host wake | By design it is trusted as local input; consumer usages capped at `0x0FFF`; wake only on a newly pressed input ([wake.rs](../src/hid/wake.rs)) | No per-device capability limits: a peer whose Report Map declares a keyboard can type. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
@@ -188,7 +187,15 @@ interim choice.
 HID discovery waits for an encrypted link; signed-only modes are not sufficient.
 `wait_for_secure_link` polls the link up to 25 times at 200 ms and accepts only
 `SecurityMode::JustWorks`, `Mitm`, or `LescMitm`. The application initiates new
-pairing only for an explicit user connection, not a background reconnect. When
+pairing only for an explicit user connection, not a background reconnect, and
+only such a link may pair when the peer sends a Security Request: every new
+link starts without permission to pair (`PairingPermission::NEW_LINK` in the
+vendored [pairing_gate.rs](../vendor/nrf-softdevice/src/ble/pairing_gate.rs)),
+the slot worker grants it with `Connection::allow_pairing` only for a user's
+connection, and the vendored Security Request handler pairs only with it
+(otherwise `peer security request ignored: this link may not pair`).
+`Bonder::on_bonded` also refuses a bond on a link without it (`Bond refused:
+this link was not opened for pairing`). When
 keys already exist for the peer, a failed encryption never falls back to fresh
 pairing, even on an explicit connection; to re-pair a device that lost its
 bond, Forget it first. Bond lookups and updates are tied to peer identity, not
@@ -614,7 +621,8 @@ Linux and Windows in CI. Malformed and hostile input is covered here:
 Not covered by automated tests:
 
 - the vendored GATT discovery hardening (`vendor/` has no tests of its own;
-  only its event portal is tested, from `tests/vendor_portal.rs`)
+  only its event portal and pairing permission are tested, from
+  `tests/vendor_portal.rs` and `tests/vendor_pairing_gate.rs`)
 - the `src/storage.rs` shell: flash reads and writes, write retries, the
   conversion to SoftDevice address and key types, and IRK resolution through
   the SoftDevice

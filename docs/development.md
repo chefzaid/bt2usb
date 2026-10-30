@@ -169,7 +169,7 @@ and `sim` features select mutually exclusive configurations.
 
 | Configuration | Command shape | Builds | Linker map | Critical section |
 | --- | --- | --- | --- | --- |
-| Host library and tests | `cargo test --locked --lib --tests` (no feature, no target) | `src/lib.rs` modules and the three files in `tests/` | Not used | Not used by the library; `tests/vendor_portal.rs` uses the `std` implementation of `critical-section`, a dev-dependency |
+| Host library and tests | `cargo test --locked --lib --tests` (no feature, no target) | `src/lib.rs` modules and the four files in `tests/` | Not used | Not used by the library; `tests/vendor_portal.rs` uses the `std` implementation of `critical-section`, a dev-dependency |
 | Firmware | `--features embedded --target thumbv7em-none-eabihf` | `bt2usb`, `bt2usb-selftest` | `memory_sd.x` | nrf-softdevice `critical-section-impl` |
 | Simulation | `--features sim --target thumbv7em-none-eabihf` | `bt2usb-sim` | `memory_sim.x` | `cortex-m/critical-section-single-core` |
 

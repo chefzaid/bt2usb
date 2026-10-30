@@ -384,8 +384,17 @@ pub(crate) unsafe fn on_evt(ble_evt: *const raw::ble_evt_t) {
                 #[cfg(feature = "ble-sec")]
                 let res = match conn.encrypt() {
                     Ok(()) => Ok(()),
+                    // bt2usb patch: pair only on a link the application allowed
+                    // to pair; upstream paired whenever no keys were found.
                     Err(EncryptError::NoSecurityHandler) | Err(EncryptError::PeerKeysNotFound) => {
-                        conn.request_pairing()
+                        let permission = conn.with_state(|state| state.security.pairing);
+                        match permission.on_security_request_without_keys() {
+                            crate::ble::pairing_gate::SecurityRequestAnswer::Pair => conn.request_pairing(),
+                            crate::ble::pairing_gate::SecurityRequestAnswer::Ignore => {
+                                warn!("peer security request ignored: this link may not pair");
+                                Ok(())
+                            }
+                        }
                     }
                     Err(EncryptError::Disconnected) => Err(AuthenticateError::Disconnected),
                     Err(EncryptError::Raw(err)) => Err(AuthenticateError::Raw(err)),

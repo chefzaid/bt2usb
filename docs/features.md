@@ -250,8 +250,8 @@ seconds of starting to advertise. Both figures follow from the scan timing; the
 times from power-up and from a key press on a sleeping keyboard to the first
 keystroke on the PC are not measured yet
 ([TODO.md](../TODO.md#ble-central-and-pairing)). The application does not request a new pairing
-for a background attempt (a peer's own Security Request is the exception; see
-[Connection And Security](#connection-and-security)), and a failure to find,
+for a background attempt, nor lets the peer start one
+([Connection And Security](#connection-and-security)), and a failure to find,
 connect, or secure the device is retried silently, as is a link that drops
 while the bridge discovers its HID service. Other failures, such as a peer
 without a usable HID service or an unreadable Report Map on a link that stays
@@ -459,14 +459,11 @@ security handler is in [`ble/bonder.rs`](../src/ble/bonder.rs)
   `slot N failed to secure BLE link` when this fails.
 - The application requests a fresh pairing only for a connection the user
   chose from a list. Background reconnects use existing keys, run only while
-  the bridge holds them, and never request a replacement pairing. The pinned
-  nrf-softdevice event handler still answers a peripheral's own security
-  request by pairing when it holds no keys for that peer
-  ([`gap.rs`](../vendor/nrf-softdevice/src/ble/gap.rs)), which a background
-  reconnect meets only when saving another device evicts this device's record,
-  and with it its keys, while its attempt is under way or while the link it
-  opened is up
-  ([technical boundaries](#current-technical-boundaries)).
+  the bridge holds them, and never request a replacement pairing. A
+  peripheral's own Security Request starts pairing only on a link the user
+  chose; on any other link the bridge leaves it unanswered when it holds no
+  keys for the peer, and logs `peer security request ignored: this link may
+  not pair` ([`pairing_gate.rs`](../vendor/nrf-softdevice/src/ble/pairing_gate.rs)).
 - Bonds are scoped to the peer's identity. Re-pairing replaces only the keys of
   the peer whose identity address or identity key matches, never another
   peer's, because the encryption master ID is not a peer identity. Keys are
@@ -956,15 +953,6 @@ implemented, so do not describe them as features.
   confirmation, or pairing window, so a device in radio range while you pair
   can intercept or impersonate the one you chose
   ([authenticated pairing](../TODO.md#ble-central-and-pairing)).
-- **A background reconnect can still pair in one narrow case.** The bridge
-  never starts pairing for a background reconnect, and since 2026-10-11 runs
-  one only while it holds the device's keys, so the device's own request to
-  pair is answered by encrypting with those keys (read from the code path;
-  not yet shown by a test or on air). If saving another device evicts this
-  one's record, and with it its keys, while an attempt is under way or while
-  the link it opened is up, and the device at the other end then asks to
-  pair, the pairing still goes ahead without you choosing anything
-  ([Refuse peer-initiated pairing on background reconnects](../TODO.md#ble-central-and-pairing)).
 - **The scan list holds eight devices.** Since 2026-10-10 it keeps the eight
   HID advertisers received most strongly, so a peripheral held next to the
   bridge is listed however many others are in range. Fake advertisers that

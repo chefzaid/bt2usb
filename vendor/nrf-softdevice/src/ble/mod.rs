@@ -16,6 +16,10 @@ mod common;
 #[cfg(feature = "ble-sec")]
 pub mod security;
 
+// bt2usb patch: the per-link permission a peer's Security Request respects.
+#[cfg(feature = "ble-sec")]
+pub mod pairing_gate;
+
 #[cfg(feature = "ble-central")]
 pub mod central;
 

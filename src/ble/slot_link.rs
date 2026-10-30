@@ -171,6 +171,12 @@ pub(crate) async fn connect_and_run_secure(
             Err(_) => return SlotOutcome::Failed(BleErrorTag::ConnectFailed),
         }
     };
+    // Only a user's connection may pair. Every other link keeps the vendored
+    // crate's default, under which a peer's Security Request for keys the
+    // bridge does not hold starts no pairing.
+    if allow_pairing {
+        conn.allow_pairing();
+    }
 
     // Once a link is owned, disconnect promptly when the user cancels during
     // security or GATT discovery, not only after notifications start flowing.

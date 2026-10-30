@@ -166,6 +166,12 @@ impl SecurityHandler for Bonder {
         peer_id: IdentityKey,
     ) {
         let link = conn.peer_address();
+        // Pairing starts only on a link opened for it, so this does not
+        // happen; if it ever did, a background link must not replace a bond.
+        if !conn.may_pair() {
+            warn!("Bond refused: this link was not opened for pairing");
+            return;
+        }
         let mut refused = self.refused.borrow_mut();
         refused.retain(|refused_link| *refused_link != link);
         // The peer chose its identity address. The store refuses one that is

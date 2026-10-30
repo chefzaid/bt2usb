@@ -67,8 +67,6 @@ def check(root: Path, docs: dict[str, Document]) -> list[Finding]:
     for name in sections:
         if name not in listed:
             findings.append(
-                Finding(
-                    PLAN, heading_line(doc, TABLE), "status", f"{name} has items but no row"
-                )
+                Finding(PLAN, heading_line(doc, TABLE), "status", f"{name} has items but no row")
             )
     return findings

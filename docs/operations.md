@@ -270,7 +270,7 @@ A first pairing adds `Added paired device - now storing N` and
 | Situation | Screen |
 | --- | --- |
 | Boot with no saved peers | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` |
-| Boot with saved peers | The Home screen until a saved peer connects, then `Connected` with each connected device's name |
+| Boot with saved peers | Home with `bt2usb / Reconnecting` until a saved peer connects, then `Connected` with each connected device's name |
 | 120 seconds without activity | Display off; the first button press only turns it back on |
 | PC asleep (USB suspended) | Display off until the host resumes |
 

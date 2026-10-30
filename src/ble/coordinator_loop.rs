@@ -100,12 +100,18 @@ pub async fn run<Io: CoordinatorIo>(io: &mut Io) -> ! {
     // first: each slot's reconnect scan resolves a rotating private address
     // itself, and one slot's scan also finds the other slot's device, so the
     // keyboard can type as soon as it advertises.
-    for (slot, device) in io.reconnect_targets().await.into_iter().enumerate() {
+    let targets = io.reconnect_targets().await;
+    let reconnecting = !targets.is_empty();
+    for (slot, device) in targets.into_iter().enumerate() {
         let attempt = manager.reserve_retry(slot, &device);
         // A paired device that's asleep or off right now will advertise
         // once it wakes, so keep trying rather than failing once.
         io.command(slot, SlotCommand::Reconnect { device, attempt })
             .await;
+    }
+    if reconnecting {
+        // Home says so until a link comes up or every retry ends.
+        io.emit(coordinator::link_state(&manager).into()).await;
     }
 
     loop {

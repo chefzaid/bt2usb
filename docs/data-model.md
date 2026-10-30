@@ -584,7 +584,7 @@ from the reducer's `UiCommand`.
 | --- | --- | --- | --- |
 | `StartScan` | — | Scan for HID peripherals for `BLE_SCAN_DURATION_SECS`; if both slots are occupied, disconnect both first | `ScanStarted`, `DeviceFound`…, `ScanComplete`, or `Error(ScanFailed)` |
 | `Connect(usize)` | Index into the coordinator's last scan result | Connect and allow pairing | `Connected` or `Error`; an out-of-range index or no free slot gives `Error(ConnectFailed)`; an already connected peer gives `Connected` at once |
-| `Disconnect` | — | Disconnect every occupied slot; records are kept | `Disconnected` or `Connected(summary)` as slots free |
+| `Disconnect` | — | Disconnect every occupied slot; records are kept | `Connected(names)`, `Reconnecting`, or `Disconnected` as slots free |
 | `ListPaired { id }` | Request ID | Read the saved-device list | `PairedDevices { id, devices }` |
 | `Forget { id, address }` | Request ID, stored identity address | Stop matching workers, remove the record, drop its bond | Link status event, then `ManagementResult { id, result }`; a failed lookup sends only `ManagementResult` with `ManagementFailed` |
 | `FactoryReset { id }` | Request ID | Stop all workers, clear every record and bond; recover an unreadable store | Link status event, then `ManagementResult { id, result }` |
@@ -606,7 +606,8 @@ converts into it with `From`.
 | `DeviceFound(DiscoveredDevice)` | Address, name (`"Unknown"` if none advertised), RSSI | Once per HID device at the end of a scan, up to 8 |
 | `ScanComplete` | — | The scan window closed |
 | `Connected(LinkNames)` | Each connected device's name, in slot order (`Vec<String<32>, 2>`) | A slot connected, or a slot changed while another stays connected |
-| `Disconnected` | — | No slot is connected |
+| `Reconnecting` | — | No slot is connected, and a slot is reconnecting a saved device in the background: at power-up, after its link dropped, or after a failed selection handed it back to the retry |
+| `Disconnected` | — | No slot is connected or reconnecting |
 | `Error(BleErrorTag)` | Error tag | A user-visible failure; see the table below |
 | `PairedDevices { id, devices }` | Request ID, up to 4 `DiscoveredDevice`, newest first | Reply to `ListPaired` |
 | `ManagementResult { id, result }` | Request ID, `Result<(), BleErrorTag>` | Reply to `Forget` or `FactoryReset`; `Ok` means the change reached flash |
@@ -750,7 +751,7 @@ sequenceDiagram
     C->>S: forget(stored address), write, then replace cache
     S-->>C: Ok or StoreError
     C->>B: forget(address), only after Ok
-    C-->>UI: BleEvent::Connected(summary) or Disconnected
+    C-->>UI: BleEvent::Connected(names), Reconnecting, or Disconnected
     C-->>UI: BleEvent::ManagementResult { id, result }
 ```
 
@@ -775,6 +776,7 @@ power flag to the display task after every event
 | `devices` | `Vec<String<32>, 8>` | Names from the current scan, in scan order |
 | `paired_names` | `Vec<String<32>, 4>` | Names from the last `PairedDevices` reply |
 | `connected_names` | `Vec<String<32>, 2>` | The connected devices' names, in slot order; empty when nothing is connected |
+| `reconnecting` | `bool` | Nothing is connected and a saved device is being reconnected; Home shows `bt2usb / Reconnecting` |
 | `message` | `String<32>` | Error or notice text, truncated by characters |
 | `scan_dots` | `u8` | Scanning animation, advanced once per second while scanning with the display on |
 
@@ -797,7 +799,7 @@ message. Events change screens as follows:
 | `ScanStarted` | From `Home` or `Scanning`: enter `Scanning` and clear the list; other screens are kept |
 | `DeviceFound` | Name appended only while `Scanning` |
 | `ScanComplete` | From `Scanning`: `DeviceList`, or `Error` with `No devices found` |
-| `Connected` / `Disconnected` | Update `connected_names`; `Home`, `Connecting` and `Connected` follow the link state; a scan's `Scanning` or `DeviceList`, dialogs, and errors are kept |
+| `Connected` / `Reconnecting` / `Disconnected` | Update `connected_names` and `reconnecting`, which only `Reconnecting` sets; `Home`, `Connecting` and `Connected` follow the link state; a scan's `Scanning` or `DeviceList`, dialogs, and errors are kept |
 | `Error(tag)` | `Error` with the tag's message |
 | `Notice(notice)` | `Paired` with the notice's message unless an error is showing |
 | `PairedDevices` (matching ID) | Store names; enter `SavedDevices` unless an error is showing |

@@ -32,7 +32,7 @@ fn a_lost_link_reconnects_at_the_new_address_the_scan_finds() {
     // It sleeps again; the slot stays reserved and scans for it.
     bench.link([Step::End(SlotOutcome::Closed)]);
     bench.settle(&mut worker);
-    assert_eq!(bench.ui.last(), Some(&UiEvent::Disconnected));
+    assert_eq!(bench.ui.last(), Some(&UiEvent::Reconnecting));
     assert!(bench.manager.is_slot_occupied(SLOT));
     let lost = Call::Note(Note::LinkLostReconnecting);
     assert!(bench.state.calls.borrow().contains(&lost));
@@ -130,7 +130,13 @@ fn a_selection_during_the_scan_takes_the_retry_over_and_resumes_it_on_failure() 
     // The user's connection may pair, and its failure is shown, but the slot
     // goes back to waiting for the keyboard.
     assert_eq!(bench.attempts(), [(KEYBOARD, true)]);
-    assert_eq!(bench.ui, failed(ErrorTag::ConnectFailed));
+    assert_eq!(
+        bench.ui,
+        [
+            UiEvent::Error(ErrorTag::ConnectFailed),
+            UiEvent::Reconnecting
+        ]
+    );
     assert!(bench.manager.is_slot_occupied(SLOT));
     // Any pairing the failed connection made is dropped; saved keys stay.
     assert_eq!(bench.discarded, [KEYBOARD]);
@@ -238,7 +244,7 @@ fn a_full_event_channel_holds_the_worker_without_losing_or_reordering_reports() 
     bench.settle(&mut worker);
     assert_eq!(
         bench.ui,
-        [shows_keyboard(), UiEvent::Disconnected, shows_keyboard()]
+        [shows_keyboard(), UiEvent::Reconnecting, shows_keyboard()]
     );
     assert_eq!(bench.attempts().len(), 2);
 }

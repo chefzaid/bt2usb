@@ -65,6 +65,8 @@ pub enum Event<A> {
     ScanComplete,
     /// At least one link is up: each connected device's name, in slot order.
     Connected(LinkNames),
+    /// No link is up, and a slot is reconnecting a saved device.
+    Reconnecting,
     /// No link is up.
     Disconnected,
     /// An error the UI shows until the user acknowledges it.
@@ -89,7 +91,7 @@ impl<A> Event<A> {
     pub fn link_up(&self) -> Option<bool> {
         match self {
             Self::Connected(_) => Some(true),
-            Self::Disconnected => Some(false),
+            Self::Reconnecting | Self::Disconnected => Some(false),
             _ => None,
         }
     }
@@ -99,6 +101,7 @@ impl<A> From<UiEvent> for Event<A> {
     fn from(event: UiEvent) -> Self {
         match event {
             UiEvent::Connected(names) => Self::Connected(names),
+            UiEvent::Reconnecting => Self::Reconnecting,
             UiEvent::Disconnected => Self::Disconnected,
             UiEvent::Error(tag) => Self::Error(tag),
         }
@@ -144,6 +147,7 @@ mod tests {
             Some(true)
         );
         assert_eq!(Event::<u8>::Disconnected.link_up(), Some(false));
+        assert_eq!(Event::<u8>::Reconnecting.link_up(), Some(false));
         for event in [
             Event::<u8>::ScanStarted,
             Event::ScanComplete,
@@ -171,6 +175,10 @@ mod tests {
         assert_eq!(
             Event::<u8>::from(UiEvent::Disconnected),
             Event::Disconnected
+        );
+        assert_eq!(
+            Event::<u8>::from(UiEvent::Reconnecting),
+            Event::Reconnecting
         );
         assert_eq!(
             Event::<u8>::from(UiEvent::Error(ErrorTag::HidNotFound)),

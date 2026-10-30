@@ -42,7 +42,12 @@ pub fn lines(state: &UiState) -> Vec<Line, MAX_LINES> {
     let mut out = Vec::new();
     match state.screen {
         Screen::Home => {
-            push(&mut out, 10, "bt2usb / Idle");
+            let status = if state.reconnecting {
+                "bt2usb / Reconnecting"
+            } else {
+                "bt2usb / Idle"
+            };
+            push(&mut out, 10, status);
             push(&mut out, 30, "SELECT: scan");
             push(&mut out, 48, "UP: saved devices");
         }

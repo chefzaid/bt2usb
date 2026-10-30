@@ -241,6 +241,8 @@ pub struct UiState {
     pub connected_names:
         heapless::Vec<heapless::String<32>, { crate::config::BLE_MAX_CONNECTIONS }>,
     pub message: heapless::String<32>,
+    /// No link is up and the bridge is reconnecting a saved device.
+    pub reconnecting: bool,
     pub scan_dots: u8,
 }
 
@@ -259,6 +261,7 @@ impl UiState {
             paired_names: heapless::Vec::new(),
             connected_names: heapless::Vec::new(),
             message: heapless::String::new(),
+            reconnecting: false,
             scan_dots: 0,
         }
     }
@@ -316,6 +319,7 @@ impl UiState {
 
     /// The links now up: each connected device's name, none when no link is.
     pub fn connection_status(&mut self, names: &[heapless::String<32>]) {
+        self.reconnecting = false;
         self.connected_names.clear();
         for name in names {
             // The coordinator names at most one device per link.
@@ -328,6 +332,13 @@ impl UiState {
             self.devices.clear();
             self.selected = 0;
         }
+    }
+
+    /// No link is up, but the bridge is reconnecting a saved device in the
+    /// background, which Home shows.
+    pub fn reconnecting_in_background(&mut self) {
+        self.connection_status(&[]);
+        self.reconnecting = true;
     }
 
     pub fn management_completed(&mut self, command: UiCommand) {

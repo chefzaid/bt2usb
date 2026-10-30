@@ -118,6 +118,33 @@ fn link_state_names_each_connected_device_in_slot_order() {
     assert_eq!(link_state(&m), shows(&["Keyboard"]));
 }
 
+#[test]
+fn link_state_reports_background_reconnects_until_every_one_ends() {
+    let (kb, mouse) = (dev(1, "Keyboard"), dev(2, "Mouse"));
+    let mut m = mgr();
+    // Power-up: both saved devices are being reconnected.
+    let kb_retry = m.reserve_retry(0, &kb);
+    m.reserve_retry(1, &mouse);
+    assert_eq!(link_state(&m), UiEvent::Reconnecting);
+    // A link that is up wins over a retry in the other slot.
+    m.connect_slot(1, &mouse);
+    assert_eq!(link_state(&m), shows(&["Mouse"]));
+    // Its link drops, so both slots retry again.
+    let mouse_retry = m.slot_attempt(1);
+    let acts = on_slot_link_lost(&mut m, 1, mouse_retry, &mouse);
+    assert_eq!(acts.as_slice(), &[Action::Emit(UiEvent::Reconnecting)]);
+    // A retry that stops (here the keys are gone) leaves the other one.
+    let acts = on_slot_error(&mut m, 0, kb_retry, ErrorTag::KeysMissing, false);
+    assert_eq!(acts.last(), Some(&Action::Emit(UiEvent::Reconnecting)));
+    // A command that frees the last retrying slot (Disconnect, or a scan with
+    // both slots busy) ends it: its worker reports the slot free.
+    let acts = on_slot_disconnected(&mut m, 1, mouse_retry);
+    assert_eq!(acts.last(), Some(&Action::Emit(UiEvent::Disconnected)));
+    // A user connection in progress is not a background reconnect.
+    m.reserve_slot(0, &kb);
+    assert_eq!(link_state(&m), UiEvent::Disconnected);
+}
+
 // ── Reducers ────────────────────────────────────────────────────────────
 
 #[test]
@@ -301,8 +328,8 @@ fn on_slot_link_lost_keeps_slot_reserved_for_reconnect() {
     let kb = dev(1, "kb");
     let attempt = m.connect_slot(0, &kb);
     let acts = on_slot_link_lost(&mut m, 0, attempt, &kb);
-    assert_eq!(acts.len(), 1);
-    assert_eq!(acts[0], Action::Emit(UiEvent::Disconnected));
+    // No link is up, and Home says the keyboard is being reconnected.
+    assert_eq!(acts.as_slice(), &[Action::Emit(UiEvent::Reconnecting)]);
     // Not active any more, but still held for the same device under the same
     // number, so a connect request for another device can't take the slot
     // out from under the reconnect (selecting the same device turns the

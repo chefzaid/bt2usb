@@ -302,14 +302,25 @@ Sim Runs The UI Controller, Display, Coordinator, Management, And Store
     Oled Should Show          bt2usb / Idle    SELECT: scan    UP: saved devices    steps=40
     Oled Showed No Power-On Noise
 
-    # Step 3 has no link left to close; the next cycle's keyboard is saved
-    # again, so the reset store accepts writes.
+    # Steps 3 and 4 have no link left to lose or close; the next cycle's
+    # keyboard is saved again, so the reset store accepts writes.
     Wait For Line On Uart     scenario: disconnect all
     Wait For Line On Uart     scenario: active_count=0 occupied_count=0
     Wait For Line On Uart     scenario: connect device 0 (Keyboard)
     Wait For Line On Uart     holds 1 device(s); reload matches
     Wait For Line On Uart     event: Connected 'Keyboard' -> screen Connected (selected 0)    pauseEmulation=true
     Oled Should Show          Connected    Keyboard    SEL:add DOWN:disc    UP:saved devices
+
+    # Step 1 adds the mouse; steps 2 and 3 drop the keyboard's link, then the
+    # mouse's. Both slots stay reserved while their workers reconnect, so Home
+    # says so, until step 4 closes them.
+    Wait For Line On Uart     event: Connected 'Keyboard', 'Mouse' -> screen Connected (selected 0)
+    Wait For Line On Uart     scenario: slot 1 kept reserved for 0xb2
+    Wait For Line On Uart     event: Reconnecting -> screen Home (selected 0)    pauseEmulation=true
+    Oled Should Show          bt2usb / Reconnecting    SELECT: scan    UP: saved devices
+    Wait For Line On Uart     scenario: disconnect all
+    Wait For Line On Uart     event: Disconnected -> screen Home (selected 0)    pauseEmulation=true
+    Oled Should Show          bt2usb / Idle    SELECT: scan    UP: saved devices
 
 A Stack Overflow Faults In The Guard And Is Reported
     # The firmware has no code path that overflows, so the test moves the

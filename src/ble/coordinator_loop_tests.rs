@@ -44,11 +44,12 @@ fn power_up_reports_an_unwritable_store_and_reconnects_the_newest_saved_devices(
                     attempt: 2
                 }
             ),
+            Call::Emit(Event::Reconnecting),
         ]
     );
 
-    // Nothing is shown until a link is up. The keyboard comes back at its new
-    // address, which is saved as its live address.
+    // Home says both are being reconnected until a link is up. The keyboard
+    // comes back at its new address, which is saved as its live address.
     bench.connected(&mut coordinator, 1, KEYBOARD_NOW);
     assert_eq!(
         bench.take(),
@@ -240,7 +241,8 @@ fn forget_quiesces_only_the_slot_holding_the_device_and_drops_its_late_reports()
         bench.take(),
         [
             Call::Forget(Some(KEYBOARD)),
-            Call::Emit(Event::Disconnected),
+            // The mouse's slot is still reconnecting it.
+            Call::Emit(Event::Reconnecting),
             result(7, Ok(())),
             Call::Send(0, SlotCommand::Disconnect),
         ]

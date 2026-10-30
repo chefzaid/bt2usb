@@ -8,6 +8,25 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Reconnecting On Home
+
+This record covers the commit that checks off the P2 item "Show that saved
+devices are reconnecting" in [TODO.md](../TODO.md#clearer-bridge-screens): a
+new link-state event, `Reconnecting`, reports that no link is up while a slot
+reconnects a saved device in the background; the coordinator loop sends it
+after the power-up reconnects, and Home reads `bt2usb / Reconnecting` until a
+link comes up or `Disconnected` arrives. Tests that expected `Disconnected`
+after a lost link or a takeover handed back to its retry now expect
+`Reconnecting`. The simulation's scenario gains a fifth step that drops the
+mouse's link as well.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Local CI script | Format, host and three firmware Clippy configurations, host tests, rustdoc, documentation checks, release and simulation builds | Passed |
+| Host tests | `cargo test --locked --lib` | 486 passed, 2 new: a coordinator test from power-up through link loss, a stopped retry, and a freed slot to `Disconnected`, and a controller test of Home's status, including after an acknowledged error; seven existing expectations changed from `Disconnected` to `Reconnecting` |
+| Renode | `renode-test renode/bt2usb-sim.robot` with the local platform copy without `ApplySVD` | 3 of 3 passed; with both links lost the panel reads `bt2usb / Reconnecting`, then `bt2usb / Idle` once step 4 closes both slots |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed after the Test Map rows (28, 22) and totals (499, 486) were updated |
+
 ## Validation Record — 2026-10-30, Both Device Names On Connected
 
 This record covers the commit that checks off the P2 item "Name both

@@ -104,7 +104,7 @@ fn a_failed_takeover_goes_back_to_the_retry() {
         &[
             Action::DiscardUnsavedBond(7),
             Action::Emit(UiEvent::Error(ErrorTag::ConnectFailed)),
-            Action::Emit(UiEvent::Disconnected),
+            Action::Emit(UiEvent::Reconnecting),
         ]
     );
     // Held for the device under the same number while the worker retries.

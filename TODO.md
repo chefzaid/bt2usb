@@ -38,8 +38,8 @@ probe, or USB host to close.
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
-| [Product Extensions](#product-extensions) | 2 | 30 | 0 |
-| **Total** | **159** | **66** | **20** |
+| [Product Extensions](#product-extensions) | 3 | 29 | 0 |
+| **Total** | **160** | **65** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1541,9 +1541,9 @@ verify them; a board confirms them with the rest of the
   `src/ui/layout.rs` draws one per row
   ([validation record](docs/validation-records.md#validation-record--2026-10-30-both-device-names-on-connected))
   *(hardware evidence pending)*.
-- [ ] **P2** **Show that saved devices are reconnecting.** Home reads
-  `bt2usb / Idle` while the bridge is still reconnecting saved devices at
-  power-up or after a link drops, so nothing tells the user to wake the
+- [x] **P2** **Show that saved devices are reconnecting.** Home read
+  `bt2usb / Idle` while the bridge was still reconnecting saved devices at
+  power-up or after a link dropped, so nothing told the user to wake the
   keyboard. Show `bt2usb / Reconnecting` while any slot holds a saved device
   without a link (occupied but inactive in `ConnManager`), and `Idle` again
   once none does: the device connects, its retry stops with an error such as
@@ -1551,7 +1551,14 @@ verify them; a board confirms them with the rest of the
   the slot. Accept when coordinator and controller tests cover power-up, link
   loss, a stopped retry, and each command that frees a slot, and the Renode
   scenario reads it back from the modelled panel
-  ([features](docs/features.md#boot-and-reconnect)).
+  ([features](docs/features.md#boot-and-reconnect)). Done 2026-10-30:
+  `link_state` reports `UiEvent::Reconnecting` when no link is up and a slot
+  retries (`ConnManager::is_reconnecting` in `src/ble/coordinator.rs`),
+  `coordinator_loop::run` sends it after the power-up reconnects, and Home
+  shows it (`UiState::reconnecting`, `src/ui/layout.rs`); the simulation's
+  new fifth step drops the mouse's link too
+  ([validation record](docs/validation-records.md#validation-record--2026-10-30-reconnecting-on-home))
+  *(hardware evidence pending)*.
 - [ ] **P2** **Bridge information screen.** The firmware version, source
   commit, and last reset cause reach only the RTT log (`src/diagnostics.rs`),
   so reading them needs a debug probe, which a user reporting a defect from a

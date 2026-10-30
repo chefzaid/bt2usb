@@ -270,6 +270,12 @@ impl<A: Clone + PartialEq> ConnManager<A> {
         }
     }
 
+    /// Whether a slot is reconnecting a saved device in the background, at
+    /// power-up or after its link dropped, and has no link up yet.
+    pub fn is_reconnecting(&self) -> bool {
+        self.slots.iter().any(|s| s.retrying && !s.connected)
+    }
+
     /// Names of all connected (not merely connecting) devices, in slot order.
     pub fn get_connected_names(&self) -> LinkNames {
         let mut names = Vec::new();
@@ -282,13 +288,16 @@ impl<A: Clone + PartialEq> ConnManager<A> {
     }
 }
 
-/// The UI event that reports the links now up: `Disconnected` when none is,
-/// otherwise `Connected` with each connected device's name.
+/// The UI event that reports the links now up: `Connected` with each
+/// connected device's name, or, when none is, `Reconnecting` while a slot
+/// reconnects a saved device in the background and `Disconnected` otherwise.
 pub fn link_state<A: Clone + PartialEq>(manager: &ConnManager<A>) -> UiEvent {
-    if manager.active_count() == 0 {
-        UiEvent::Disconnected
-    } else {
+    if manager.active_count() > 0 {
         UiEvent::Connected(manager.get_connected_names())
+    } else if manager.is_reconnecting() {
+        UiEvent::Reconnecting
+    } else {
+        UiEvent::Disconnected
     }
 }
 
@@ -299,6 +308,8 @@ pub type LinkNames = Vec<String<32>, MAX_CONNECTIONS>;
 #[derive(Clone, PartialEq, Debug)]
 pub enum UiEvent {
     Connected(LinkNames),
+    /// No link is up, and a slot is reconnecting a saved device.
+    Reconnecting,
     Disconnected,
     Error(ErrorTag),
 }

@@ -166,6 +166,7 @@ impl<A: Clone> UiController<A> {
             }
             Event::ScanComplete => self.state.scan_complete(),
             Event::Connected(names) => self.state.connection_status(&names),
+            Event::Reconnecting => self.state.reconnecting_in_background(),
             Event::Disconnected => self.state.connection_status(&[]),
             Event::Error(tag) => self.state.error(error_message(tag)),
             Event::Notice(notice) => self.state.paired(notice_message(notice)),

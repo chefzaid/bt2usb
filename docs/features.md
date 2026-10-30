@@ -100,7 +100,7 @@ state behind these screens is in the
 
 | Screen | `Screen` variant | What it shows | UP | DOWN | SELECT |
 | --- | --- | --- | --- | --- | --- |
-| Home | `Home` | `bt2usb / Idle`, `SELECT: scan`, `UP: saved devices` | Open saved devices | — | Start an 8-second scan |
+| Home | `Home` | `bt2usb / Idle`, or `bt2usb / Reconnecting` while a saved device is being reconnected, `SELECT: scan`, `UP: saved devices` | Open saved devices | — | Start an 8-second scan |
 | Scanning | `Scanning` | `Scanning` and a dot animation that advances once per second | — | — | — |
 | Select device | `DeviceList` | `Select device`, up to four device names, `>` on the highlighted row | Move up, stopping at the first | Move down, stopping at the last | Connect to the highlighted device |
 | Connecting | `Connecting` | `Connecting...` | — | — | — |
@@ -240,7 +240,9 @@ saved: reconnecting or renaming a saved device does not move it
 
 Each slot then keeps reconnecting in the background until it succeeds, the
 user gives it another command, or the device can no longer be reached with
-the keys the bridge holds. An attempt listens for up to 6 seconds for the saved device, recognizing
+the keys the bridge holds. While no link is up and a slot is still trying,
+Home reads `bt2usb / Reconnecting` instead of `bt2usb / Idle`, so a sleeping
+keyboard only needs a key press; the same holds after the last link drops. An attempt listens for up to 6 seconds for the saved device, recognizing
 it by its identity key, so a rotating private address still matches, or by
 the address it last used. One slot's search also looks for the other slot's device and hands it
 over when it hears it, so a mouse that is asleep never keeps the keyboard

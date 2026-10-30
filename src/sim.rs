@@ -171,6 +171,7 @@ fn describe(out: &mut impl core::fmt::Write, event: &Event<SimAddr>) -> core::fm
             }
             Ok(())
         }
+        Event::Reconnecting => write!(out, "Reconnecting"),
         Event::Disconnected => write!(out, "Disconnected"),
         Event::Error(tag) => write!(out, "Error {:?}", tag),
         Event::Notice(notice) => write!(out, "Notice {:?}", notice),

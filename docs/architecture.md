@@ -351,7 +351,9 @@ store when it first runs, then plans boot reconnects:
    address as described in [background reconnect](#background-reconnect):
    whichever slot holds the radio looks for both saved devices at the fast duty
    cycle, so a keyboard can connect as soon as it advertises, whether or not
-   the mouse is awake.
+   the mouse is awake. When it reserved any slot, it then sends
+   `BleEvent::Reconnecting`, so Home reads `bt2usb / Reconnecting` until a
+   link comes up or every retry ends.
 6. Enters its loop, which serves UI commands and slot events one at a time.
 
 ```mermaid

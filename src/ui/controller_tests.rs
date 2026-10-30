@@ -391,3 +391,26 @@ fn the_connected_screen_names_each_link_until_the_last_one_ends() {
     assert_eq!(ui.state.screen, Screen::Home);
     assert!(ui.state.connected_names.is_empty());
 }
+
+#[test]
+fn home_says_when_saved_devices_are_reconnecting() {
+    let mut ui = UiController::<Addr>::new();
+    ui.event(Event::Reconnecting);
+    assert_eq!(ui.state.screen, Screen::Home);
+    assert!(ui.state.reconnecting);
+    // A link that comes up ends it, and so does every retry ending.
+    ui.event(Event::Connected([name("Keyboard")].into_iter().collect()));
+    assert!(!ui.state.reconnecting);
+    ui.event(Event::Reconnecting);
+    assert_eq!(ui.state.screen, Screen::Home);
+    assert!(ui.state.reconnecting && ui.state.connected_names.is_empty());
+    ui.event(Event::Disconnected);
+    assert!(!ui.state.reconnecting);
+    // An error stays on screen; Home shows the retry once it is acknowledged.
+    ui.event(Event::Error(ErrorTag::KeysMissing));
+    ui.event(Event::Reconnecting);
+    assert_eq!(ui.state.screen, Screen::Error);
+    assert_eq!(ui.button(ButtonEvent::Down, 0), None);
+    assert_eq!(ui.state.screen, Screen::Home);
+    assert!(ui.state.reconnecting);
+}

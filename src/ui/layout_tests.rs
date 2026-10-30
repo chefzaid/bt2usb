@@ -48,6 +48,8 @@ fn every_screen() -> std::vec::Vec<UiState> {
         for selected in 0..2 {
             let mut state = state(screen);
             state.selected = selected;
+            // Home's longer status, which the other screens ignore.
+            state.reconnecting = selected == 1;
             states.push(state);
         }
     }
@@ -63,6 +65,12 @@ fn home_shows_the_title_and_both_button_hints() {
             (30, "SELECT: scan".into()),
             (48, "UP: saved devices".into()),
         ]
+    );
+    let mut reconnecting = state(Screen::Home);
+    reconnecting.reconnecting_in_background();
+    assert_eq!(
+        texts(&reconnecting),
+        ["bt2usb / Reconnecting", "SELECT: scan", "UP: saved devices"]
     );
 }
 

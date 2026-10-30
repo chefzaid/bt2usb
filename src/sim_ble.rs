@@ -221,11 +221,12 @@ impl SimBle {
     }
 
     /// Advance the scripted peripheral behavior by one step: the keyboard
-    /// connects, the mouse connects, the keyboard's link drops (its slot stays
-    /// reserved while the worker reconnects), then every link is closed.
+    /// connects, the mouse connects, the keyboard's link drops, then the
+    /// mouse's (each slot stays reserved while its worker reconnects, so with
+    /// both down Home says so), then every link is closed.
     pub fn scenario_step(&mut self, console: &mut Console) -> Events {
         let mut events = Events::new();
-        let step = self.step % 4;
+        let step = self.step % 5;
         self.step = self.step.wrapping_add(1);
         match step {
             0 | 1 => {
@@ -248,34 +249,7 @@ impl SimBle {
                     self.execute(console, action, &mut events);
                 }
             }
-            2 => {
-                slog!(console, "scenario: slot 0 link lost");
-                let device = self.manager.slot_address(0).and_then(|address| {
-                    self.peripherals
-                        .iter()
-                        .find(|device| device.address == *address)
-                        .cloned()
-                });
-                match device {
-                    Some(device) if self.manager.is_slot_occupied(0) => {
-                        let attempt = self.manager.slot_attempt(0);
-                        for action in
-                            coordinator::on_slot_link_lost(&mut self.manager, 0, attempt, &device)
-                        {
-                            self.execute(console, action, &mut events);
-                        }
-                        let kept = self.manager.is_slot_occupied(0)
-                            && self.manager.slot_address(0) == Some(&device.address);
-                        slog!(
-                            console,
-                            "scenario: slot 0 {} for {:#x}",
-                            if kept { "kept reserved" } else { "released" },
-                            device.address
-                        );
-                    }
-                    _ => slog!(console, "scenario: slot 0 has no link to lose"),
-                }
-            }
+            2 | 3 => self.lose_link(console, step as usize - 2, &mut events),
             _ => {
                 slog!(console, "scenario: disconnect all");
                 for action in coordinator::plan_disconnect(&self.manager) {
@@ -290,6 +264,37 @@ impl SimBle {
             self.manager.occupied_count()
         );
         events
+    }
+
+    /// The link in `slot` drops, and its worker reconnects in the background.
+    fn lose_link(&mut self, console: &mut Console, slot: usize, events: &mut Events) {
+        slog!(console, "scenario: slot {} link lost", slot);
+        let device = self.manager.slot_address(slot).and_then(|address| {
+            self.peripherals
+                .iter()
+                .find(|device| device.address == *address)
+                .cloned()
+        });
+        match device {
+            Some(device) if self.manager.is_slot_occupied(slot) => {
+                let attempt = self.manager.slot_attempt(slot);
+                for action in
+                    coordinator::on_slot_link_lost(&mut self.manager, slot, attempt, &device)
+                {
+                    self.execute(console, action, events);
+                }
+                let kept = self.manager.is_slot_occupied(slot)
+                    && self.manager.slot_address(slot) == Some(&device.address);
+                slog!(
+                    console,
+                    "scenario: slot {} {} for {:#x}",
+                    slot,
+                    if kept { "kept reserved" } else { "released" },
+                    device.address
+                );
+            }
+            _ => slog!(console, "scenario: slot {} has no link to lose", slot),
+        }
     }
 
     /// Perform one coordinator action as `coordinator_loop::execute` does,

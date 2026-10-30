@@ -246,7 +246,7 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 
 | Concern | Where |
 | --- | --- |
-| Boot assignment without a scan | `ble_task` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
+| Boot assignment without a scan | `run` in [coordinator_loop.rs](../../src/ble/coordinator_loop.rs), with the saved devices from `reconnect_targets` in [multi_conn.rs](../../src/ble/multi_conn.rs) |
 | Shared table, sighting lifetime, duty window, failure holdoff, tie-break, wakes | `ReconnectTable` (`register`, `clear`, `attempt_failed`, `targets`, `record_sighting`, `take_sighting`, `wake_pending`, `duty`), `Recorded`, `ScanDuty`, and `owner_of` in [reconnect.rs](../../src/ble/reconnect.rs) |
 | Saved-device identity and matching | `reconnect::SavedPeer` (equality by identity key, otherwise by address; `matches` with a key resolver) in `reconnect.rs`; the `SavedPeer` alias and the `IdentityKey::is_match` resolver in [scanner.rs](../../src/ble/scanner.rs) |
 | Shared reconnect scan and handover | `RECONNECTS`, `RECONNECT_WAKE`, `update`, `register_reconnect`, `clear_reconnect`, `reconnect_attempt_failed`, `reconnect_sighted`, and `find_saved_peer` in `scanner.rs`; the log line `slot {} scan found slot {}'s device` |

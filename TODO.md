@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 55 | 0 | 0 |
+| [FIXME](#fixme) | 56 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 16 | 4 | 2 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 16 | 0 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 17 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **153** | **63** | **20** |
+| **Total** | **155** | **63** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -206,6 +206,12 @@ two what fixed it; its commit and validation record hold the details.
   and the self-test now request it through the SoftDevice at boot
   (`src/sd_setup.rs` `request_hfxo`), and the self-test reports it as a stage
   *(hardware evidence pending)*.
+- [x] **P3** **A quiesced slot kept an unsaved pairing's keys.** A Forget or
+  factory reset freed a quiesced slot without the `DiscardUnsavedBond` every
+  other attempt end returns, so a pairing it had not saved stayed in RAM when
+  the pairing held a new identity or the store write failed.
+  `on_slot_quiesced` in `src/ble/coordinator_events.rs` returns it, with a
+  reducer test and a coordinator loop test.
 
 ## Needs Your Input
 
@@ -259,7 +265,8 @@ Scanning, GATT HID discovery, bonding, and the two connection slots. Context:
   coordinator reducer that returns actions for the async shell to execute,
   with host tests (`src/ble/coordinator.rs`, `src/ble/coordinator_tests.rs`,
   `src/ble/coordinator_attempt_tests.rs`, `src/ble/scan_list.rs`,
-  `src/ble/scan_list_tests.rs`, `src/ble/multi_conn.rs`; [ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)).
+  `src/ble/scan_list_tests.rs`, `src/ble/coordinator_loop.rs`,
+  `src/ble/multi_conn.rs`; [ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)).
 - [x] Serialize SoftDevice scan and connection setup with one shared GAP
   procedure lock, and bound each connection attempt by
   `BLE_CONNECT_TIMEOUT_SECS` (6 s) so a user scan does not wait indefinitely
@@ -568,7 +575,8 @@ Context: [data model](docs/data-model.md#pairing-store),
 - [x] Add saved-device management with default-Cancel confirmations, stable
   selected identities, worker quiescence before mutation, transactional cached
   bond updates, and explicit reset recovery of unreadable storage (`src/ui/`,
-  `src/ble/management.rs`, `src/ble/multi_conn.rs`, `src/storage.rs`).
+  `src/ble/management.rs`, `src/ble/coordinator_loop.rs`,
+  `src/ble/multi_conn.rs`, `src/storage.rs`).
   *(hardware evidence pending)*
 - [ ] **P0** **ADR: power-loss-safe persistence and storage migration.**
   Decide the commit protocol for interrupted writes and garbage collection, the
@@ -999,10 +1007,25 @@ Host tests, simulation, and code-health work. Context:
   10 host tests in `src/ble/slot_loop_tests.rs` run the production loop
   against a scripted radio with its events going through the real coordinator
   reducers, asserting the worker's attempts, retries, and reports and the UI
-  events for each fault listed. The coordinator task's own loop (user scans,
-  the Forget and factory-reset transaction) and the GAP procedure lock are not
-  covered and stay a known gap
+  events for each fault listed. The coordinator task's own loop got the same
+  treatment in the item below; the GAP procedure lock stays a known gap
   ([validation record](docs/validation-records.md#validation-record--2026-10-30-slot-worker-fault-tests)).
+- [x] **P1** **Coordinator task fault tests.** The coordinator task's loop
+  (`ble_task`: power-up, user scans and selections, and the Forget and
+  factory-reset transaction) had only its reducers tested, so the order in
+  which it handles commands and worker reports, and which reports a Forget
+  drops, ran only on hardware. Accept when deterministic tests run the
+  production loop through those paths, including late, stale, and foreign
+  worker reports during a Forget and a failed store write. Done 2026-10-30:
+  the loop moved into `src/ble/coordinator_loop.rs`, generic over the store,
+  scanner, and channels (`CoordinatorIo`; the firmware's is `Shell` in
+  `src/ble/multi_conn.rs`), and 8 host tests in
+  `src/ble/coordinator_loop_tests.rs` run it on a scripted bench
+  (`coordinator_loop_bench.rs`) with the test playing both workers. They
+  found that a quiesced slot kept an unsaved pairing's keys
+  ([FIXME](#fixme)). The GAP procedure lock, which lives in the SoftDevice
+  scan and connect calls, stays a known gap
+  ([validation record](docs/validation-records.md#validation-record--2026-10-30-coordinator-task-fault-tests)).
 - [x] **P1** **Host tests for the I/O shells.** The connection workers,
   security handler, GATT HID client, USB device, and display driver
   (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/slot_link.rs`,
@@ -1497,7 +1520,7 @@ These decisions come first because several items below depend on them.
 - [ ] **P2** **Connect any saved device that is present.** Only the two most
   recently added saved devices with a bond reconnect at boot
   (`store.iter_recent().filter(|paired| paired.bond.is_some()).take(MAX_CONNECTIONS)`
-  in `ble_task`, `src/ble/multi_conn.rs`), and a slot whose link drops stays
+  in `reconnect_targets`, `src/ble/multi_conn.rs`), and a slot whose link drops stays
   reserved for that device (`on_slot_link_lost` in `src/ble/coordinator.rs`).
   A third or fourth saved device, such as a second keyboard kept at another desk,
   therefore connects only through a scan and a selection on the bridge, and

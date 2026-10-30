@@ -8,6 +8,33 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Coordinator Task Fault Tests
+
+This record covers the commit that checks off the P1 item "Coordinator task
+fault tests" in [TODO.md](../TODO.md#verification-and-code-quality): the
+coordinator task's loop moves from `ble_task`, `manage_devices`,
+`handle_slot_event`, and `execute_action` in `src/ble/multi_conn.rs` into
+`run` in the host-compiled `src/ble/coordinator_loop.rs`, generic over a
+`CoordinatorIo` trait; `multi_conn.rs` keeps `ble_task` and the firmware's
+`CoordinatorIo` (`Shell`). Eight fault tests run the production loop on a
+scripted bench, with the test playing both connection workers
+([coordinator loop fault tests](testing.md#ble-coordination-and-discovery)).
+Writing them found one defect, fixed in the same commit: a slot freed by a
+quiescence acknowledgement kept the keys of a pairing it had not saved
+([FIXME](../TODO.md#fixme)); `on_slot_quiesced` now returns
+`DiscardUnsavedBond` for it, in the firmware and in the simulation. The
+firmware's behavior is otherwise meant to be unchanged; the checks ran
+locally on Linux in a container, and nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script, as in the HFXO record | Passed after this record was added; 482 unit tests (8 new in `coordinator_loop_tests.rs`, 1 in `coordinator_attempt_tests.rs`) and the 13 integration, glyph, pairing-permission, and portal tests |
+| Same loop as before | Review of the old `ble_task` and its helpers against `run` and `Shell` | The loop is the same code with each I/O call behind a `CoordinatorIo` method that `Shell` implements with the code it replaced: the store load and bond import, the saved devices with keys taken for power-up, the `select` over the two channels, the sends to the UI and the slots, `scanner::scan`, `bonder().same_peer`, the saved-device list, the store lookup and identity match for Forget, the store write and bonder update for a Forget or reset, the whole `PersistDevice` arm, and `discard_unsaved`. The scan snapshot is an empty list where it was `None`, which `plan_connect` treats the same. The one change is the acknowledgement's `on_slot_quiesced` |
+| Mutants | Two deliberate breaks of `coordinator_loop.rs`, each reverted | Handling a targeted slot's events during the barrier failed the Forget test; freeing a quiesced slot without `on_slot_quiesced` failed the stale-acknowledgement test |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only`, cargo-llvm-cov 0.9.1 | 98.66% of lines (63 of 4,717 missed), 98.51% of regions, 98.64% of functions; `coordinator_loop.rs` 98.43% of lines. The summary lists 40 files, of which the fuzzing harness and the two fault-test benches are test code ([what is instrumented](code-quality.md#what-is-instrumented)) |
+| Renode scenario | `renode-test renode/bt2usb-sim.robot`, Renode on `PATH` | Not run: Renode could not download the nRF52840 SVD from `dl.antmicro.com`, which this environment's network policy refuses; the CI Renode job runs it. The simulation's log lines do not change |
+| Board/radio/USB acceptance | Physical hardware | Not run; the GAP lock between scans and connects is still checked only on hardware |
+
 ## Validation Record — 2026-10-30, Slot Worker Fault Tests
 
 This record covers the commit that checks off the P1 item "Async task fault

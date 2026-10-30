@@ -754,9 +754,11 @@ Files:
   `on_slot_link_lost`, and so on). A new failure needs an `ErrorTag` variant,
   and `controller::error_message` must then map it to a distinct message of
   at most 21 characters, which a host test checks.
-- [ble/multi_conn.rs](../src/ble/multi_conn.rs): handle the command in
-  `ble_task`, and add `SlotCommand`/`SlotEvent` variants if a connection worker
-  must act. A worker event carries the attempt number of the command it
+- [ble/coordinator_loop.rs](../src/ble/coordinator_loop.rs): handle the
+  command in `run`, and add `SlotCommand`/`SlotEvent` variants if a
+  connection worker must act; give the fault tests' bench
+  (`coordinator_loop_bench.rs`) anything new the loop asks of `CoordinatorIo`,
+  and the firmware's `Shell` in [ble/multi_conn.rs](../src/ble/multi_conn.rs). A worker event carries the attempt number of the command it
   reports on, and its reducer must ignore one that is not the slot's current
   number ([attempt numbers](architecture.md#attempt-numbers-and-retry-takeover)). Scan and connection setup must hold `GAP_PROCEDURE`, because the
   SoftDevice runs one such procedure at a time.

@@ -6,10 +6,11 @@
 //!    HID-over-GATT Profile (HOGP).
 //! 2. **HID Client** - performs GATT service/characteristic discovery
 //!    on a connected peripheral and subscribes to HID Report notifications.
-//! 3. **Connection coordinator** - `multi_conn::ble_task` owns the
-//!    connection-slot state machine ([`coordinator`]), loads the paired-device
-//!    store, runs scans and boot-time reconnects, and reports status changes
-//!    to the UI task.
+//! 3. **Connection coordinator** - `multi_conn::ble_task` runs the loop in
+//!    [`coordinator_loop`], which owns the connection-slot state machine
+//!    ([`coordinator`]), loads the paired-device store, runs scans, boot-time
+//!    reconnects, and saved-device management, and reports status changes to
+//!    the UI task.
 //! 4. **Connection workers** - two `slot_worker::connection_slot_task`s, one
 //!    per link (typically a keyboard and a mouse), each connecting, pairing or
 //!    encrypting, running the HID client, and reconnecting after a drop.
@@ -28,6 +29,7 @@ pub mod adv_parser;
 pub mod bond_table;
 pub mod conn_params;
 pub mod coordinator;
+pub mod coordinator_loop;
 pub mod long_read;
 pub mod management;
 pub mod messages;

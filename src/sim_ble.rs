@@ -11,7 +11,7 @@
 //! `scan_list::merge_advertisement`,
 //! `management::{forget_targets, Quiescence, commit}`, and
 //! `storage::devices::DeviceList` with its record codec and framing, called in
-//! the order `ble::multi_conn` calls them.
+//! the order `ble::coordinator_loop` calls them.
 
 use heapless::Vec;
 
@@ -139,7 +139,7 @@ impl Flash {
     }
 }
 
-/// The coordinator task's state, as `multi_conn::ble_task` holds it.
+/// The coordinator task's state, as `coordinator_loop::run` holds it.
 pub struct SimBle {
     manager: ConnManager<SimAddr>,
     /// The scenario's keyboard and mouse, which connect on their own the way
@@ -291,7 +291,7 @@ impl SimBle {
         events
     }
 
-    /// Perform one coordinator action as `multi_conn::execute_action` does,
+    /// Perform one coordinator action as `coordinator_loop::execute` does,
     /// with a connection worker that reports back at once.
     fn execute(&mut self, console: &mut Console, action: Action<SimAddr>, events: &mut Events) {
         match action {
@@ -372,7 +372,7 @@ impl SimBle {
     }
 
     /// Forget one saved device (`Some`) or reset them all (`None`) as
-    /// `multi_conn::manage_devices` does: quiesce the affected slots behind a
+    /// `coordinator_loop::manage` does: quiesce the affected slots behind a
     /// barrier, publish the new list only once it is saved, then report the
     /// links still up. Simulated workers acknowledge the barrier at once.
     async fn manage(
@@ -399,7 +399,9 @@ impl SimBle {
         let mut barrier = Quiescence::new(targets, token);
         for (slot, &target) in targets.iter().enumerate() {
             if target && barrier.acknowledge(slot, token) {
-                self.manager.disconnect_slot(slot);
+                for action in coordinator::on_slot_quiesced(&mut self.manager, slot) {
+                    self.execute(console, action, events);
+                }
                 slog!(console, "  quiesce: slot {} released", slot);
             }
         }

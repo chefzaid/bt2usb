@@ -1,6 +1,7 @@
 //! The coordinator's reducers for slot-worker events: a link reported up,
-//! lost, or failed, and a slot reported free. Each ignores an event whose
-//! attempt number is not the slot's current one (see [`ConnManager`]).
+//! lost, or failed, and a slot reported free or quiesced. Each but the last
+//! ignores an event whose attempt number is not the slot's current one (see
+//! [`ConnManager`]); a quiescence is matched by its token instead.
 //!
 //! An attempt that ends while its slot has no link up also discards the keys
 //! of any unsaved pairing it made ([`Action::DiscardUnsavedBond`]): one that
@@ -109,5 +110,22 @@ pub fn on_slot_error<A: Clone + PartialEq>(
     }
     let _ = actions.push(Action::Emit(UiEvent::Error(tag)));
     let _ = actions.push(Action::Emit(link_state(manager)));
+    actions
+}
+
+/// A slot worker acknowledged the quiescence of a Forget or factory reset:
+/// its link and retry are gone, so the slot is free. Like any attempt that
+/// ends with no link up, it drops the keys of a pairing the store never
+/// saved, which the transaction's own key removal misses when the pairing
+/// holds a new identity or the store write fails.
+pub fn on_slot_quiesced<A: Clone + PartialEq>(
+    manager: &mut ConnManager<A>,
+    slot: usize,
+) -> Vec<Action<A>, 1> {
+    let mut actions = Vec::new();
+    if let Some(address) = unsaved_pairing(manager, slot) {
+        let _ = actions.push(Action::DiscardUnsavedBond(address));
+    }
+    manager.disconnect_slot(slot);
     actions
 }

@@ -69,8 +69,8 @@ frame (`store_item` in `save_to_flash`): `forget` one without the record,
 `factory_reset` an empty one. The host-tested `DeviceList::reset`
 ([devices.rs](../../src/storage/devices.rs)) asks for the
 pages to be erased first (`erase_first` in `factory_reset`) only when the store
-is unreadable; `manage_devices` then clears the bonder
-(`bonder().clear()` in [multi_conn.rs](../../src/ble/multi_conn.rs)).
+is unreadable; the coordinator then clears the bonder
+(`bonder().clear()` in `Shell::forget`, [multi_conn.rs](../../src/ble/multi_conn.rs)).
 `sequential-storage` 7.2.0 only "logically" overwrites on `store_item`
 (`map.rs` lines 368 to 372), `remove_item` only zeroes an item's CRC
 (`erase_data`, `item.rs` lines 197 to 207), and its README (lines 136 to 139)

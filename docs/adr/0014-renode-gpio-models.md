@@ -220,7 +220,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   non-Cargo tooling, which includes Renode.
 - "Async task fault tests": deterministic tests for cancellation, full
   channels, and contention are separate from this scenario; the slot worker
-  loop has them on the host since 2026-10-30 (`slot_loop_tests.rs`).
+  loop and the coordinator loop have them on the host since 2026-10-30
+  (`slot_loop_tests.rs`, `coordinator_loop_tests.rs`).
 
 ## Implementation
 

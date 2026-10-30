@@ -220,7 +220,7 @@ Bond bookkeeping in `Bonder` ([bonder.rs](../src/ble/bonder.rs)):
   once saved, the screen shows **Paired** with `Replaced old pairing`.
 - A bond whose identity is not a public or random static address, the only
   types the Core specification allows for an identity, is not kept:
-  `on_bonded` keeps no keys for it, `execute_action` stores nothing for the
+  `on_bonded` keeps no keys for it, `Shell::persist` stores nothing for the
   device and shows `Pairing not saved`, and the type is decoded without the
   vendored `Address::address_type`, which panics on a reserved one. Saving
   the bond would make the next boot refuse the whole store, and saving the

@@ -260,7 +260,7 @@ and `DeviceStore::add` logs it: `"Updated existing paired device"`,
 record saved without any are an update),
 `"Added paired device - now storing {}"`, or, for an eviction,
 `"Paired device store full - evicting oldest entry"` first; it returns the
-outcome to `execute_action` as `Stored`, which names the evicted device's
+outcome to `Shell::persist` in `multi_conn.rs` as `Stored`, which names the evicted device's
 identity for the bonder to drop. For a bond whose
 identity is not public or random static it returns `AddOutcome::BondRefused`
 and changes nothing; `DeviceStore::add` then logs
@@ -337,13 +337,13 @@ which then erases pages 240–243 before writing an empty frame. Ordinary saves 
   specification reserves is refused rather than passed to the vendored
   `Address::address_type`, which panics on one. It keeps no keys, logs
   `Bond refused: identity address is not public or random static`, and
-  records the link; `execute_action` finds it with `Bonder::take_refused`,
+  records the link; `Shell::persist` finds it with `Bonder::take_refused`,
   stores nothing, and raises `BleEvent::Error(BondRefused)`. `DeviceStore::add`
   refuses such a bond as well, a reserved type itself (`to_stored_bond`) and a
   private or anonymous one through `DeviceList::add` (`AddOutcome::BondRefused`,
   nothing changed or left to save). It logs
   `Device store refused a bond whose identity is not public or random static`,
-  and `execute_action` drops exactly those keys from `Bonder` (`forget_bond`),
+  and `Shell::persist` drops exactly those keys from `Bonder` (`forget_bond`),
   so RAM holds what flash will hold after a reboot. A bond already stored for
   the same peer stays in flash and is loaded again at the next boot. Once the
   link ends, background reconnects cannot bring the device back, because they
@@ -617,7 +617,9 @@ converts into it with `From`.
 ### SlotCommand
 
 Coordinator to one connection worker, defined in
-[ble/multi_conn.rs](../src/ble/multi_conn.rs). `attempt` is the number
+[ble/slot_loop.rs](../src/ble/slot_loop.rs) over any address type;
+[ble/multi_conn.rs](../src/ble/multi_conn.rs) names the firmware's, over the
+SoftDevice `Address`. `attempt` is the number
 `ConnManager` gave the slot's reservation; the worker puts it on every event it
 reports for the command
 ([attempt numbers](architecture.md#attempt-numbers-and-retry-takeover)).
@@ -631,8 +633,8 @@ reports for the command
 
 ### SlotEvent
 
-Connection worker to coordinator, defined in
-[ble/multi_conn.rs](../src/ble/multi_conn.rs).
+Connection worker to coordinator, defined beside `SlotCommand` in
+[ble/slot_loop.rs](../src/ble/slot_loop.rs).
 
 Every variant but `Quiesced` carries the `attempt` of the command it reports
 on, and the coordinator ignores one whose number is not the occupied slot's
@@ -707,7 +709,7 @@ empty list ([ui/ui_logic.rs](../src/ui/ui_logic.rs)). The completion notices
 `Forget result unknown`, `Reset result unknown`, and `List not loaded`, also
 come from `ui_logic.rs`.
 
-After a save succeeds, `execute_action` also sends `Event::Notice` with a
+After a save succeeds, `Shell::persist` also sends `Event::Notice` with a
 `PairingNotice` ([messages.rs](../src/ble/messages.rs)) when the device list's
 `add` changed another saved device (`persist_report` in
 [management.rs](../src/ble/management.rs)). The UI shows it on the **Paired** screen

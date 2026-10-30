@@ -1,36 +1,33 @@
-//! Multi-device BLE connection manager.
+//! Multi-device BLE connection manager on the radio: the firmware's
+//! [`CoordinatorIo`] for the loop in [`coordinator_loop`].
 //!
 //! Supports up to two concurrent BLE HID peripheral links (typical:
-//! keyboard + mouse) with secure pairing and bonding. [`ble_task`] runs the
-//! pure coordinator, executes its [`Action`]s, owns the paired-device store,
-//! runs user scans and saved-device management, and starts the power-up
-//! reconnects; the slot workers live in
+//! keyboard + mouse) with secure pairing and bonding. [`ble_task`] runs once.
+//! The loop it runs decides what to do with each UI command and slot event
+//! and is host-tested against fakes; this file connects it to the UI and slot
+//! channels, the paired-device store in flash, the security handler's keys,
+//! and user scans in [`scanner`]. The slot workers live in
 //! [`slot_worker`](crate::ble::slot_worker) and the security handler in
 //! [`bonder`](crate::ble::bonder).
 
 use crate::ble::bonder::{bonder, key_matches};
-use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
-use crate::ble::management::{self, Quiescence};
-use crate::ble::scanner::ScanResult;
+use crate::ble::coordinator::MAX_CONNECTIONS;
+use crate::ble::coordinator_loop::{self, CoordinatorIo, Input};
+use crate::ble::management;
 use crate::ble::slot_loop;
 use crate::ble::{scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
-use crate::config::MAX_PAIRED_DEVICES;
+use crate::config::{BLE_MAX_DISCOVERED, MAX_PAIRED_DEVICES};
 use crate::storage::{PairedDevice, Stored, DEVICE_STORE};
 use embassy_futures::select::{select, Either};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Receiver, Sender};
 use heapless::Vec;
 use nrf_softdevice::ble::Address;
-use nrf_softdevice::Softdevice;
+use nrf_softdevice::{Flash, Softdevice};
 
 /// Command senders to the slot workers, one per link, indexed by slot. An
 /// array of [`MAX_CONNECTIONS`] makes `main.rs` build one channel per link.
 pub type SlotSenders = [Sender<'static, CriticalSectionRawMutex, SlotCommand, 2>; MAX_CONNECTIONS];
-
-/// The connection-slot state machine, specialised to the SoftDevice address
-/// type. The logic lives in (and is host-tested via)
-/// [`crate::ble::coordinator`]; here it is just instantiated.
-type MultiConnectionManager = ConnManager<Address>;
 
 /// A coordinator command to one slot worker, over the SoftDevice address
 /// ([`slot_loop::SlotCommand`]).
@@ -40,38 +37,36 @@ pub type SlotCommand = slot_loop::SlotCommand<Address>;
 /// ([`slot_loop::SlotEvent`]).
 pub type SlotEvent = slot_loop::SlotEvent<Address>;
 
-pub async fn ble_task(
+/// The channels, flash, and radio the coordinator loop runs on.
+struct Shell<'a> {
     sd: &'static Softdevice,
-    cmd_rx: &Receiver<'static, CriticalSectionRawMutex, BleCommand, 4>,
-    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot_txs: &SlotSenders,
-    slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
-) -> ! {
-    // `Flash::take` panics on a second call; `main` spawns this task once and it
-    // never returns.
-    let mut flash = nrf_softdevice::Flash::take(sd);
-    {
+    flash: Flash,
+    cmd_rx: &'a Receiver<'static, CriticalSectionRawMutex, BleCommand, 4>,
+    event_tx: &'a Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
+    slot_txs: &'a SlotSenders,
+    slot_event_rx: &'a Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
+}
+
+fn device_info(paired: PairedDevice) -> DiscoveredDevice {
+    DiscoveredDevice {
+        address: paired.address,
+        name: paired.name,
+        rssi: paired.last_rssi,
+    }
+}
+
+impl CoordinatorIo for Shell<'_> {
+    type Address = Address;
+    type Saved = PairedDevice;
+
+    async fn load(&mut self) -> bool {
         let mut store = DEVICE_STORE.lock().await;
-        store.load_from_flash(&mut flash).await;
+        store.load_from_flash(&mut self.flash).await;
         bonder().load_bonds(&store.bonds());
-        if !store.is_writable() {
-            event_tx
-                .send(BleEvent::Error(BleErrorTag::StorageFailed))
-                .await;
-        }
+        store.is_writable()
     }
 
-    let mut manager = MultiConnectionManager::new();
-    let mut last_scan: Option<ScanResult> = None;
-    let mut management_token = 0u32;
-
-    // Auto-reconnect the most recently added devices (up to the number of
-    // connection slots) so a keyboard + mouse pair both come back after a
-    // reboot without manual re-selection. Start at once, without a full scan
-    // first: each slot's reconnect scan resolves a rotating private address
-    // itself, and one slot's scan also finds the other slot's device, so the
-    // keyboard can type as soon as it advertises.
-    let peers: Vec<DiscoveredDevice, MAX_CONNECTIONS> = {
+    async fn reconnect_targets(&mut self) -> Vec<DiscoveredDevice, MAX_CONNECTIONS> {
         let store = DEVICE_STORE.lock().await;
         store
             .iter_recent()
@@ -80,299 +75,144 @@ pub async fn ble_task(
             // selected again.
             .filter(|paired| paired.bond.is_some())
             .take(MAX_CONNECTIONS)
-            .map(|paired| DiscoveredDevice {
-                address: paired.address,
-                name: paired.name,
-                rssi: paired.last_rssi,
-            })
+            .map(device_info)
             .collect()
-    };
-    for (slot, device) in peers.into_iter().enumerate() {
-        let attempt = manager.reserve_retry(slot, &device);
-        // A paired device that's asleep or off right now will advertise
-        // once it wakes, so keep trying rather than failing once.
-        send_slot_cmd(slot, SlotCommand::Reconnect { device, attempt }, slot_txs).await;
     }
 
-    // The coordinator below is a thin interpreter: it asks the pure
-    // `coordinator` reducers (host-tested) what to do for each command/event,
-    // then performs the resulting I/O via `execute_action`.
-    loop {
-        match select(cmd_rx.receive(), slot_event_rx.receive()).await {
-            Either::First(cmd) => match cmd {
-                BleCommand::StartScan => {
-                    for action in coordinator::plan_start_scan(&manager) {
-                        execute_action(action, event_tx, slot_txs, &mut flash).await;
-                    }
-                    match scanner::scan(sd, event_tx).await {
-                        Ok(result) => last_scan = Some(result),
-                        Err(_) => last_scan = None,
-                    }
-                }
-                BleCommand::Connect(index) => {
-                    let devices: &[DiscoveredDevice] = match &last_scan {
-                        Some(scan) => scan.devices.as_slice(),
-                        None => &[],
-                    };
-                    let same_peer =
-                        |held: &Address, seen: &Address| bonder().same_peer(*held, *seen);
-                    for action in coordinator::plan_connect(&mut manager, devices, index, same_peer)
-                    {
-                        execute_action(action, event_tx, slot_txs, &mut flash).await;
-                    }
-                }
-                BleCommand::Disconnect => {
-                    for action in coordinator::plan_disconnect(&manager) {
-                        execute_action(action, event_tx, slot_txs, &mut flash).await;
-                    }
-                }
-                BleCommand::ListPaired { id } => publish_paired_devices(id, event_tx).await,
-                BleCommand::Forget { id, address } => {
-                    management_token = management_token.wrapping_add(1);
-                    let result = manage_devices(
-                        Some(address),
-                        management_token,
-                        &mut manager,
-                        event_tx,
-                        slot_txs,
-                        slot_event_rx,
-                        &mut flash,
-                    )
-                    .await;
-                    event_tx
-                        .send(BleEvent::ManagementResult { id, result })
-                        .await;
-                }
-                BleCommand::FactoryReset { id } => {
-                    management_token = management_token.wrapping_add(1);
-                    let result = manage_devices(
-                        None,
-                        management_token,
-                        &mut manager,
-                        event_tx,
-                        slot_txs,
-                        slot_event_rx,
-                        &mut flash,
-                    )
-                    .await;
-                    // Explicit reset also invalidates the old discovery snapshot.
-                    last_scan = None;
-                    event_tx
-                        .send(BleEvent::ManagementResult { id, result })
-                        .await;
-                }
-            },
-            Either::Second(event) => {
-                handle_slot_event(event, &mut manager, event_tx, slot_txs, &mut flash).await;
-            }
+    async fn next(&mut self) -> Input<Address> {
+        match select(self.cmd_rx.receive(), self.slot_event_rx.receive()).await {
+            Either::First(command) => Input::Command(command),
+            Either::Second(event) => Input::Slot(event),
         }
     }
-}
 
-async fn handle_slot_event(
-    event: SlotEvent,
-    manager: &mut MultiConnectionManager,
-    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot_txs: &SlotSenders,
-    flash: &mut nrf_softdevice::Flash,
-) {
-    let actions: Vec<Action<Address>, 3> = match event {
-        SlotEvent::Connected {
-            slot,
-            attempt,
-            device,
-        } => coordinator::on_slot_connected(manager, slot, attempt, &device)
-            .into_iter()
-            .collect(),
-        SlotEvent::Disconnected { slot, attempt } => {
-            coordinator::on_slot_disconnected(manager, slot, attempt)
-                .into_iter()
-                .collect()
-        }
-        SlotEvent::LinkLost {
-            slot,
-            attempt,
-            device,
-        } => coordinator::on_slot_link_lost(manager, slot, attempt, &device)
-            .into_iter()
-            .collect(),
-        SlotEvent::Error {
-            slot,
-            attempt,
-            tag,
-            retrying,
-        } => coordinator::on_slot_error(manager, slot, attempt, tag, retrying),
-        SlotEvent::Quiesced { .. } => return,
-    };
-    for action in actions {
-        execute_action(action, event_tx, slot_txs, flash).await;
+    async fn slot_event(&mut self) -> SlotEvent {
+        self.slot_event_rx.receive().await
     }
-}
 
-async fn publish_paired_devices(
-    id: u32,
-    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-) {
-    let devices = {
+    async fn emit(&mut self, event: BleEvent) {
+        self.event_tx.send(event).await;
+    }
+
+    async fn command(&mut self, slot: usize, command: SlotCommand) {
+        if let Some(tx) = self.slot_txs.get(slot) {
+            tx.send(command).await;
+        }
+    }
+
+    async fn scan(&mut self) -> Option<Vec<DiscoveredDevice, BLE_MAX_DISCOVERED>> {
+        let result = scanner::scan(self.sd, self.event_tx).await;
+        result.ok().map(|scan| scan.devices)
+    }
+
+    fn same_peer(&self, held: &Address, seen: &Address) -> bool {
+        bonder().same_peer(*held, *seen)
+    }
+
+    async fn paired(&mut self) -> Vec<DiscoveredDevice, MAX_PAIRED_DEVICES> {
         let store = DEVICE_STORE.lock().await;
         // `collect` into a heapless `Vec` panics past its capacity; `take`
         // keeps the list within it whatever the store holds.
         store
             .iter_recent()
             .take(MAX_PAIRED_DEVICES)
-            .map(|paired| DiscoveredDevice {
-                address: paired.address,
-                name: paired.name,
-                rssi: paired.last_rssi,
-            })
+            .map(device_info)
             .collect()
-    };
-    event_tx.send(BleEvent::PairedDevices { id, devices }).await;
-}
-
-/// Stop workers before changing persistent identities. Suppress their queued
-/// Connected/LinkLost events until a command-specific barrier confirms that the
-/// BLE link, USB source state and retry target have all been released.
-async fn manage_devices(
-    address: Option<Address>,
-    token: u32,
-    manager: &mut MultiConnectionManager,
-    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot_txs: &SlotSenders,
-    slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
-    flash: &mut nrf_softdevice::Flash,
-) -> Result<(), BleErrorTag> {
-    let paired = if let Some(identity) = address {
-        let store = DEVICE_STORE.lock().await;
-        let Some(paired) = store.find(identity) else {
-            return Err(BleErrorTag::ManagementFailed);
-        };
-        Some(paired)
-    } else {
-        None
-    };
-    let targets = match &paired {
-        None => [true; MAX_CONNECTIONS],
-        Some(peer) => management::forget_targets(manager, |current| {
-            *current == peer.address
-                || peer
-                    .bond
-                    .is_some_and(|bond| key_matches(&bond.peer_id, *current))
-        }),
-    };
-    for (slot, _) in targets.iter().enumerate().filter(|(_, &target)| target) {
-        send_slot_cmd(slot, SlotCommand::Quiesce(token), slot_txs).await;
     }
-    let mut barrier = Quiescence::new(targets, token);
-    while !barrier.complete() {
-        let event = slot_event_rx.receive().await;
-        let slot = match &event {
-            SlotEvent::Quiesced { slot, token } => {
-                if barrier.acknowledge(*slot, *token) {
-                    manager.disconnect_slot(*slot);
-                }
-                continue;
+
+    async fn find(&mut self, identity: Address) -> Option<PairedDevice> {
+        DEVICE_STORE.lock().await.find(identity)
+    }
+
+    fn holds(&self, saved: &PairedDevice, address: &Address) -> bool {
+        *address == saved.address
+            || saved
+                .bond
+                .is_some_and(|bond| key_matches(&bond.peer_id, *address))
+    }
+
+    async fn forget(&mut self, saved: Option<PairedDevice>) -> bool {
+        let result = {
+            let mut store = DEVICE_STORE.lock().await;
+            match saved.as_ref() {
+                Some(peer) => store.forget(peer.address, &mut self.flash).await,
+                None => store.factory_reset(&mut self.flash).await,
             }
-            SlotEvent::Connected { slot, .. }
-            | SlotEvent::Disconnected { slot, .. }
-            | SlotEvent::LinkLost { slot, .. }
-            | SlotEvent::Error { slot, .. } => *slot,
         };
-        if !barrier.suppresses(slot) {
-            handle_slot_event(event, manager, event_tx, slot_txs, flash).await;
+        if result.is_ok() {
+            match saved {
+                Some(peer) => bonder().forget(peer.address),
+                None => bonder().clear(),
+            }
         }
+        result.is_ok()
     }
-    // No targeted worker can reconnect, emit a stale connection save or invoke
-    // a late security callback after its quiescence acknowledgement.
-    let result = {
-        let mut store = DEVICE_STORE.lock().await;
-        match paired.as_ref() {
-            Some(peer) => store.forget(peer.address, flash).await,
-            None => store.factory_reset(flash).await,
-        }
-    };
-    if result.is_ok() {
-        match paired {
-            Some(peer) => bonder().forget(peer.address),
-            None => bonder().clear(),
-        }
-    }
-    event_tx.send(coordinator::link_state(manager).into()).await;
-    result.map_err(|_| BleErrorTag::StorageFailed)
-}
 
-/// Perform the I/O for one coordinator [`Action`]: drive slot workers, persist
-/// to flash, or emit UI events. This is the only place the pure decisions touch
-/// hardware/channels.
-async fn execute_action(
-    action: Action<Address>,
-    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
-    slot_txs: &SlotSenders,
-    flash: &mut nrf_softdevice::Flash,
-) {
-    match action {
-        Action::DisconnectSlot(slot) => {
-            send_slot_cmd(slot, SlotCommand::Disconnect, slot_txs).await;
-        }
-        Action::ConnectSlot {
-            slot,
-            device,
-            attempt,
-        } => {
-            send_slot_cmd(slot, SlotCommand::Connect { device, attempt }, slot_txs).await;
-        }
+    async fn persist(&mut self, device: DiscoveredDevice) {
         // `Bonder::on_bonded` refused the pairing's bond and logged why. The
         // device is not stored either: without keys it would sit at the
         // private address it connected from, and each pairing after that
         // address rotates would add a record, evicting a bonded peer once the
         // store is full.
-        Action::PersistDevice(device) if bonder().take_refused(device.address) => {
-            event_tx
-                .send(BleEvent::Error(BleErrorTag::BondRefused))
-                .await;
+        if bonder().take_refused(device.address) {
+            self.emit(BleEvent::Error(BleErrorTag::BondRefused)).await;
+            return;
         }
-        Action::PersistDevice(device) => {
-            let mut store = DEVICE_STORE.lock().await;
-            let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
-            let bond = bonder().bond_for_address(device.address);
-            paired.bond = bond;
-            let stored = match store.add(paired) {
-                // RAM now holds what the store does: the new keys are saved,
-                // and the keys of a device evicted to make room are gone.
-                Ok(stored) => {
-                    if let Some(bond) = bond {
-                        bonder().mark_saved(&bond);
-                    }
-                    if let Stored::RemovedOldest(Some(identity)) = stored {
-                        bonder().forget_identity(identity);
-                    }
-                    Some(stored)
+        let mut store = DEVICE_STORE.lock().await;
+        let mut paired = PairedDevice::new(device.address, device.name.as_str(), device.rssi);
+        let bond = bonder().bond_for_address(device.address);
+        paired.bond = bond;
+        let stored = match store.add(paired) {
+            // RAM now holds what the store does: the new keys are saved, and
+            // the keys of a device evicted to make room are gone.
+            Ok(stored) => {
+                if let Some(bond) = bond {
+                    bonder().mark_saved(&bond);
                 }
-                // The store refuses what `Bonder` should already have
-                // refused; drop exactly those keys so RAM holds what flash
-                // will.
-                Err(_) => {
-                    if let Some(bond) = bond {
-                        bonder().forget_bond(&bond);
-                    }
-                    event_tx
-                        .send(BleEvent::Error(BleErrorTag::BondRefused))
-                        .await;
-                    None
+                if let Stored::RemovedOldest(Some(identity)) = stored {
+                    bonder().forget_identity(identity);
                 }
-            };
-            let saved = store.save_to_flash(flash).await.is_ok();
-            if let Some(event) = management::persist_report(stored.as_ref(), saved) {
-                event_tx.send(event).await;
+                Some(stored)
             }
+            // The store refuses what `Bonder` should already have refused;
+            // drop exactly those keys so RAM holds what flash will.
+            Err(_) => {
+                if let Some(bond) = bond {
+                    bonder().forget_bond(&bond);
+                }
+                self.event_tx
+                    .send(BleEvent::Error(BleErrorTag::BondRefused))
+                    .await;
+                None
+            }
+        };
+        let saved = store.save_to_flash(&mut self.flash).await.is_ok();
+        if let Some(event) = management::persist_report(stored.as_ref(), saved) {
+            self.event_tx.send(event).await;
         }
-        Action::DiscardUnsavedBond(address) => bonder().discard_unsaved(address),
-        Action::Emit(ui) => event_tx.send(ui.into()).await,
+    }
+
+    fn discard_unsaved_bond(&mut self, address: Address) {
+        bonder().discard_unsaved(address);
     }
 }
 
-async fn send_slot_cmd(slot: usize, cmd: SlotCommand, slot_txs: &SlotSenders) {
-    if let Some(tx) = slot_txs.get(slot) {
-        tx.send(cmd).await;
-    }
+pub async fn ble_task(
+    sd: &'static Softdevice,
+    cmd_rx: &Receiver<'static, CriticalSectionRawMutex, BleCommand, 4>,
+    event_tx: &Sender<'static, CriticalSectionRawMutex, BleEvent, 8>,
+    slot_txs: &SlotSenders,
+    slot_event_rx: &Receiver<'static, CriticalSectionRawMutex, SlotEvent, 8>,
+) -> ! {
+    let mut shell = Shell {
+        sd,
+        // `Flash::take` panics on a second call; `main` spawns this task once
+        // and it never returns.
+        flash: Flash::take(sd),
+        cmd_rx,
+        event_tx,
+        slot_txs,
+        slot_event_rx,
+    };
+    coordinator_loop::run(&mut shell).await
 }

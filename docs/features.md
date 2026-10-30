@@ -47,7 +47,7 @@ are not translated.
 | Bounded peripheral connection parameter requests | Software-verified (bounding policy) | [`ble/conn_params.rs`](../src/ble/conn_params.rs), [`ble/bonder.rs`](../src/ble/bonder.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [Connection And Security](#connection-and-security), [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
 | GATT HID discovery and report classification | Software-verified (classification, subscription decisions) | [`ble/hid_client.rs`](../src/ble/hid_client.rs), [`ble/hid_gatt.rs`](../src/ble/hid_gatt.rs), [`hid/report_protocol.rs`](../src/hid/report_protocol.rs), [`hid/mod.rs`](../src/hid/mod.rs) | [HID Discovery And Report Maps](#hid-discovery-and-report-maps) |
 | Report Map long reads up to 512 bytes | Software-verified (fragment assembly) | [`ble/long_read.rs`](../src/ble/long_read.rs), [`vendor/nrf-softdevice`](../vendor/nrf-softdevice/README.bt2usb.md) | [ADR 0007](adr/0007-vendored-softdevice-patch.md) |
-| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table, slot retry policy, slot worker loop) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/slot_policy.rs`](../src/ble/slot_policy.rs), [`ble/slot_loop.rs`](../src/ble/slot_loop.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
+| Two connection slots, immediate boot reconnect, shared reconnect scan, link-loss retry | Software-verified (slot reducers, reconnect table, slot retry policy, slot worker loop, coordinator loop) | [`ble/coordinator.rs`](../src/ble/coordinator.rs), [`ble/coordinator_loop.rs`](../src/ble/coordinator_loop.rs), [`ble/slot_policy.rs`](../src/ble/slot_policy.rs), [`ble/slot_loop.rs`](../src/ble/slot_loop.rs), [`ble/reconnect.rs`](../src/ble/reconnect.rs), [`ble/scanner.rs`](../src/ble/scanner.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs), [`ble/slot_worker.rs`](../src/ble/slot_worker.rs) | [Boot And Reconnect](#boot-and-reconnect), [Reconnect And Link Loss](#reconnect-and-link-loss) |
 | Keyboard LED forwarding to the BLE keyboard, current state on every link | Software-verified (LED byte handling, forwarding loop) | [`usb/host_requests.rs`](../src/usb/host_requests.rs), [`hid/host_leds.rs`](../src/hid/host_leds.rs), [`hid/keyboard.rs`](../src/hid/keyboard.rs), [`ble/hid_client.rs`](../src/ble/hid_client.rs) | [Keyboard LEDs](#keyboard-leds) |
 | Composite USB keyboard, mouse, consumer control | Software-verified (descriptors, report formats) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`hid/`](../src/hid/) | [USB HID Device](#usb-hid-device) |
 | Boot protocol, per-unit serial, software VBUS | Implemented (boot mouse format software-verified) | [`usb/hid_device.rs`](../src/usb/hid_device.rs), [`usb/host_requests.rs`](../src/usb/host_requests.rs), [`sd_setup.rs`](../src/sd_setup.rs) | [USB HID Device](#usb-hid-device) |
@@ -55,7 +55,7 @@ are not translated.
 | Coalescing and independent endpoint workers | Software-verified (including async workers with fake sinks) | [`hid/coalesce.rs`](../src/hid/coalesce.rs), [`hid/delivery.rs`](../src/hid/delivery.rs) | [Endpoint Workers](#endpoint-workers) |
 | Remote wakeup on new presses only | Software-verified (policy) | [`hid/wake.rs`](../src/hid/wake.rs), [`usb/hid_device.rs`](../src/usb/hid_device.rs) | [Remote Wakeup](#remote-wakeup) |
 | Versioned, fail-closed pairing store | Software-verified (framing, record validation, commit) | [`storage.rs`](../src/storage.rs), [`storage/`](../src/storage/) | [Pairing Storage](#pairing-storage), [ADR 0006](adr/0006-fail-closed-pairing-store.md) |
-| Saved-device Forget and Factory reset | Software-verified (UI reducer, request IDs, quiescence, commit; Renode runs them on the target) | [`ui/ui_logic.rs`](../src/ui/ui_logic.rs), [`ui/controller.rs`](../src/ui/controller.rs), [`ble/management.rs`](../src/ble/management.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Saved-Device Management](#saved-device-management) |
+| Saved-device Forget and Factory reset | Software-verified (UI reducer, request IDs, quiescence, commit, the coordinator loop's transaction; Renode runs them on the target) | [`ui/ui_logic.rs`](../src/ui/ui_logic.rs), [`ui/controller.rs`](../src/ui/controller.rs), [`ble/management.rs`](../src/ble/management.rs), [`ble/coordinator_loop.rs`](../src/ble/coordinator_loop.rs), [`ble/multi_conn.rs`](../src/ble/multi_conn.rs) | [Saved-Device Management](#saved-device-management) |
 | OLED screens and three-button navigation | Software-verified (reducer, controller, and screen layout; Renode drives the button driver through them and reads each screen back from the modelled panel) | [`ui/`](../src/ui/), [`main.rs`](../src/main.rs) | [Using The Bridge](#using-the-bridge), [ADR 0024](adr/0024-renode-oled-models.md) |
 | Isolated display task with fault recovery | Software-verified (backoff policy; Renode runs the task and a recovery from an unanswered address on modelled TWIM and SSD1306 peripherals) | [`ui/display.rs`](../src/ui/display.rs), [`ui/display_logic.rs`](../src/ui/display_logic.rs) | [Local UI And Power](#local-ui-and-power), [ADR 0009](adr/0009-isolated-display-task.md) |
 | Activity-driven display power, no System-OFF | Software-verified (policy) | [`power_logic.rs`](../src/power_logic.rs), [`power.rs`](../src/power.rs) | [Wake and display](#wake-and-display), [ADR 0012](adr/0012-bus-powered-no-system-off.md) |
@@ -424,7 +424,9 @@ the Nordic SoftDevice S140 in the central role
 ([ADR 0002](adr/0002-nrf52840-softdevice-embassy.md)). The coordinator's
 decisions are pure reducers in [`ble/coordinator.rs`](../src/ble/coordinator.rs)
 covered by host tests; the tasks that perform them are in
-[`ble/multi_conn.rs`](../src/ble/multi_conn.rs) (the coordinator task) and
+[`ble/coordinator_loop.rs`](../src/ble/coordinator_loop.rs) and
+[`ble/multi_conn.rs`](../src/ble/multi_conn.rs) (the coordinator task, whose
+loop the host fault tests run on a scripted bench) and
 [`ble/slot_loop.rs`](../src/ble/slot_loop.rs),
 [`ble/slot_worker.rs`](../src/ble/slot_worker.rs), and
 [`ble/slot_link.rs`](../src/ble/slot_link.rs) (the slot workers, whose loop
@@ -812,7 +814,7 @@ migration rules, and physical key protection are open work.
 
 Forget and Factory reset change persistent identities while links may be live,
 so they run as a short transaction
-([`ble/multi_conn.rs`](../src/ble/multi_conn.rs) `manage_devices`,
+(`manage` in [`ble/coordinator_loop.rs`](../src/ble/coordinator_loop.rs),
 [`ble/management.rs`](../src/ble/management.rs)):
 
 ```mermaid
@@ -850,7 +852,12 @@ sequenceDiagram
   its link is closed, its input released, and its retry target dropped. Until
   all acknowledgements arrive, connection and link-lost events from those slots
   are discarded, so a queued event cannot re-save a device being forgotten.
-  An ordinary disconnect event is not an acknowledgement.
+  An ordinary disconnect event is not an acknowledgement. Each acknowledged
+  slot is freed, and a pairing it made that was never saved, because no link
+  came up, is dropped with it, as at the end of any attempt
+  (`on_slot_quiesced`). The coordinator loop's host fault tests run the
+  transaction with late, stale, and unasked acknowledgements and reports and
+  a failed write ([testing](testing.md#ble-coordination-and-discovery)).
 - **Commit before cache.** The in-memory store and the bonder change only after
   the flash write succeeds; a failed write leaves both unchanged. Factory reset
   on an unreadable store erases the region first, which is the only path that

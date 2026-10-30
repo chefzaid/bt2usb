@@ -1,7 +1,7 @@
 //! Host tests for attempt numbers and retry takeovers: a selection that takes
 //! over a background reconnect, reports from an attempt the coordinator has
 //! since replaced, a failed takeover handing the slot back to the retry, and
-//! a reserved slot freed when its attempt ends without a link.
+//! a reserved slot freed when its attempt ends without a link or is quiesced.
 
 use super::*;
 
@@ -174,6 +174,27 @@ fn a_reserved_slot_is_freed_when_its_attempt_ends() {
         assert!(!m.is_slot_occupied(0));
         assert_eq!(m.find_empty_slot(), Some(0));
     }
+}
+
+#[test]
+fn a_quiesced_slot_is_freed_and_drops_only_unsaved_keys() {
+    // Quiesced mid-attempt: the attempt's pairing was never saved.
+    let mut m = mgr();
+    m.reserve_slot(0, &dev(7, "kb"));
+    let acts = on_slot_quiesced(&mut m, 0);
+    assert_eq!(acts.as_slice(), &[Action::DiscardUnsavedBond(7)]);
+    assert!(!m.is_slot_occupied(0));
+    assert_eq!(m.slot_attempt(0), 0);
+
+    // Quiesced with its link up: Connected saved the keys, which stay.
+    let attempt = m.reserve_slot(1, &dev(8, "mouse"));
+    on_slot_connected(&mut m, 1, attempt, &dev(8, "mouse"));
+    assert!(on_slot_quiesced(&mut m, 1).is_empty());
+    assert_eq!(m.occupied_count(), 0);
+
+    // A free slot has nothing to drop.
+    assert!(on_slot_quiesced(&mut m, 0).is_empty());
+    assert!(on_slot_quiesced(&mut m, MAX_CONNECTIONS).is_empty());
 }
 
 #[test]

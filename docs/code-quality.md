@@ -724,9 +724,10 @@ for the same run. Report which tool produced a figure.
 Coverage measures only the code that host tests compile:
 
 - the host library as built for tests: `src/hid/`, the BLE advertisement
-  parser, bond table, connection-parameter bounds, coordinator, scan result
-  list, reconnect table, long-read assembler, management logic, and PnP ID
-  parser, `src/power_logic.rs`, `src/diagnostics.rs`, the stack guard's placement and
+  parser, bond table, connection-parameter bounds, coordinator with its
+  reducers and task loop, scan result list, reconnect table, slot worker loop
+  and policy, GATT HID decisions, long-read assembler, management logic,
+  messages, and PnP ID parser, `src/power_logic.rs`, `src/diagnostics.rs`, the stack guard's placement and
   register values and the overflow record's encoding in `src/stack_logic.rs`, and the UI display, input, and
   state-machine logic
 - `src/storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs`, which
@@ -739,14 +740,17 @@ of the llvm-cov report: `tests/integration.rs`, `tests/oled_font.rs`,
 `tests/vendor_portal.rs` and `tests/vendor_pairing_gate.rs` with the vendored
 sources they compile (the totals did not change when they were added on
 2026-10-11 and 2026-10-30), the `src/*_tests.rs` files
-that `lib.rs` includes, and the `#[path]` test files `coordinator_tests.rs`,
-`coordinator_attempt_tests.rs`, `scan_list_tests.rs`, `bond_table_tests.rs`,
-`diagnostics_tests.rs`,
-`reconnect_tests.rs`, `delivery_tests.rs`, `ui_logic_tests.rs`,
-`devices_tests.rs`, and `devices_format_tests.rs`. On 2026-10-10, after the device-store move,
+that `lib.rs` includes, and the `#[path]` test files beside the modules they
+test (`coordinator_tests.rs`, `slot_loop_tests.rs`, `devices_tests.rs`, and
+the rest named `*_tests.rs`), which hold only `#[test]` functions. On 2026-10-10, after the device-store move,
 cargo-llvm-cov 0.9.1's summary listed 24 files, all of them source modules; passing
-`--ignore-filename-regex '(_tests\.rs$|tests/)'` gave the same total, so no
-test file reaches the figure.
+`--ignore-filename-regex '(_tests\.rs$|tests/)'` gave the same total. Three
+test-only files hold helper code as well as tests, so the report lists them
+and their lines count: the fuzzing harness `src/fuzz.rs` and the fault-test
+benches `ble/slot_loop_bench.rs` and `ble/coordinator_loop_bench.rs`. On
+2026-10-30 the summary listed 40 files, those three and 37 source modules;
+the three held 568 of the 4,717 lines and 22 of the 63 missed, so the total
+was 98.66% of lines with them and 99.01% without.
 
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
@@ -797,8 +801,9 @@ size would cross the floor. It is a ratchet:
   move hardware-coupled code out of the pure modules.
 
 **What the figure includes.** The total is the one `--summary-only` prints:
-the 33 source modules listed under [What Is Instrumented](#what-is-instrumented),
-with their inline test modules and without the separate test files. Inline test
+the files listed under [What Is Instrumented](#what-is-instrumented): the
+source modules with their inline test modules, and the three test-only files
+that hold helper code, but not the files of tests alone. Inline test
 code is covered almost entirely by running, so files with large inline test
 modules read slightly higher than their production code alone would. Region
 and function coverage are reported but have no floor.

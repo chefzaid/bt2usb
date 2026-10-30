@@ -31,9 +31,9 @@ erase (`erase_first` in `DeviceList::reset`). The
 20 ms apart (`save_to_flash`), from a word-aligned 512-byte `FlashBuffer`
 (a plain `[u8; 512]` until this review; see below); the reset erases the four
 pages, then writes (`factory_reset`). `ble_task` is
-the only writer (`ble/multi_conn.rs`: load at the start of `ble_task`, Forget
-and reset in `manage_devices`, enrollment in the `Action::PersistDevice` arm
-of `execute_action`); the self-test image also writes and
+the only writer (`Shell` in `ble/multi_conn.rs`: load in `load`, Forget and
+reset in `forget`, enrollment in `persist`, each called by the coordinator
+loop in `ble/coordinator_loop.rs`); the self-test image also writes and
 removes key `0xFE` (`SELFTEST_KEY` and `check_flash` in `selftest.rs`).
 
 **The flash path.** `vendor/nrf-softdevice/src/flash.rs` issues

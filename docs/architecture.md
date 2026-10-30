@@ -73,6 +73,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/bond_table.rs](../src/ble/bond_table.rs) | Pure core | The bonding keys held in RAM, each saved or not: a new pairing never displaces a saved device's keys, and one that is not saved is discarded |
 | [ble/conn_params.rs](../src/ble/conn_params.rs) | Pure core | Bounds for a peripheral's connection parameter request |
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot state and command reducers; the slot-event reducers are in its child module [coordinator_events.rs](../src/ble/coordinator_events.rs) |
+| [ble/coordinator_loop.rs](../src/ble/coordinator_loop.rs) | Pure core | The BLE coordinator task's loop, generic over the store, scanner, and channels (`CoordinatorIo`): power-up reconnects, UI commands before slot events, the reducers' actions, and the Forget and factory-reset transaction; host fault tests run it on a scripted bench |
 | [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/slot_policy.rs](../src/ble/slot_policy.rs) | Pure core | A connection slot's decisions: the error a link that would not encrypt fails with, and whether the slot reconnects in the background, reports an error, or resumes the retry a user's connection replaced once an attempt ends |
@@ -81,7 +82,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives; what adding a connected device did to the store (`Stored`) and the notice or error the user is told once it is written (`persist_report`) |
 | [ble/messages.rs](../src/ble/messages.rs) | Pure core | UI-to-coordinator commands and coordinator-to-UI events, generic over the address type |
 | [ble/pnp_id.rs](../src/ble/pnp_id.rs) | Pure core | Parsing of the Device Information Service PnP ID the bridge logs per link |
-| [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | BLE coordinator task, slot command and event types, user scans, saved-device management |
+| [ble/multi_conn.rs](../src/ble/multi_conn.rs) | Board shell | `ble_task`, the firmware's `CoordinatorIo` for that loop: the UI and slot channels, the store in flash and the bonder's keys kept in step with it, and user scans; the slot command and event types over the SoftDevice address |
 | [ble/slot_loop.rs](../src/ble/slot_loop.rs) | Pure core | The connection worker's loop, generic over the radio (`SlotIo`): serves the coordinator's commands, reports slot events, retries in the background; host fault tests run it against a scripted radio |
 | [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | The firmware's `SlotIo` for that loop, run once per slot: the coordinator's channels, the bonder's keys, the reconnect scan, and each attempt |
 | [ble/slot_link.rs](../src/ble/slot_link.rs) | Board shell | One attempt of a slot worker: connect, secure, discover HID, and run the notification loop, racing each phase against the slot's commands |
@@ -120,7 +121,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, slot_loop, slot_policy, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, coordinator_loop, scan_list, reconnect, slot_loop, slot_policy, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, device_info, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -156,7 +157,7 @@ flowchart TD
         STK["stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, slot_loop, slot_policy, management, long_read, hid_gatt, adv_parser, pnp_id"]
+        BC["ble::coordinator, coordinator_loop, scan_list, bond_table, messages, reconnect, conn_params, slot_loop, slot_policy, management, long_read, hid_gatt, adv_parser, pnp_id"]
         DG["diagnostics"]
         SL["stack_logic"]
         HID["hid modules"]
@@ -187,8 +188,11 @@ follow:
 
 - Dependencies point from entry points to the shell and from the shell to the
   core. No pure module imports a shell module.
-- Pure modules import only `core`, `heapless`, and other pure modules. They do
-  not import `embassy_*`, `nrf_softdevice`, `cortex_m`, or `sequential_storage`;
+- Pure modules import only `core`, `heapless`, and other pure modules, plus
+  `embassy_futures`, whose `select` combinators are plain `core` futures with
+  no executor or hardware types (the slot worker loop races its commands
+  against scans and attempts with them). They do not import the other
+  `embassy_*` crates, `nrf_softdevice`, `cortex_m`, or `sequential_storage`;
   `defmt` appears only behind `#[cfg(feature = "defmt")]` or `cfg_attr`.
 - Where the real type is hardware-bound, the core is generic or takes a
   callback: `DeviceInfo<A>`, `ConnManager<A>`, and `Action<A>` are generic over
@@ -196,8 +200,9 @@ follow:
   address types and `reconnect::owner_of` takes a matcher, so IRK resolution
   stays in the SoftDevice; `host_leds::forward_host_leds` takes the `HostLeds`
   trait and a write closure; `delivery::run_endpoint` takes the
-  `DeliveryQueue`, `ReportSink`, and `RetryClock` traits; `management::commit`
-  takes an async persist closure; `display_logic::Recovery` takes milliseconds.
+  `DeliveryQueue`, `ReportSink`, and `RetryClock` traits; the task loops
+  `slot_loop::run` and `coordinator_loop::run` take the `SlotIo` and
+  `CoordinatorIo` traits; `management::commit` takes an async persist closure; `display_logic::Recovery` takes milliseconds.
 - Pure modules size their buffers from `config.rs` where a value is shared
   with the shell (the link count `BLE_MAX_CONNECTIONS` behind
   `coordinator::MAX_CONNECTIONS` and `aggregate::SOURCES`, and the
@@ -320,8 +325,9 @@ reaches its first `.await`, the `select4` at the top of the UI loop, so the
 order of `spawn` calls is not an ordering guarantee between tasks.
 
 `main` does not touch flash. `ble_task` in
-[multi_conn.rs](../src/ble/multi_conn.rs) loads the pairing store when it first
-runs, then plans boot reconnects:
+[multi_conn.rs](../src/ble/multi_conn.rs) runs the coordinator loop in
+[coordinator_loop.rs](../src/ble/coordinator_loop.rs), which loads the pairing
+store when it first runs, then plans boot reconnects:
 
 1. Takes the SoftDevice flash handle, locks `DEVICE_STORE`, and calls
    `load_from_flash`, which logs one of `"Loaded {} devices from flash"`,
@@ -671,7 +677,8 @@ flowchart TD
 
 ### Attempt Numbers And Retry Takeover
 
-`ble_task` waits on UI commands and slot events with one `select` that polls
+`ble_task` waits on UI commands and slot events with one `select`
+(`CoordinatorIo::next` in [multi_conn.rs](../src/ble/multi_conn.rs)) that polls
 commands first, so the coordinator can act on a selection while a worker's
 report on the attempt that selection replaces is still queued. Attempt
 numbers keep those late reports from undoing the newer decision.
@@ -981,8 +988,8 @@ sequenceDiagram
    stable address from the snapshot rather than the list index, or
    `FactoryReset { id }`. If the snapshot no longer has the row, the UI shows
    "Device changed; retry".
-4. The coordinator increments its management token and runs
-   `manage_devices`. Forget finds the record by stable identity, matching the
+4. The coordinator increments its management token and runs `manage` in
+   [coordinator_loop.rs](../src/ble/coordinator_loop.rs). Forget finds the record by stable identity, matching the
    stored address or resolving through its IRK; a missing record fails with
    `ManagementFailed`. Forget targets the slots whose reserved address matches
    that peer (`management::forget_targets`); Factory reset targets both slots.
@@ -995,8 +1002,10 @@ sequenceDiagram
    loop iteration, `Quiesced`. A worker inside the GAP connect call sees the
    command only when that call returns, within about 6 seconds.
 6. The `Quiescence` barrier accepts only acknowledgements carrying the current
-   token, clears each acknowledged slot in the `ConnManager`, and drops every
-   other event from targeted slots, so a late `Connected` cannot re-save a
+   token and clears each acknowledged slot in the `ConnManager`
+   (`on_slot_quiesced`, which first drops the keys of a pairing the slot made
+   but never saved, when no link was up). It drops every other event from
+   targeted slots, so a late `Connected` cannot re-save a
    forgotten bond. Events from untargeted slots are handled normally.
 7. `DeviceStore::forget` or `factory_reset` builds a candidate store and passes
    it to `management::commit`, which publishes it only after `save_to_flash`

@@ -140,7 +140,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
   compatibility baseline").
 - Add the missing layers listed as known gaps: "Power-loss-safe persistence"
   and "Soak and latency measurements". "Async task fault tests" was closed on
-  2026-10-30 by the slot worker loop's fault tests (`slot_loop_tests.rs`). "Automated documentation checks" was closed on
+  2026-10-30 by the slot worker loop's fault tests (`slot_loop_tests.rs`), and
+  "Coordinator task fault tests" the same day (`coordinator_loop_tests.rs`). "Automated documentation checks" was closed on
   2026-10-10 by `scripts/check_docs.py` in the Linux host job, and
   "Reproducible firmware evidence" on 2026-10-30 by `release.py build` and
   its staging checks ([ADR 0028](0028-reproducible-budgeted-release-images.md)).

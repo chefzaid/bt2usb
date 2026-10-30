@@ -53,824 +53,154 @@ memory budget needs.
 
 Defects found in the current tree while working through this plan, including
 code that breaks the [coding-agent checklist](#how-this-plan-is-worked). They
-are fixed before any other open item. Each entry says what is wrong, how it
-shows, and what closes it; a fixed entry is checked and names the change that
-fixed it.
+are fixed before any other open item. An open entry says what is wrong, how
+it shows, and what closes it. A fixed entry is checked and says in a line or
+two what fixed it; its commit and validation record hold the details.
 
-- [x] **P1** **Scripts lacked the executable bit.** Git recorded every file in
-  the repository as mode `100644`, including `scripts/run-tool.sh` and
-  `scripts/install-renode.sh`. Almost every `maskfile.md` recipe runs
-  `./scripts/run-tool.sh …`, so on a fresh Linux, macOS, or WSL clone each one
-  stopped with `./scripts/run-tool.sh: Permission denied`, and `mask coverage`
-  reported "No coverage tool found" even with `cargo-llvm-cov` installed (seen
-  on 2026-10-10). CI was unaffected because it calls Cargo directly. Fixed by
-  committing both scripts as `100755`; `mask coverage` then ran and reported
-  96.16% host line coverage ([testing](docs/testing.md#troubleshooting)).
-- [x] **P3** **Stale notes after the link-count change.** Commit `63d458d`
-  compiled `config.rs` into the host library, but the
-  [host library composition](docs/testing.md#host-library-composition) table
-  and the [coverage scope](docs/code-quality.md#coverage) still listed it as
-  firmware-only, and `manage_devices` kept a `clippy::too_many_arguments`
-  allowance it no longer needed (seven parameters once the slot senders became
-  one array). Found while bounding the management wait; fixed in the same
-  commit, which also removed the allowance from the
-  [lint inventory](docs/code-quality.md#lint-allowances).
-
-The entries below came from a four-part audit of commit `4faf99f` against the
-checklist on 2026-10-10; each was confirmed by a second, independent check.
-
-- [x] **P1** **The reconnect scan counts non-connectable advertisements.**
-  `find_saved_peer` (`src/ble/scanner.rs`) records a sighting for any report
-  from a saved device, including `ADV_NONCONN_IND` and `ADV_SCAN_IND`. A device
-  that also advertises a non-connectable set ends the other slot's scan and
-  hands its slot an address for a 6 s attempt that a connection cannot use,
-  and never succeeds if that set uses another private address. Fixed by the
-  commit "Count only connectable advertisements in the reconnect scan": the
-  callback returns early when the report's `connectable` bit is clear, and
-  [ADR 0015](docs/adr/0015-shared-reconnect-scan.md), the architecture, feature,
-  hardware, and security guides say so. Not yet seen on a board.
-- [x] **P2** **The keyboard-only Report Map rule is written twice.**
-  `src/hid/mod.rs` (reserved-byte handling) and `src/ble/hid_client.rs` (LED
-  output report) each test `!has_report_ids() && has_keyboard && !has_mouse &&
-  !has_consumer` by hand, and only the first is host-tested. If they drift, the
-  bridge writes LEDs to a report it does not treat as the keyboard, or the
-  reverse. Fixed: both call `HidDescriptor::is_unnumbered_keyboard_only`
-  (through `is_keyboard_report` for the LED output report), with four host
-  tests in `src/hid_keyboard_report_tests.rs`, which also took the
-  reserved-byte tests out of `hid_descriptor_tests.rs` (551 to 444 lines).
-- [x] **P2** **`HostLeds::current` documented the wrong start state.** The
-  trait doc (`src/hid/host_leds.rs`) said it returns `None` until the host sends
-  an LED state after enumeration, but every USB bus reset stores all-off in
-  `KEYBOARD_LEDS` (`UsbPowerHandler::reset`), so a new link gets `Some(all off)`
-  before any SET_REPORT. Fixed: the trait doc and the
-  [feature guide](docs/features.md#keyboard-leds) now say `None` lasts only until
-  the first bus reset, and that a keyboard connecting before the host sends its
-  state gets all off first. The behavior was right and is unchanged.
-- [x] **P2** **New log strings were missing from the operations guide.** The
-  [log reference](docs/operations.md#ble-scan-and-connection) lacked
-  `slot {} scan found slot {}'s device` and the three connection-parameter
-  lines added in `4faf99f`, and its `slot {} connecting to {}` row no longer
-  matched when that line appears. Fixed: all four are listed with their
-  meaning and action, the row says a background reconnect logs it only after a
-  reconnect scan hears the device, and the two reconnect incidents now describe
-  the shared scan, its duty cycle, and the connectable-only rule. Every
-  `info!`, `warn!`, and `error!` string outside the self-test is now in the
-  guide.
-- [x] **P2** **Python bytecode was not ignored, and got committed.** Running
-  the documented release helper tests (`python -m unittest discover -s scripts
-  -p "release_test.py"`) writes `scripts/__pycache__/`, which `.gitignore` did
-  not cover, so it showed as untracked and was committed by mistake in "Record
-  firmware sizes with their log level" (`3061a1b`). Tracked bytecode is rewritten
-  whenever the tests run with another Python, leaving a modified tracked file
-  that `release.py` staging refuses as a dirty tree. Fixed: the bytecode is
-  removed from the repository and `.gitignore` covers `__pycache__/` and
-  `*.py[cod]`.
-- [x] **P2** **Source files over 500 lines grew.** `4faf99f` added lines to
-  `src/ble/multi_conn.rs` (845), `src/usb/hid_device.rs` (536), and pushed
-  `src/hid_descriptor_tests.rs` past the limit (551); `src/lib_tests.rs` was
-  503. Fixed on 2026-10-10: `hid_descriptor_tests.rs` lost its keyboard-report
-  tests to `hid_keyboard_report_tests.rs`; `multi_conn.rs` (now 356 lines) gave
-  the security handler to `src/ble/bonder.rs` and the slot worker to
-  `src/ble/slot_worker.rs`; `hid_device.rs` (440) gave the host's
-  SET_PROTOCOL and SET_REPORT handling and the LED state to
-  `src/usb/host_requests.rs`; and `lib_tests.rs` gave its classification tests
-  to `src/hid_classify_tests.rs`. CI now fails when any Rust file passes 500
-  lines ([code quality](docs/code-quality.md#file-length)).
-- [x] **P2** **A link change on the scan screens had no test.** Since
-  `4faf99f`, `UiState::connection_status` leaves a running scan or its picker on
-  screen with its list when a saved device connects or drops in the
-  background, and clears the list only on the Home, Connecting, and Connected
-  screens. `a_new_link_returns_home_screens_to_connected_and_clears_the_list`
-  covered the second half; nothing covered the first, so a regression that sent
-  the user's picker back to Home passed every test. Fixed:
-  `a_background_link_change_keeps_a_user_scan_and_its_list` pins both screens,
-  their lists, and the highlight across a connect and a drop, and
-  `a_dropped_link_returns_connecting_to_home_and_clears_the_list` covers the
-  drop on Connecting.
+- [x] **P1** **Scripts lacked the executable bit.** `scripts/run-tool.sh` and
+  `scripts/install-renode.sh` are committed as `100755`, so mask recipes run on
+  a fresh clone.
+- [x] **P3** **Stale notes after the link-count change.** The host library
+  table, coverage scope, and an unneeded `too_many_arguments` allowance on
+  `manage_devices` were corrected.
+- [x] **P1** **The reconnect scan counts non-connectable advertisements.** The
+  reconnect scan callback in `src/ble/scanner.rs` ignores reports whose
+  `connectable` bit is clear ([ADR 0015](docs/adr/0015-shared-reconnect-scan.md)).
+- [x] **P2** **The keyboard-only Report Map rule is written twice.** Both
+  sites call `HidDescriptor::is_unnumbered_keyboard_only`, with tests in
+  `src/hid_keyboard_report_tests.rs`.
+- [x] **P2** **`HostLeds::current` documented the wrong start state.** The doc
+  and the [feature guide](docs/features.md#keyboard-leds) say `None` lasts only
+  until the first bus reset.
+- [x] **P2** **New log strings were missing from the operations guide.** Every
+  `info!`, `warn!`, and `error!` string outside the self-test is in the
+  [log reference](docs/operations.md#ble-scan-and-connection).
+- [x] **P2** **Python bytecode was not ignored, and got committed.** `.gitignore` covers
+  `__pycache__/` and `*.py[cod]`.
+- [x] **P2** **Source files over 500 lines grew.** The large files were split
+  (`bonder.rs`, `slot_worker.rs`, `host_requests.rs`, sibling test files), and
+  CI fails any Rust file over 500 lines
+  ([file length](docs/code-quality.md#file-length)).
+- [x] **P2** **A link change on the scan screens had no test.**
+  `a_background_link_change_keeps_a_user_scan_and_its_list` and
+  `a_dropped_link_returns_connecting_to_home_and_clears_the_list` pin it.
 - [x] **P2** **The advertised-kind filter for unnumbered maps lost its test.**
-  `unnumbered_descriptor_rejects_unadvertised_kind` fed a 3-byte report to a
-  keyboard-only map, which now takes the keyboard-only shortcut in
-  `classify_notification_with_hint` and never reaches the filter that drops a
-  report of a kind the map does not declare. No test covered that filter for a
-  mixed map, so removing it would have let a keyboard-and-consumer device's
-  mouse-sized vendor report move the host's pointer. Fixed: the test now sends
-  each undeclared kind to three mixed maps without report IDs and checks the
-  declared kinds still pass; with the filter removed, it is the one test that
-  fails.
+  The test sends each undeclared kind to three mixed maps without report IDs.
 - [x] **P2** **Reconnect decisions in the scan shell had no host tests.**
-  `SavedPeer` equality (`src/ble/scanner.rs`) decides whether re-registering a
-  device keeps its slot's failure holdoff and fast-scan window: the same
-  identity key, or the same address when neither record has one. The
-  `RECONNECT_WAKE` bookkeeping woke the owning slot on a handover and was reset
-  on scan start, after a failed attempt, and on clear, with the same
-  `if let Some(signal) = RECONNECT_WAKE.get(slot)` block pasted three times,
-  and a handover to a slot cleared after the scan copied the targets still
-  stopped the scan and signalled that slot. Both were hardware-free but
-  compiled only into the firmware, so no test covered them. Fixed:
-  `reconnect::SavedPeer<A, K>` holds the identity rule and `matches` (the
-  firmware passes `IdentityKey::is_match`), `ReconnectTable::record_sighting`
-  returns `Recorded::{Own, HandedOver, NotRegistered}` and
-  `wake_pending` says when a slot is due a wake, and every table change in
-  `scanner.rs` goes through `update`, which sets or resets the slot's signal to
-  match. A handover to a cleared slot now records nothing and the scan goes on.
-  Eight host tests cover the rules, and the table's tests moved to
-  `src/ble/reconnect_tests.rs` (`reconnect.rs` 271 lines, tests 405).
-  This also closes the earlier P3 entry for the pasted reset block.
+  `reconnect::SavedPeer` and `ReconnectTable::record_sighting`/`wake_pending`
+  hold the rules, with tests in `src/ble/reconnect_tests.rs`.
 - [x] **P3** **Firmware rustdoc warning and a stale banner in `scanner.rs`.**
-  The `RECONNECTS` doc linked to [`reconnect`], which does not resolve
-  (firmware rustdoc with private items warns), and a "Unit Tests" banner was
-  left at the end of the file when its tests moved to `adv_parser.rs`. Fixed:
-  the banner went with the connectable-only fix, the link now names
-  `crate::ble::reconnect`, and three more links that broke only in some builds
-  (`coordinator.rs` and `power_logic.rs` in the embedded library, `ble/mod.rs`
-  in the `sim` build) are written as code. Rustdoc with private items and
-  warnings denied is clean for the host library, the embedded library, and all
-  three binaries; the commands and the rule are in
-  [code quality](docs/code-quality.md#documentation-comments).
-- [x] **P3** **Duplicated and dead logic in `conn_params.rs`.** Reversed
-  interval bounds were normalized twice in two styles (`bound_request` and
-  `interval_within_request`); the step-back loop in `max_latency_for` could
-  never run for a nonzero timeout and its comment ("can overshoot by one
-  event") was false; and the tests copied the Core-rule check three times.
-  Fixed: `requested_range` normalizes the range for both functions and the
-  sweep test, `max_latency_for` is the closed form `(4 × timeout − 1) /
-  interval − 1` with its derivation, and the tests share `meets_core_rule`. A
-  new test checks the closed form against the Core rule for every timeout up to
-  33 s at twelve intervals; answers are unchanged.
-- [x] **P3** **`SIGHTING_TTL_MS` sat outside `config.rs` unlisted.** The
-  other `ReconnectTable` timings come from `config.rs`; the 2 s sighting
-  lifetime was a constant in `src/ble/reconnect.rs` and was missing from
-  [constants outside config.rs](docs/hardware.md#constants-outside-configrs).
-  Fixed: it is `BLE_RECONNECT_SIGHTING_TTL_MS` in `config.rs`, passed to
-  `ReconnectTable::new` with the other two timings and listed in the
-  [configuration defaults](docs/hardware.md#configuration-defaults); the tests
-  use their own value.
-- [x] **P3** **A redundant `Disconnect` arm in `connection_slot_task`.** The
-  arm for a `Disconnect` that arrives between reconnect attempts repeated what
-  the fall-through path does (`clear_reconnect`, then `Disconnected`). Fixed:
-  the arm is gone and its comment moved to the one `Disconnect` arm, which now
-  handles both cases with the same calls in the same order.
+  Rustdoc with private items and warnings denied is clean for every build
+  ([documentation comments](docs/code-quality.md#documentation-comments)).
+- [x] **P3** **Duplicated and dead logic in `conn_params.rs`.**
+  `requested_range` normalizes once and `max_latency_for` is a closed form,
+  checked against the Core rule up to 33 s.
+- [x] **P3** **`SIGHTING_TTL_MS` sat outside `config.rs` unlisted.** It is
+  `BLE_RECONNECT_SIGHTING_TTL_MS` in `config.rs`.
+- [x] **P3** **A redundant `Disconnect` arm in `connection_slot_task`.** One arm
+  handles both cases.
 - [x] **P3** **`BLE_CONNECT_TIMEOUT_SECS` cited a scan rate attempts no longer
-  use.** Its doc justified 6 s with three default 1.7 s scan intervals, but
-  connection attempts now always scan at the fast duty, and the constant also
-  bounds reconnect scans, which the doc did not mention. Fixed: the doc names
-  both uses, the fast duty for attempts (60 windows in 6 s), the default duty
-  for a reconnect scan past its fast window (three windows), and the holdoff
-  derived from it.
-- [x] **P3** **Docs described removed code.**
-  [data model](docs/data-model.md#ui-state-model) still listed the removed
-  `UiState::interactive_scan`, and ADR 0011 and the architecture guide still
-  spoke of a "reconnect planner" or "boot planner" that `4faf99f` replaced with
-  the reconnect table and inline boot reconnect. Fixed: the row is gone, the
-  architecture guide says `ble_task` sends `Reconnect` at power-up, ADR 0011
-  and the multi-device item name the reconnect table, and only ADR 0015's
-  account of the old tree still names `resolve_reconnect_targets`, as history.
-
-- [x] **P3** **The test map misdescribed two `conn_params` tests.** The
-  [testing guide](docs/testing.md#test-map) said "a faster request gets
-  7.5 ms" and "latency is lowered when 4 s cannot cover it", but those tests
-  raise the floor to 15 ms and cap the timeout at 1 s. Fixed with the next
-  entry: the faster-request test now also checks the production 7.5 ms floor,
-  and the row names the floors and the 1 s cap the tests use.
+  use.** Its doc
+  names both uses and both duties.
+- [x] **P3** **Docs described removed code.** The `interactive_scan` row and
+  the "reconnect planner" wording are gone.
+- [x] **P3** **The test map misdescribed two `conn_params` tests.** The rows
+  name the floors and the 1 s cap the tests use.
 - [x] **P3** **ADR 0016 and the architecture guide misstated when the
-  out-of-range warning fires.** They said only a peripheral that wants nothing
-  faster than 30 ms is granted an interval outside its range. A request
-  entirely below 7.5 ms, which the SoftDevice cannot grant, is granted 7.5 ms
-  and gets the warning too, while one whose fastest interval is exactly 30 ms
-  is granted it inside its range. Fixed: both name the two cases, and host
-  tests now pin the 7.5 ms case as flagged and the 30 ms case as inside its
-  range.
-- [x] **P3** **The recorded firmware size omitted `DEFMT_LOG` and was stale.**
-  The [2026-10-09 validation record](docs/testing.md#validation-record--2026-10-09) gave
-  `.text` and `.bss` for the release build without the log level, which
-  [code quality](docs/code-quality.md#measuring) requires, and the code has
-  changed since. Fixed: that record now names `debug`, and the
-  [2026-10-10 validation record](docs/testing.md#validation-record--2026-10-10)
-  gives every loaded section at `6e1b8b4` for both `debug` and `info`
-  (`.text` 110,812 and 109,584 bytes).
-- [x] **P3** **Three modules had no module comment.** The
-  [review rule](docs/code-quality.md#documentation-comments) says every module
-  starts with a `//!` comment, but `src/ble/adv_parser.rs`,
-  `src/ui/input_logic.rs` (a plain `//` note instead), and
-  `src/ble/coordinator_tests.rs` had none, and nothing checked the rule.
-  Fixed: each now says what it owns, and the Linux host job fails on any Rust
-  file under `src/`, `tests/`, or `build.rs` without a `//!` line.
-- [x] **P3** **The audit job installed its toolchain implicitly.** The hosted
-  run of `c0b4b48` showed rustup's "missing active toolchain has been
-  auto-installed" warning in the Dependency security audit job: `cargo audit`
-  goes through the rustup proxy, and that job was the only Cargo job without
-  the `rustup install` step. Fixed in `2622228`: it installs the pinned
-  toolchain first, like the other jobs.
-- [x] **P2** **The documentation checker exceeded the 500-line limit.**
-  `scripts/check_docs.py` was 676 lines when it landed (775 once formatted),
-  over the coding guide's 500-line limit, which CI enforced only for Rust.
-  Fixed: it is now a 73-line driver over one module per check in
-  `scripts/docs_checks/` (the largest, `config.py`, under 230 lines), and the
-  Linux host job applies the 500-line limit to Python files under `scripts/`
-  as well ([file length](docs/code-quality.md#file-length)).
-- [x] **P3** **`scripts/release.py` imported `sys` without using it**, and
-  `mask rustdoc-check` and `mask ci` built the rustdoc command in word-split
-  strings. Both were found by the first Ruff and ShellCheck run below and fixed:
-  the import is gone, and the recipes use Bash arrays.
-- [x] **P3** **The operations runbook overstated what `trace` logs.** Its
-  log-sharing advice said a `trace` build also logs "security-request details,
-  including the bond's master identifier (EDIV and RAND) and peer addresses".
-  That line (`ble evt sec info request` in `vendor/nrf-softdevice/src/ble/gap.rs`)
-  is compiled only with the crate's `ble-peripheral` feature, which bt2usb does
-  not enable, and the boot-sequence note still said dependency logs were not
-  audited. Found while reviewing the vendored logs below; fixed in the same
-  change, which rewrote both passages from the
-  [dependency log review](docs/security.md#dependency-logs).
-- [x] **P3** **Boot logged a line per stored device that the docs omitted.**
-  `DeviceStore::load_from_flash` rebuilt the list through the runtime `add`, so
-  every boot printed `Added paired device - now storing N` for each stored
-  record (or `Updated existing paired device` when two merged) before
-  `Loaded N devices from flash`, while the
-  [boot sequence](docs/operations.md#boot-sequence) lists only that summary line. Found while
-  moving the store into host code; fixed by the move: the pure loader merges
-  without logging, and only runtime adds log.
-- [x] **P3** **The data model still described the store before the move.**
-  After `eeae4b8` the [data model](docs/data-model.md#in-memory-cache) still
-  gave `DeviceStore` the fields `devices: Vec<PairedDevice, 4>`, `dirty`, and
-  `writable`, which now live in `DeviceList` as `StoredDevice` records, and
-  said legacy parsing "exists only in `storage.rs` and has no host test".
-  Found while reading the schema rules for the storage migration item; fixed:
-  the In-Memory Cache and Legacy Format sections describe `DeviceList`, its
-  `resolve` function, the `AddOutcome` log lines, and the legacy tests.
-- [x] **P1** **Pairing saves could fail on buffer alignment.** `save_to_flash`
-  and `load_from_flash` in `src/storage.rs`, and the self-test flash stage in
-  `src/selftest.rs`, gave `sequential-storage` a plain `[u8; N]` scratch
-  buffer. The map writes item data to flash straight from that buffer
-  (its `ItemHeader::write_raw`, also when garbage collection moves items),
-  and `nrf_softdevice::Flash::write` returns `FlashError::BufferMisaligned`
-  for a source that is not 4-byte aligned in RAM. A byte array has alignment
-  1, so whether a save, and with it every pairing, succeeded depended on where
-  the compiler placed the buffer; no board record shows a save yet. Found by
-  the fact-check of ADR 0019. Fixed: all three use `FlashBuffer`, a
-  `#[repr(align(4))]` wrapper in `src/sd_setup.rs`
+  out-of-range warning fires.** It
+  names both cases, and host tests pin them.
+- [x] **P3** **The recorded firmware size omitted `DEFMT_LOG` and was stale.** Validation
+  records name the log level.
+- [x] **P3** **Three modules had no module comment.** CI fails any Rust file
+  without a `//!` line.
+- [x] **P3** **The audit job installed its toolchain implicitly.** It runs
+  `rustup install` first (`2622228`).
+- [x] **P2** **The documentation checker exceeded the 500-line limit.** It is a driver
+  over `scripts/docs_checks/`, and the limit covers `scripts/*.py`.
+- [x] **P3** **`scripts/release.py` imported `sys` without using it.** Removed;
+  the rustdoc recipes use Bash arrays.
+- [x] **P3** **The operations runbook overstated what `trace` logs.** Both
+  passages follow the [dependency log review](docs/security.md#dependency-logs).
+- [x] **P3** **Boot logged a line per stored device that the docs omitted.** The pure loader merges
+  without logging.
+- [x] **P3** **The data model still described the store before the move.** The
+  In-Memory Cache and Legacy Format sections describe `DeviceList`.
+- [x] **P1** **Pairing saves could fail on buffer alignment.** Flash scratch
+  buffers are `FlashBuffer`, a `#[repr(align(4))]` wrapper in `src/sd_setup.rs`
   ([write rules](docs/data-model.md#write-rules)).
 - [x] **P3** **The button reducer computed a redraw hint nothing read.**
-  `ui_logic::on_button` returned `ButtonOutcome::redraw` (`Redraw::{None,
-  Scanning, DeviceList, Home, Current}`) for every press, and seven host-test
-  assertions checked it, but since the display task began rendering the whole
-  latest `UiState` ([ADR 0009](docs/adr/0009-isolated-display-task.md)) no
-  firmware path read it; only the Renode build logged it. Found while moving
-  the UI loop into `ui::controller`; fixed by removing `Redraw` and the field.
+  `Redraw` is gone.
 - [x] **P3** **The architecture retry table said management requests wait
-  forever.** Its "Management request" row read "None | UI waits for the reply",
-  although the UI has given up after `UI_MANAGEMENT_TIMEOUT_SECS` (30 s) and
-  shown **No reply** since the bounded management wait landed. Found while
-  updating the guide for the controller; fixed: the row names the deadline,
-  the No reply screen, and `controller.rs`
-  ([retries](docs/architecture.md#retries-deadlines-and-backoff)).
+  forever.** The row
+  names `UI_MANAGEMENT_TIMEOUT_SECS` and the No reply screen.
 - [x] **P3** **The OLED showed power-on noise while its first frame was
-  drawn.** The `ssd1306` crate's `init` ends by turning the panel on while its
-  RAM still holds whatever it powered up with, and `render` then sent the
-  1,024-byte frame at the TWIM's default 100 kHz, so for about 0.1 s after
-  boot, and after a retry that followed a power loss of the panel, it showed
-  random pixels. Found by the Renode SSD1306 model, which counted 1,024 frame
-  bytes written to a lit panel at boot. Turning the panel off right after
-  `init` still left it lit with noise for the two bytes of that command, so
-  the fix clears the panel's RAM before `init`, while power-up still holds
-  the panel off, then turns it off after `init` until the first frame is in
-  (`display::initialize` in `src/ui/display.rs`); a render that initializes
-  now sends two full frames, about 0.22 s at 100 kHz, inside the 500 ms
-  deadline. The Robot test asserts that the panel receives no byte while lit
-  with noise, at boot and after it is plugged back in
-  ([OLED checks](docs/testing.md#oled-checks)).
-- [x] **P2** **The glyph-table test failed on Windows.** The Windows host job
-  of CI run 38085444796 (`bbe5a83`) failed
-  `renode_glyph_table_matches_the_firmware_font`: `.gitattributes` kept
-  Renode scripts and models LF but not `renode/oled-font-6x10.txt`, so the
-  Windows checkout converted the table to CRLF and the byte-for-byte
-  comparison failed. Fixed: `.gitattributes` keeps `renode/*.txt` LF, and the
-  test compares the table with CRLF read as LF (`tests/oled_font.rs`). Push
-  run 38085612272 (`ed63657`) passed every job.
-- [x] **P3** **Line-number citations into bt2usb's own sources drifted.**
-  The proposed ADRs 0017 to 0022 cited lines of `src/` files, `Cargo.toml`,
-  `Cargo.lock`, `memory_sd.x`, and the vendored `nrf-softdevice` by number,
-  and the commits since they were written moved that code: for example ADR
-  0020 placed the UI loop at `main.rs` lines 244 to 376 and ADR 0019 placed
-  the load in `ble_task` at `multi_conn.rs` lines 76 to 79. Found while
-  renaming the display task in ADR 0020. ADR 0003 also still counted 283 test
-  attributes. Fixed: the six ADRs cite bt2usb's own code and the vendored
-  crate by item name (`execute_action`, `manage_devices`, `Flash::erase`, and
-  so on), and keep line numbers only for dependency sources that `Cargo.lock`
-  pins.
-  ADR 0003 counts 359 test attributes and lists the modules and test files
-  added since (`messages.rs`, `controller.rs`, `layout.rs`, and their tests).
+  drawn.** `display::initialize` clears
+  the panel's RAM before `init` and keeps it off until the first frame; the
+  Robot test checks it ([OLED checks](docs/testing.md#oled-checks)).
+- [x] **P2** **The glyph-table test failed on Windows.** `.gitattributes` keeps
+  `renode/*.txt` LF, and `tests/oled_font.rs` reads CRLF as LF.
+- [x] **P3** **Line-number citations into bt2usb's own sources drifted.** ADRs cite
+  bt2usb's code by item name.
 - [x] **P1** **Peers could halt the bridge through four vendored panics.**
-  The panic inventory found them in the compiled `nrf-softdevice` modules.
-  At the 64-byte ATT MTU a primary-service discovery response with 15 handle
-  ranges is a 132-byte event, over the crate's default 128-byte buffer, so
-  `events::run_ble` panicked (`BLE_EVT_MAX_SIZE is too low`) and halted the
-  chip, and after each power cycle a bonded device sent the same response to
-  the next discovery. `gap::on_evt` panicked on the
-  authenticated payload timeout (`unknown timeout src`), which an encrypted
-  peer that ignores LE Ping causes. `Connection::drop` unwrapped the
-  `DisconnectedError` that dropping a link the peer had just ended returns,
-  for example after a failed MTU exchange in `connect_inner`, and
-  `disconnect_with_reason` unwrapped any other SoftDevice error. Fixed:
-  bt2usb enables `evt-max-size-256` and checks the buffer against the MTU at
-  compile time in `src/sd_setup.rs`; the timeout arm logs `unhandled timeout
-  src {:?}`; the disconnect returns `DisconnectedError` and the drop accepts
-  it ([ADR 0025](docs/adr/0025-panic-lints-and-inventory.md),
-  [vendored list](docs/code-quality.md#vendored-nrf-softdevice)).
+  `evt-max-size-256` with a compile-time check, a logged unknown timeout, and a
+  non-panicking disconnect
+  ([ADR 0025](docs/adr/0025-panic-lints-and-inventory.md)).
 - [x] **P0** **Report Maps were cut short when a peripheral offered an MTU
-  above 64.** The vendored `gatt_client::att_mtu_exchange` stored the peer's
-  Server RX MTU from `BLE_GATTC_EVT_EXCHANGE_MTU_RSP` as the link's ATT MTU,
-  but the SoftDevice uses the smaller of that and the 64 bt2usb asks for (and
-  never less than 23), as the S140 documentation of
-  `sd_ble_gattc_exchange_mtu_request` says. With a peripheral that offered 65
-  to 517, as current BLE stacks commonly do (247 and 517 are typical),
-  `conn.att_mtu()` reported the larger value, `read_report_map` built its
-  `LongRead` for fragments of that size minus 1, and the first 63-byte
-  fragment looked short, so the read ended after 63 bytes. A longer Report Map
-  was truncated: report IDs declared after byte 63 were unknown, and their
-  reports (often the mouse and media keys) were dropped, or the map failed to
-  parse. With an offer above 517, `LongRead::new` rejected the stored MTU and
-  every connect failed with `HID map read failed`. Found by the panic
-  inventory; not reproduced on hardware. Fixed: the exchange stores
-  `server_rx_mtu.min(requested).max(23)` (`vendor/nrf-softdevice/src/ble/gatt_client.rs`,
-  marked `bt2usb patch:`;
-  [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
-  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
-  embedded builds and Clippy; the vendored code has no tests, and the
-  hardware check is part of "Report Map interoperability and legacy policy".
+  above 64.** The vendored
+  MTU exchange stores `server_rx_mtu.min(requested).max(23)`
+  ([vendor notes](vendor/nrf-softdevice/README.bt2usb.md)).
 - [x] **P1** **A bond with a private or reserved identity address broke the
-  store.** `Bonder::on_bonded` kept the identity address the peer sent
-  during pairing without checking its type; when the peer sent none, it
-  kept the connection's address with an all-zero IRK
-  (`IdentityKey::from_addr`). `execute_action` stored the bond only when
-  `bond_for_address` matched it to the connection's address: a public or
-  static address had to equal the identity, a non-resolvable one never
-  matched, and a resolvable one had to be resolved by the bond's IRK. A
-  private or reserved identity therefore reached the store only from a peer
-  that connected from a resolvable private address and either distributed an IRK
-  that resolved it together with an identity type the SoftDevice passes
-  through (its documentation does not say whether it can), or distributed no
-  identity and built its address from an all-zero IRK, which a crafted peer
-  can do. `DeviceStore::add` then converted the identity with the vendored
-  `Address::address_type`, which `unwrap!`s and panics for the reserved raw
-  types 4 to 126. A private type (resolvable or non-resolvable) was saved, but
-  the reload refuses any identity type above 1, so the next boot logged
-  `Invalid or unsupported device store; writes disabled`, loaded no devices,
-  and refused saves until a Factory reset: every pairing was lost. Found by
-  the panic inventory's reviewer. Fixed: the raw type is decoded with
-  `AddressKind::from_gap_type`, which returns `None` for a reserved one, and
-  no bond whose identity is not public or random static
-  (`AddressKind::is_identity`) is kept. Since the follow-up FIXME "A refused
-  pairing still stored the device", `Bonder::on_bonded` refuses it when it is
-  made and nothing is stored for that pairing; `DeviceStore::add`,
-  `DeviceList::add`, and the reload in `codec::decode_bond` refuse it too, and
-  the OLED shows `Pairing not saved` (`BleErrorTag::BondRefused`). Host tests
-  decode every SoftDevice address type and save and reload a bond with each
-  identity type (`src/storage/devices_tests.rs`, `devices_format_tests.rs`;
-  [data model](docs/data-model.md#write-rules),
-  [ADR 0006](docs/adr/0006-fail-closed-pairing-store.md)). The shell and the
-  `execute_action` path are checked by the embedded builds and Clippy; no peer
-  that sends such an identity was tried.
-- [x] **P1** **A peripheral that refused the MTU exchange could not
-  connect.** `central::connect_with_security` runs `att_mtu_exchange` inside
-  the vendored `connect_inner` and failed the whole connection when it
-  returned an error. A GATT server may answer the Exchange MTU Request with an
-  ATT error (Request Not Supported), after which both sides keep the default
-  23-byte MTU; such a peripheral failed every connect. Found by the panic
-  inventory's reviewer; not reproduced. Fixed: an ATT error response logs
-  `att mtu exchange refused: {:?}; keeping the default mtu` and the connect
-  continues at MTU 23, while a timeout, a disconnect, or a SoftDevice error
-  still fails it (`vendor/nrf-softdevice/src/ble/central.rs`, marked
-  `bt2usb patch:`; [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
-  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
-  embedded builds and Clippy; hardware evidence belongs to "Report Map
-  interoperability and legacy policy".
+  store.** Only public or random static identities are kept, at pairing, add,
+  and reload, and the OLED shows `Pairing not saved`
+  ([ADR 0006](docs/adr/0006-fail-closed-pairing-store.md)).
+- [x] **P1** **A peripheral that refused the MTU exchange could not connect.**
+  An ATT error keeps the default MTU and the connect continues.
 - [x] **P1** **A peripheral's own MTU exchange or CCCD access was never
-  answered.** With the `ble-gatt-server` feature off, the vendored
-  `ble::on_evt` dropped every GATT server event, including
-  `BLE_GATTS_EVT_EXCHANGE_MTU_REQUEST`, which needs
-  `sd_ble_gatts_exchange_mtu_reply`, and `BLE_GATTS_EVT_SYS_ATTR_MISSING`,
-  which needs `sd_ble_gatts_sys_attr_set` (S140 includes the Service Changed
-  characteristic and its CCCD by default). A peripheral that also acts as a
-  GATT client, sending its own MTU exchange or reading or writing the bridge's
-  Service Changed CCCD, got no answer; its ATT transaction timed out after
-  30 s, after which the Core specification lets it send no more ATT PDUs on
-  that link, including the notifications that carry its reports. Found by the
-  panic inventory's reviewer; not reproduced. Fixed: without the GATT server
-  feature, `on_gatts_evt_without_server` answers the MTU request with Server
-  RX MTU 64 and records `client_rx_mtu.min(64).max(23)`, and answers a
-  missing system attribute with the defaults
-  (`vendor/nrf-softdevice/src/ble/mod.rs` and a non-panicking state lookup in
-  `connection.rs`, marked `bt2usb patch:`;
-  [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
-  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). Checked by the
-  embedded builds and Clippy; hardware evidence needs a peripheral that sends
-  its own MTU exchange.
+  answered.** `on_gatts_evt_without_server` answers both in the vendored crate.
 - [x] **P2** **Bonder callbacks re-entered the vendored connection state.**
-  The vendored crate called `SecurityHandler::on_bonded` (in `gap::on_evt`,
-  `BLE_GAP_EVT_AUTH_STATUS`) and `get_peripheral_key` (in
-  `Connection::encrypt`) inside `Connection::with_state`, which holds a
-  `&mut ConnectionState`. bt2usb's `Bonder` calls `conn.peer_address()` in
-  both, which took a second `&mut` to the same state through the
-  `UnsafeCell`. Two live mutable references are undefined behavior even
-  though both accesses only read, so the builds behaved as intended.
-  Found by the panic inventory. Fixed: every security handler call in the
-  compiled modules now runs after `with_state` returns, with the handler and
-  its data copied out: `on_bonded`, `on_security_update`, `display_passkey`,
-  `enter_passkey` and `recv_out_of_band` (whose `Connection::from_handle`
-  also re-entered the state) in `gap::on_evt`, `get_peripheral_key` in
-  `Connection::encrypt`, and `security_params` in
-  `Connection::request_pairing`, each marked `bt2usb patch:`
-  (`vendor/nrf-softdevice/src/ble/`;
-  [vendor notes](vendor/nrf-softdevice/README.bt2usb.md),
-  [ADR 0007](docs/adr/0007-vendored-softdevice-patch.md)). The
-  [unsafe-code inventory](docs/code-quality.md#vendored-unsafe) states the
-  rule for `with_state` closures and lists the three sites left in code
-  bt2usb does not compile. Checked by the embedded builds and Clippy; the
-  vendored code has no tests.
-- [x] **P2** **An all-zero IRK resolved private addresses.** A peer that
-  distributes no identity key during pairing gets the vendored
-  `IdentityKey::from_addr`, whose IRK is all zeros, and its bond keeps that
-  IRK. Every resolution in bt2usb treated it as a real key:
-  `IdentityKey::is_match` in `Bonder` (`on_bonded`, `bond_for_address`,
-  `get_key`, `get_peripheral_key`, `forget`), `StoredBond::matches` through
-  `storage::resolve`, the reconnect scan's `SavedPeer::matches`, and the
-  Forget targets in `manage_devices`. A device that builds a resolvable
-  private address from the all-zero IRK, which anyone can do, therefore
-  matched every bond made without an IRK, such as a keyboard on a public
-  address. Paired, it replaced that keyboard's keys in `Bonder`
-  (`on_bonded` replaces the first match), and its record merged into the
-  keyboard's in the store, overwriting its address and name
-  (`DeviceList::add`); merely advertising, it counted as the keyboard during
-  a background reconnect scan, so the slot connected to it and failed to
-  encrypt instead of reaching the keyboard. Nordic's nRF5 SDK peer manager
-  treats an all-zero IRK as no IRK. Found by the review of the bond identity
-  fix. Fixed: `irk_present` in `src/storage/devices.rs` decides whether an
-  IRK is a key, `StoredBond::matches` resolves a private address only with
-  one, and `bonder::key_matches`, which `Bonder`, the reconnect scan, and
-  Forget's slot selection now use instead of `IdentityKey::is_match`, does
-  the same ([security](docs/security.md#pairing-and-authentication)). Host
-  tests cover `irk_present`, `StoredBond::matches`, `DeviceList::find`, and
-  `DeviceList::add` with such a device. `SavedPeer::matches` is generic over
-  the resolver it is given, so the rule is tested where it lives, and the
-  firmware passes it `key_matches`; that shell code is checked by the
-  embedded builds and Clippy.
-- [x] **P2** **A refused pairing still stored the device.** After the bond
-  identity fix, `DeviceStore::add` refused the bond but stored the device
-  without keys, at the private address it connected from. A peer that names
-  a private identity pairs again after each address rotation, so every
-  pairing added a record; in a full store each one evicted the oldest bonded
-  peer, whose keys were then lost at the next boot, and the keyless records
-  took boot reconnect slots although only an address the peer had already
-  left matched them. A peer that sent no identity while connecting from a
-  non-resolvable private address was not refused at all:
-  `IdentityKey::is_match` never matches such an address, so
-  `bond_for_address` found no bond, the device was stored without keys, and
-  no error was shown. Found by the behavior review of the bond identity fix.
-  Fixed: `Bonder::on_bonded` checks the identity the peer sends
-  (`storage::is_identity_address`, which decodes the type without
-  `Address::address_type`), keeps no keys for one that is not public or
-  random static, logs `Bond refused: identity address is not public or random
-  static`, and records the link; `execute_action` then stores nothing for it
-  and shows `Pairing not saved` (`Bonder::take_refused`). As a second line of
-  defense `DeviceList::add` returns `AddOutcome::BondRefused` and stores
-  nothing for such a bond, and `DeviceStore::add` logs `Device store refused a
-  bond whose identity is not public or random static`; `execute_action` then
-  drops exactly those keys from `Bonder` (`forget_bond`). A bond already
-  stored for the same peer stays. Host tests show that a refused bond stores
-  nothing and leaves nothing to save, leaves the same peer's stored bond, and
-  that 256 refused pairings from rotating addresses leave every bond of a
-  full store (`src/storage/devices_tests.rs`;
-  [data model](docs/data-model.md#write-rules)). `Bonder` and
-  `execute_action` are checked by the embedded builds and Clippy.
-- [x] **P2** **A slot kept retrying a device it could not secure.** When the
-  link of a device for which `Bonder` held no keys ended (a refused pairing,
-  or a device whose keys a newer pairing evicted from the four in memory),
-  the slot worker reported `LinkLost` and retried it in the background.
-  Background reconnects never pair, so every attempt failed, and the slot
-  stayed reserved until the user disconnected: with two slots, one such
-  device halved what the bridge could connect. Found while fixing "A refused
-  pairing still stored the device". Fixed: on link loss
-  `connection_slot_task` asks `Bonder::bond_for_address` for the device's
-  keys and, without them, sends `SlotEvent::Disconnected`, which frees the
-  slot, and logs `slot {} link lost; no keys to reconnect`, instead of
-  retrying (`src/ble/slot_worker.rs`;
-  [architecture](docs/architecture.md#background-reconnect)). This is the
-  part of the open P1 "Visible storage/security errors" that the bridge can
-  decide alone, since it knows it holds no keys; that item still covers a
-  peer that lost its keys and a legacy record without a bond. The slot
-  worker is checked by the embedded builds and Clippy; the coordinator's
-  handling of `Disconnected` is host-tested.
-- [x] **P1** **Selecting a device whose slot was retrying left the UI on
-  Connecting.** `plan_connect` returned no action when the selected address
-  was reserved by a slot that was not connected, expecting that attempt to
-  report. A background retry that cannot succeed, such as one for a
-  peripheral that lost its keys after pairing with another computer, or for a
-  legacy record without keys, never reports, so `Connecting...`, which
-  ignores every button, stayed on screen until the bridge was reset, or until
-  an event from the other slot (a link change or an error) moved the UI off
-  it; after a reset the boot reconnect started the same retry again. A bonded peer selected at a new private
-  address was not recognized as the device its slot was retrying at all, so
-  a second slot connected it, or `Connect failed` showed when none was free.
-  Raised from P2 because the trap needs no hostile peer: a keyboard paired
-  with another computer, the usual case behind a KVM, reaches it. Found while
-  fixing "A refused pairing still stored the device". Fixed: `ConnManager`
-  marks a slot reserved by a background reconnect (`reserve_retry`, used at
-  power-up and by `on_slot_link_lost`), and `plan_connect` takes a
-  `same_peer` test, which the firmware answers with the address or
-  `Bonder::same_peer` (one bond's identity key matching both addresses). A
-  slot that holds the selected device and is retrying is reserved again for
-  the user's connection and sent `SlotCommand::Connect`, which may pair; a
-  connected one is acknowledged. The worker drops a retry superseded by a
-  `Connect` without reporting `Disconnected`, which would free the slot and
-  move the UI off Connecting, and reports a superseding `Disconnect` once
-  instead of twice (`superseded` in `src/ble/slot_worker.rs`). A peripheral
-  that lost its own keys now ends in `Connect failed`, from which the user
-  forgets and pairs it again. Two coordinator host tests cover the takeover
-  at power-up and after a link loss, and a bonded peer at a new address (now
-  in `src/ble/coordinator_attempt_tests.rs`; the scan tests that moved out of
-  `src/ble/coordinator_tests.rs` to keep it under 500 lines are now in
-  `src/ble/scan_list_tests.rs`;
-  [architecture](docs/architecture.md#user-scan-connect-pairing-and-hid-discovery)).
-  The worker and `Bonder::same_peer` are checked by the embedded builds and
-  Clippy. The next entry replaced the worker's rule for a superseding
-  `Connect` with attempt numbers.
-- [x] **P2** **The retry takeover raced the slot's own events.** The takeover
-  in the previous entry trusted the coordinator's view of the slot, but
-  `ble_task` handles UI commands before queued slot events, so a selection
-  could act on a retry whose report was already on its way. An independent
-  review of the previous two entries found five defects. A retry that had
-  just connected, with its `Connected` still queued, was torn down by the
-  takeover and connected again, and ended in `Connect failed` if the device
-  did not advertise again within 6 seconds. A failed takeover, for example
-  when the device had stopped advertising by the time it was selected, freed
-  the slot and ended the background reconnect of a device whose keys were
-  still good, so it no longer came back when it woke. A retry that failed
-  with an HID error while the selection was handled freed the user's new
-  reservation and left that error on screen over a connection that then
-  succeeded. A takeover during the retry's security or HID discovery closed
-  the nearly finished link and started over. And a retry whose keys a newer
-  pairing evicted kept retrying forever, since the keys were checked only on
-  link loss. Fixed: every reservation gets an attempt number
-  (`ConnManager::reserve_slot`, `reserve_retry`), commands and events carry
-  it, and the `on_slot_*` reducers ignore an event from an attempt the
-  coordinator has since replaced or ended. The worker treats a `Connect` for
-  the peer it is retrying (`Bonder::same_peer`) as a takeover: a link already
-  up is kept and reported `Connected` under the new number, an attempt
-  securing the link or discovering HID carries on under it, and when the
-  user's connection fails while `Bonder` still holds the device's keys, the
-  worker reports `Error` with `retrying` and resumes the retry, which
-  `on_slot_error` keeps reserved. Before each silent attempt the worker
-  checks the keys and, without them, frees the slot
-  (`slot {} has no keys to reconnect`); power-up reserves slots only for
-  saved devices with a bond. A background reconnect therefore never targets a
-  device the bridge holds no keys for, which also narrows the open P0 "Refuse
-  peer-initiated pairing on background reconnects" to keys dropped during an
-  attempt or while the link it opened is up. `merge_advertisement` moved to `src/ble/scan_list.rs` with its
-  tests to keep `src/ble/coordinator.rs` under 500 lines. Seven host tests in
-  `src/ble/coordinator_attempt_tests.rs` cover the numbers and the takeover
-  ([architecture](docs/architecture.md#attempt-numbers-and-retry-takeover));
-  the worker is checked by the embedded builds and Clippy.
-- [x] **P2** **A superseded link's pending GATT wait could outlive it.**
-  Found by the independent review of "The retry takeover raced the slot's own
-  events". To let a takeover carry on with a link's security and HID
-  discovery, or with its notification loop, that change pinned those futures
-  for the whole of `connect_and_run_secure` (`src/ble/slot_worker.rs`), so a
-  pending one was dropped only after `close_connection` had seen the link
-  gone. The vendored GATT client keeps one portal per connection handle, and
-  dropping a pending wait clears whatever that portal then holds
-  (`Portal::wait_once` and `wait_many` in
-  `vendor/nrf-softdevice/src/util/portal.rs`). If the other slot connected in
-  the 10 ms polling window and the SoftDevice gave it the freed handle, the
-  late drop erased its MTU exchange, its `connect_with_security` never
-  returned, and it held the GAP procedure lock until the bridge was reset,
-  stalling every scan and connect. Fixed: each future is pinned inside a
-  block that returns the result or the superseding command, so it is dropped
-  before the link is closed, as before that change. The same review found the
-  coordinator's release of a reserved slot without a link untested (one host
-  test added in `src/ble/coordinator_attempt_tests.rs`), the RAM and store
-  evictions described as one event (documents corrected; the code is the
-  FIXME below), the Security Request window stated too narrowly, and
-  documents still naming the old boot selection or `coordinator.rs` for the
-  scan list, all corrected
-  ([validation record](docs/testing.md#validation-record--2026-10-11-retry-takeover-review-fixes)).
-- [x] **P2** **A background reconnect that loses its link during HID
-  discovery stops retrying.** Found while fixing "The retry takeover raced the
-  slot's own events". A silent attempt that connects and secures the link but
-  then fails HID discovery reports the error (`No HID service`,
-  `HID map read failed`, or `Notify failed`) and frees the slot
-  (`SlotOutcome::Failed` in `connection_slot_task`, `src/ble/slot_worker.rs`).
-  For a saved device that worked before, a likely cause is the link dropping
-  during discovery, for example a keyboard going back to sleep right after a
-  key press woke it. The error then ends the device's background reconnect:
-  it no longer comes back when it wakes until it is selected from a scan or
-  the bridge restarts. Accept when a silent attempt whose link dropped during
-  discovery is retried like a connection failure, a discovery failure on an
-  intact link is still reported, and the documents say which is which.
-  Fixed: when securing or discovering fails, `connect_and_run_secure` reads
-  the link's handle before closing it; the vendored crate marks the link
-  disconnected before it fails the pending GATT procedure, so a link already
-  gone dropped during the step. `ErrorTag::for_failed_setup`
-  (`src/ble/coordinator.rs`, one host test) then reports `ConnectFailed`,
-  which a silent attempt retries, and logs
-  `slot {} link dropped during HID discovery`; a failure on a link still up
-  keeps its own error. A selection whose link drops shows `Connect failed`
-  instead of an HID error. To make room under 500 lines, one attempt's
-  connect, secure, discover, and run phases moved from
-  `src/ble/slot_worker.rs` to `src/ble/slot_link.rs`
-  ([architecture](docs/architecture.md#background-reconnect)).
-- [x] **P2** **Keys held in RAM and saved records are evicted separately.**
-  Found by the independent review of "The retry takeover raced the slot's own
-  events". `Bonder` keeps the keys of up to four peers in RAM, loaded from
-  the store's bonded records at boot, and `on_bonded` drops the oldest of
-  them (`peers.remove(0)`) as soon as a bonding completes while four are
-  held, before the device is saved (`src/ble/bonder.rs`). The store evicts
-  its oldest record only when `Action::PersistDevice` adds a fifth
-  (`DeviceList::add`), and leaves that record's keys in RAM (`DeviceStore::add`
-  only logs `AddedAfterEviction`, `src/storage.rs`). A user pairing that bonds
-  and then fails HID discovery, or that the user cancels, therefore saves
-  nothing yet drops the oldest saved device's keys until restart: a slot
-  retrying that device stops (`slot N has no keys to reconnect`), and the P0
-  Security Request path opens without a fifth device ever being saved. And
-  when one of the four saved records has no bond and is not the oldest, so
-  RAM held only three keys, saving a fifth device evicts the oldest record
-  while its keys stay: a slot retrying it keeps retrying and, when it
-  reconnects, saves the record again and evicts another. Accept when the keys in RAM match the store's bonded
-  records except for pairings not yet saved, a pairing that is never saved
-  drops no other device's keys, and host tests show both. Fixed: the new
-  pure `BondTable` (`src/ble/bond_table.rs`, eight host tests) holds the
-  saved devices' keys plus one unsaved pairing per link (`BOND_SLOTS`, six),
-  and `on_bonded` adds a new peer unsaved instead of dropping the oldest.
-  `PersistDevice` marks the keys saved and, when the store evicts a record,
-  drops its keys by identity address (`AddOutcome::AddedAfterEviction` now
-  names it; `DeviceStore::add` returns it; one host test). An attempt that
-  ends before its link was reported up makes `on_slot_error` or
-  `on_slot_disconnected` return `Action::DiscardUnsavedBond` first, which
-  drops a pairing's unsaved keys and leaves saved ones; the coordinator
-  handles a slot's events in order, so a `Connected` and its save always come
-  before a later report. The slot-event reducers moved to
-  `src/ble/coordinator_events.rs`, a child module of `coordinator.rs`, to
-  keep it under 500 lines
+  Every security handler call runs after `with_state` returns
+  ([vendored unsafe](docs/code-quality.md#vendored-unsafe)).
+- [x] **P2** **An all-zero IRK resolved private addresses.** `irk_present` and
+  `bonder::key_matches` treat it as no IRK
   ([security](docs/security.md#pairing-and-authentication)).
+- [x] **P2** **A refused pairing still stored the device.** `Bonder::on_bonded`
+  keeps no keys for a non-identity address and nothing is stored.
+- [x] **P2** **A slot kept retrying a device it could not secure.** A slot
+  without keys frees itself (`slot {} link lost; no keys to reconnect`).
+- [x] **P1** **Selecting a device whose slot was retrying left the UI on
+  Connecting.**
+  `reserve_retry` and `plan_connect`'s `same_peer` test let a selection take
+  over the retry.
+- [x] **P2** **The retry takeover raced the slot's own events.** Attempt numbers
+  on every reservation, command, and event
+  ([attempt numbers](docs/architecture.md#attempt-numbers-and-retry-takeover)).
+- [x] **P2** **A superseded link's pending GATT wait could outlive it.** Each
+  future is dropped before its link is closed.
+- [x] **P2** **A background reconnect that loses its link during HID
+  discovery stops retrying.** `ErrorTag::for_failed_setup` reports `ConnectFailed`, which a
+  silent attempt retries.
+- [x] **P2** **Keys held in RAM and saved records are evicted separately.** The pure
+  `BondTable` (`src/ble/bond_table.rs`) keeps them in step.
 - [x] **P2** **A GATT wait that ends after a peer disconnect can clear the
-  next link's portal.** Found by the independent review of "A superseded
-  link's pending GATT wait could outlive it", which fixed only the links the
-  worker closes itself. The vendored portal's drop guard (`Portal::wait_once`
-  and `wait_many` in `vendor/nrf-softdevice/src/util/portal.rs`) ran whenever
-  a wait ended, completed or cancelled, and reset the portal without checking
-  whose closure it held. When the peer drops a link, `on_disconnected` fails
-  the link's pending GATT waits on its handle's portal, and the waiting task
-  runs again only at its next poll. If the SoftDevice gave the freed handle
-  to the other slot's link in the same event drain, and the executor polled
-  that slot first, its MTU exchange registered on the portal and the late
-  guard of the old wait (a discovery read, or an LED write that the
-  notification loop's select dropped) erased it: that slot's
-  `connect_with_security` never returned and held the GAP procedure lock
-  until the bridge was reset. Accept when an ended wait clears the portal only
-  while it holds that wait's own closure, whoever closed the link, and host
-  tests show it. Fixed: a `bt2usb patch:` makes the guard compare the stored
-  closure's address with its own (`Portal::clear_if_registered`), and
-  `tests/vendor_portal.rs` compiles the vendored portal on the host with five
-  tests, three of which fail on the unpatched source. The drop-before-close
-  order in `src/ble/slot_link.rs` stays as defence in depth. The same review
-  found the TODO wording on evicted keys and on which keys gate a retry, and
-  the coverage rows that gave the region figure as the line figure, all
-  corrected in "Keys held in RAM and saved records are evicted separately"
-  ([validation record](docs/testing.md#validation-record--2026-10-11-portal-clears-only-its-own-wait)).
-- [x] **P3** **The portal guard's comments describe the old behaviour.** Found
-  by the independent review of "A GATT wait that ends after a peer disconnect
-  can clear the next link's portal". The comment above the drop guard in
-  `Portal::wait_once` and `Portal::wait_many`
-  (`vendor/nrf-softdevice/src/util/portal.rs`) still said the guard resets
-  the portal to None whenever the wait is cancelled, which the fix had
-  changed to "only while the portal holds this wait's own closure"; a reader
-  checking the patch against the comment would take the comment for the
-  behaviour. Fixed: both comments now carry the `bt2usb patch:` marker and
-  state the ownership check. The same review's other finding, that saving a
-  fifth device drops the keys of an evicted device a slot still uses, was
-  refuted: that eviction predates the fix and is the documented outcome
-  ([security](docs/security.md#pairing-and-authentication),
-  [first flash](docs/first-flash.md#6-device-management-and-degraded-display)).
-- [x] **P2** **Docs the bond-table and portal commits left wrong.** Found by
-  the same independent review, each finding confirmed by a second check.
-  Two first-flash checks could not pass as written: "Unsaved pairing evicts
-  nothing" told the tester to pair a phone or a heart-rate strap, which the
-  scan never lists because neither advertises the HID service UUID, so no
-  unsaved pairing happened and the check passed without testing anything;
-  "Fifth device" expected three devices to reconnect after a reset, though
-  power-up gives a slot only to the two most recently added. Features still
-  said a fifth bond replaces the oldest, and ADR 0017's context still
-  described that eviction. The `Bond table full` log row assumed four saved
-  devices; the `DiscardUnsavedBond` docs and comments said "never
-  connected" where the code checks "no link up now"; ADR 0007 called the
-  portal the only vendored module that builds without the SoftDevice; the
-  vendored README counted three further changes where five follow; and the
-  "Bond Identity Refusal" coverage row still gave the region figure as the
-  line figure. Fixed: the unsaved-pairing check now uses a phone advertising
-  `0x1812` without an HID service and names the log lines to expect, the
-  fifth-device check expects the two newest to reconnect and names both
-  no-keys log lines, and every other statement now matches the code
-  ([first flash](docs/first-flash.md#6-device-management-and-degraded-display)).
-- [x] **P2** **The event counters' docs and one count did not match the
-  code.** Found by an independent review of the event-counter commit
-  `78471e8`, each finding confirmed by a second check. `USB write failures`
-  missed the first failure after a bus resume about ten times in eleven:
-  the endpoint worker re-armed its first-failure test only after a write
-  worked or when a reset or resume landed during the 100 ms write, not
-  during the backoff or while the bus was suspended, although the counter's
-  docs said every reset or resume re-arms it. The first-flash Counters check
-  and its hardware-result row could not pass on correct firmware: the counts
-  restart at every board reset, which section 4 does four times, and two
-  earlier steps leave a slot retrying a device paired elsewhere. The
-  `reports coalesced` docs blamed a full channel or a slow USB side, although
-  notifications delivered together merge without either, and said a mouse
-  merge loses no motion, although it clips at 127 per axis and can lose a
-  click. The security guide gave the counter line's timing as one-minute
-  resolution where the first change shows to about a second; "many per save"
-  described more flash retries than one save can make; and the test map,
-  ADR 0003, and the feature guide carried stale test counts. Fixed: the
-  worker re-arms the test when the bus is unavailable or a lifecycle event
-  ends the backoff, with a host test that fails on the old worker; the
-  Counters check starts from a clean boot and expects one lost link and one
-  attempt per sleep; every other statement now matches the code. One
-  further finding, raised twice, that a background attempt taken over by
-  the user's selection counts as an attempt but not a failure, was refuted:
-  the user stepped in, so it is no longer a background failure.
-- [x] **P3** **The PnP ID commit left docs out of step.** Found by an
-  independent review of commit `2e81820`, each finding confirmed by a second
-  check. The security guide's input-validation table, which claims to list
-  every peer-parsed boundary, lacked the Device Information discovery and
-  PnP ID read; the architecture layer table and dependency graph, the
-  `lib.rs` crate doc, the lists of shells without host tests, and the coverage
-  module count (still 22, now 32) left out `pnp_id`, `device_info`, or both;
-  the runbook still said a keyboard's LED state is written as soon as its
-  notification loop starts, contradicting its own PnP ID section; the log
-  reference listed two of the three vendor ID sources and said a longer
-  value logs `Truncated`, though an 8-byte one logs as malformed; the
-  `device_info.rs` comment gave a wrong reason for the 8-byte buffer; the
-  first-flash result list omitted the PnP ID line; ADR 0003 still gave
-  `lib.rs` as 166 lines; and the Diagnostics item lacked its
-  *(hardware evidence pending)* mark. Fixed: each statement now matches the
-  code, the graph has `ble::device_info` and `diagnostics` with their edges,
-  and the security table has a row for the PnP ID read.
-- [x] **P2** **A stack overflow during a log call is not reported.** Found
-  while documenting the MPU stack guard (ADR 0026). The HardFault handler
-  logs the overflow with `defmt::error!`. If the overflow happens while a
-  `defmt` line is being written, as it may when a log call is the frame that
-  crosses into the guard, defmt-rtt 1.3 finds its logger already taken and
-  panics ("defmt logger taken reentrantly"); panic-probe's `udf` then faults
-  inside the HardFault handler, the core locks up, and the nRF52840 resets
-  with `reset reason: CPU lock-up` and no `stack overflow` line. The statics
-  are still protected, but the report is lost. The self-test's deliberate
-  overflow logs nothing while it recurses, so it does not show this. Closes
-  when the handler first stores the stack pointer, guard, and PC in
-  `.uninit` RAM, which a lock-up or pin reset does not clear, before it
-  tries to log, and the next boot logs and clears that record, with the
-  record's encoding host-tested. The simulation writes its report straight
-  to UART0 without `defmt`, so Renode cannot show the lost line. Fixed: the
-  handler stores an `OverflowRecord` (a tag, the stack pointer, the guard's
-  bounds, the PC, and a check word) in six atomics in `.uninit` before it
-  logs, and every image logs and clears it at boot as
-  `previous boot: stack overflow: ...`; five host tests pin the encoding and
-  its rejection of cleared, corrupted, and swapped words, and the Renode
-  overflow case now resets the machine and expects that line, failing when
-  the store is removed. The board evidence is an optional first-flash check
-  after the deliberate overflow *(hardware evidence pending)*.
+  next link's portal.**
+  `Portal::clear_if_registered`, with host tests in `tests/vendor_portal.rs`.
+- [x] **P3** **The portal guard's comments describe the old behaviour.** Both
+  comments state the ownership check.
+- [x] **P2** **Docs the bond-table and portal commits left wrong.** The two
+  first-flash checks and the other statements match the code.
+- [x] **P2** **The event counters' docs and one count did not match the code.**
+  The worker re-arms its first-failure test after a lifecycle event, with a
+  host test.
+- [x] **P3** **The PnP ID commit left docs out of step.** The security table,
+  layer table, graph, and log reference include it.
+- [x] **P2** **A stack overflow during a log call is not reported.** The
+  handler stores an `OverflowRecord` in `.uninit` before logging, and the next
+  boot logs it *(hardware evidence pending)*.
 - [x] **P2** **The stack guard's first version missed cases and overstated
-  others.** A four-part review of the MPU stack guard commit (`ba13354`,
-  ADR 0026) on 2026-10-11 upheld 24 findings, every one confirmed against the
-  code, a build, or the Arm architecture manual. In the code: the self-test's
-  `stack guard` stage checked only `MPU_CTRL` and region 0, though a
-  higher-numbered region left on over the guard would open it; the handler
-  missed an overflow whose push faulted in the guard while the fault's own
-  frame still fitted above it (a store-multiple of 44 bytes or more), and
-  would read a PC from a frame whose push hit a bus error (`STKERR`); the
-  self-test offered its deliberate overflow even with the guard off or
-  SELECT stuck low, and then ran it at once, while its `returned without a
-  fault` warning could never print (the recursion was bounded at a depth
-  needing 50 MB of stack); and the simulation's UART report started DMA with
-  no compiler fence after filling the buffer. In the docs: the HardFault
-  module comment said the fault's frame could be stacked in the guard; the
-  `RASR` attributes were said to match the default SRAM map; the runbook
-  blamed only `mask run` for probe-rs's HardFault catch, promised intact
-  statics for a stack pointer below the guard, and still said the first two
-  boot lines carry the reset reason; ADR 0020 still told the watchdog work
-  to add a second HardFault handler, which cannot link; ADR 0010 said
-  `high_water` scans from `_stack_end`; the unsafe inventory's grep counts
-  were wrong; and the frame sizes left out saved registers and were measured
-  at `DEFMT_LOG=info`, though `mask selftest` builds at `debug`, where the
-  self-test's main task frame is 4,480 bytes, above the guard's 4 KiB.
-  Fixed: `enable_guard` turns regions 1 and up off and `guard_is_on` checks
-  they stay off; `StackGuard::is_overflow` also counts a data access refused
-  inside the guard (`CFSR.DACCVIOL` with `MMARVALID` and `MMFAR`), and
-  `frame_stacked` drops the PC for `STKERR` as for `MSTKERR`, with seven new
-  host tests; the self-test offers the overflow only when the SELECT and
-  guard stages passed, cancels it when SELECT already reads pressed, and
-  bounds the recursion by the guard's address, so a guard that is off stops
-  it before the statics; the simulation fences the copy before the DMA
-  starts; and every statement above now matches the code and a re-measured
-  frame table, which records that the two frames above 4 KiB are main tasks
-  polled only from the top of the stack. The self-test changes still need a
-  board run *(hardware evidence pending)*.
+  others.**
+  `enable_guard` turns other MPU regions off, `StackGuard::is_overflow` counts
+  refused data accesses, and the self-test bounds its deliberate overflow
+  *(hardware evidence pending)*.
 
 ## Needs Your Input
 

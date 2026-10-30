@@ -53,7 +53,7 @@ PowerShell, use the direct command.
 | Renode glyph table check, or rewrite after a font change | — | `cargo test --locked --test oled_font`, or with `UPDATE_OLED_FONT=1` |
 | Coverage summary | `mask coverage` | `cargo llvm-cov --locked --lib --tests` |
 | Coverage HTML / JSON | `mask coverage --html` / `--json` | `cargo llvm-cov --locked --lib --tests --html --output-dir coverage-html` |
-| Coverage against the CI floor | — | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` (the floor is `COVERAGE_MIN_LINES` in [ci.yml](../.github/workflows/ci.yml)) |
+| Coverage against the CI floor | — | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 98` (the floor is `COVERAGE_MIN_LINES` in [ci.yml](../.github/workflows/ci.yml)) |
 | Host lint | — | `cargo clippy --locked --lib --tests -- -D warnings` |
 | Embedded lint | `mask clippy` | `cargo clippy --locked --features embedded --target thumbv7em-none-eabihf -- -D warnings`, then again with `--features embedded,log-sensitive-data` |
 | Simulation lint | — | `cargo clippy --locked --features sim --target thumbv7em-none-eabihf -- -D warnings` |
@@ -141,9 +141,10 @@ Git.
 
 CI runs llvm-cov in the Host coverage job, uploads the summary, an lcov file,
 and the HTML report as the `coverage-report-<attempt>` artifact, and then fails
-the job when line coverage is below the floor, 97% since 2026-10-10. The
-baseline it was set from is 97.59% of lines, recorded in the
-[validation record](validation-records.md#validation-record--2026-10-10). The
+the job when line coverage is below the floor, 98% since 2026-10-30 (97%
+from 2026-10-10). The baseline it was raised from is 98.66% of lines,
+recorded in the
+[validation record](validation-records.md#validation-record--2026-10-30-coverage-floor-ratchet). The
 [coverage policy](code-quality.md#coverage-in-ci) says how the floor changes.
 
 ## Test Map
@@ -901,7 +902,7 @@ Specific to the current workflow and test tree:
 - The coverage floor is one line-coverage total over the 37 host-library source
   modules and three test helper files
   ([what is instrumented](code-quality.md#what-is-instrumented)); a single
-  module can lose coverage while the total stays above 97%,
+  module can lose coverage while the total stays above 98%,
   and region and function coverage have no floor.
 - The Renode job runs one scripted scenario on Linux, plus a stack overflow
   case and register-level checks of its TWIM and SSD1306 models. The scenario covers the UI

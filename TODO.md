@@ -1097,7 +1097,8 @@ Host tests, simulation, and code-health work. Context:
   the Host coverage job runs `cargo llvm-cov` 0.9.1, uploads the summary,
   lcov, and HTML reports as `coverage-report-<attempt>`, and then fails below
   97% of lines, set from the 97.59% baseline as a ratchet that guards the pure
-  core rather than serving as evidence
+  core rather than serving as evidence (raised to 98% on 2026-10-30, from
+  98.66%)
   ([ADR 0023](docs/adr/0023-host-coverage-floor.md),
   [coverage in CI](docs/code-quality.md#coverage-in-ci)). The embedded and
   simulation jobs document the embedded library, `bt2usb`, `bt2usb-selftest`,

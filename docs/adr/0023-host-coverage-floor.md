@@ -65,8 +65,10 @@ floor as a regression guard, never as evidence.
   failing run still carries the report that shows which files lost coverage.
 - **The floor.** `cargo llvm-cov report --summary-only --fail-under-lines
   "$COVERAGE_MIN_LINES"` fails the job below the floor. `COVERAGE_MIN_LINES`
-  is 97, about 0.6 points under the 97.59% baseline: roughly 15 more uncovered
-  lines at the same size would cross it.
+  was 97, about 0.6 points under the 97.59% baseline: roughly 15 more
+  uncovered lines at the same size would cross it. The ratchet raised it to
+  98 on 2026-10-30, 0.66 points under the 98.66% that CI measured then
+  (about 31 more uncovered lines would cross it).
 - **The ratchet.** The floor rises in the commit that raises coverage enough
   to keep a similar margin. It is lowered only with the reason in the commit
   message, such as code leaving the host library, and with a new baseline in a
@@ -155,10 +157,10 @@ Negative:
 | Measurement | `cargo llvm-cov --locked --lib --tests --no-report` |
 | Reports | `cargo llvm-cov report` with `--summary-only` (teed to `summary.txt`), `--lcov --output-path lcov.info`, and `--html --output-dir`, all under `$RUNNER_TEMP/coverage` |
 | Artifact | `actions/upload-artifact` (SHA-pinned), `coverage-report-${{ github.run_attempt }}`, `if-no-files-found: error` |
-| Floor | Job-level `COVERAGE_MIN_LINES: 97`, checked last with `--fail-under-lines` |
+| Floor | Job-level `COVERAGE_MIN_LINES: 98` (97 until 2026-10-30), checked last with `--fail-under-lines` |
 | Release ordering | `release-package` needs `coverage` with the other check jobs |
 | Policy | [Coverage in CI](../code-quality.md#coverage-in-ci) and the [testing guide](../testing.md#coverage) |
-| Local equivalent | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` |
+| Local equivalent | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 98` |
 
 ### Verification Status
 

@@ -8,6 +8,22 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Coverage Floor Ratchet
+
+This record covers the commit that raises `COVERAGE_MIN_LINES` in
+[ci.yml](../.github/workflows/ci.yml) from 97 to 98, as the ratchet in
+[ADR 0023](adr/0023-host-coverage-floor.md) asks once coverage has risen
+enough to keep a similar margin: the floor was 0.59 points under the 97.59%
+it was set from, and 98 is 0.66 points under the figure below. No code
+changes.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Hosted figure | Host coverage job of CI run 41063405326 (`2a946ac`), cargo-llvm-cov 0.9.1, the pinned toolchain | 98.66% of lines (63 of 4,717 missed), 98.51% of regions, 98.64% of functions, over the 40 files [what is instrumented](code-quality.md#what-is-instrumented) lists |
+| Local figure | `cargo llvm-cov --locked --lib --tests --summary-only`, Linux container, same tool and toolchain | The same three figures and per-file table |
+| New floor | `cargo llvm-cov report --summary-only --fail-under-lines 98`, then `99` | Exit 0, then exit 1 |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed; every statement of the floor names 98 |
+
 ## Validation Record — 2026-10-30, Coordinator Task Fault Tests
 
 This record covers the commit that checks off the P1 item "Coordinator task

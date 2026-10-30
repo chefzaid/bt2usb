@@ -145,7 +145,7 @@ jobs:
     env:
       # Baseline: 97.59% of lines on 2026-10-10 (docs/validation-records.md#validation-record--2026-10-10).
       # Raise the floor as coverage grows; lower it only with a reason in the commit.
-      COVERAGE_MIN_LINES: 97
+      COVERAGE_MIN_LINES: 98
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

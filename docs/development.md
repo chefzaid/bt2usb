@@ -366,7 +366,7 @@ The report files each tool writes are listed under
 [coverage in the testing guide](testing.md#coverage). What coverage measures,
 why a tarpaulin figure is not comparable with an llvm-cov one, and how to
 report a figure are in [code quality](code-quality.md#coverage). None of these
-tasks applies a floor; CI's Host coverage job fails below 97% of lines
+tasks applies a floor; CI's Host coverage job fails below 98% of lines
 ([coverage in CI](code-quality.md#coverage-in-ci)).
 
 ### Simulation
@@ -607,7 +607,7 @@ in a public issue. See the [security policy](../SECURITY.md).
 
 | You changed | Run before review | Also needed |
 | --- | --- | --- |
-| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `scan_list`, `management`, `messages`, `controller`, `ui_logic`, `layout`, `stack_logic`, `diagnostics`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`) when you add code or remove tests |
+| A module listed in `src/lib.rs` | `mask test`, then `mask ci` | `mask sim-test` for `coordinator`, `scan_list`, `management`, `messages`, `controller`, `ui_logic`, `layout`, `stack_logic`, `diagnostics`, or the `storage` modules, which the simulation runs; the coverage floor (`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 98`) when you add code or remove tests |
 | Task, driver, or entry-point code | `mask ci` | The affected [first-flash](first-flash.md) steps on a board |
 | `sim.rs`, `sim_ble.rs`, `stack.rs`, `ui/buttons.rs`, `ui/display.rs`, or `renode/` | `mask ci`, `mask sim-test` | For `stack.rs`, also the self-test's stack guard and deliberate overflow stages on a board ([first flash](first-flash.md#2-self-test-image)) |
 | The display font, or the `embedded-graphics` version | `cargo test --locked --test oled_font`, which also checks that `display.rs` draws in `FONT_6X10`; when only the glyphs changed, `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font` rewrites [oled-font-6x10.txt](../renode/oled-font-6x10.txt); then `mask sim-test` | Review the glyph table diff. A font with another cell size also needs the test's font, the text reader's cell size in [ssd1306.cs](../renode/ssd1306.cs), and the baselines in `ui::layout` changed ([OLED checks](testing.md#oled-checks)) |

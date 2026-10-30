@@ -47,7 +47,7 @@ Clippy warning into an error.
 | Host rustdoc | `cargo doc --locked --no-deps --document-private-items --lib` with `RUSTDOCFLAGS=-D warnings` | `mask ci`, `mask rustdoc-check` | Host tests, Linux and Windows | Fails on any rustdoc warning |
 | Firmware rustdoc | The same flags with `--features embedded --target thumbv7em-none-eabihf`, once for `--lib` and once for `--bin bt2usb --bin bt2usb-selftest` | `mask ci`, `mask rustdoc-check` | Embedded build & clippy | Fails on any rustdoc warning |
 | Simulation rustdoc | The same flags with `--features sim --target thumbv7em-none-eabihf --bin bt2usb-sim` | `mask ci`, `mask rustdoc-check` | Renode simulation test | Fails on any rustdoc warning |
-| Coverage floor | `cargo llvm-cov --locked --lib --tests --no-report`, then `cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"` (97), cargo-llvm-cov 0.9.1 | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` | Host coverage | Fails when host line coverage drops below the floor; the report uploads first ([Coverage In CI](#coverage-in-ci)) |
+| Coverage floor | `cargo llvm-cov --locked --lib --tests --no-report`, then `cargo llvm-cov report --summary-only --fail-under-lines "$COVERAGE_MIN_LINES"` (98), cargo-llvm-cov 0.9.1 | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 98` | Host coverage | Fails when host line coverage drops below the floor; the report uploads first ([Coverage In CI](#coverage-in-ci)) |
 | Host tests | `cargo test --locked --lib --tests` | `mask ci`, `mask test` | Host tests, Linux and Windows | Fails on any failed test |
 | Release firmware build | `python scripts/release.py build`: `cargo build --locked --features embedded --target thumbv7em-none-eabihf --release` with the build paths remapped, then `release.py stage` | `mask release-build`; `mask ci` and `mask build-release` build without the remap | Embedded build & clippy | Fails the job; builds `bt2usb` and `bt2usb-selftest`; staging fails an image that names a build path or is over a [size budget](#release-size-budgets) |
 | Simulation build | `cargo build --locked --features sim --target thumbv7em-none-eabihf` | `mask ci`, `mask sim-build` | Renode simulation test | Fails the job |
@@ -111,7 +111,7 @@ the tag check, or release staging. Run the ones your change can affect:
 | --- | --- |
 | `///` or `//!` comments only | `mask rustdoc-check`, which runs the four rustdoc builds without the rest of `mask ci` |
 | Markdown only, `src/config.rs`, `memory_sd.x`, `memory_sim.x`, `maskfile.md`, or a renamed file | `mask docs-check` |
-| Pure logic in `src/lib.rs` modules, or their tests | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97` |
+| Pure logic in `src/lib.rs` modules, or their tests | `cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 98` |
 | `.github/workflows/ci.yml` | `actionlint`, with `shellcheck` on `PATH` so it checks the `run:` scripts |
 | A Python file, a `*.sh` script, a `maskfile.md` recipe, or `ruff.toml` | `mask lint-scripts` |
 | `scripts/release.py`, `scripts/release_sbom.py`, `scripts/release_image.py`, or the release jobs | `python -m unittest discover -s scripts -p "release*_test.py" -v`; for a build change, `mask release-build` twice in two clones and compare the ELF hashes |
@@ -786,11 +786,13 @@ on every trigger:
 The report uploads before the floor is checked, so a failed run still carries
 the report that shows which files lost coverage.
 
-**The floor.** `COVERAGE_MIN_LINES` is 97, set on 2026-10-10 from the baseline
-of 97.59% of lines (98.17% of regions, 98.67% of functions) in the
-[validation record](validation-records.md#validation-record--2026-10-10). At that baseline
-59 of 2,452 lines were not covered; about 15 more uncovered lines at the same
-size would cross the floor. It is a ratchet:
+**The floor.** `COVERAGE_MIN_LINES` is 98, raised on 2026-10-30 from the
+hosted figure of 98.66% of lines (98.51% of regions, 98.64% of functions) in
+the [validation record](validation-records.md#validation-record--2026-10-30-coverage-floor-ratchet):
+63 of 4,717 lines were not covered, and about 31 more at the same size would
+cross the floor. It was 97 from 2026-10-10, set from the baseline of 97.59%
+in the [validation record](validation-records.md#validation-record--2026-10-10),
+when 59 of 2,452 lines were not covered. It is a ratchet:
 
 - Raise it when coverage rises enough to leave the same margin, in the commit
   that raises coverage.
@@ -809,7 +811,7 @@ modules read slightly higher than their production code alone would. Region
 and function coverage are reported but have no floor.
 
 **Local reproduction.** Run
-`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 97`
+`cargo llvm-cov --locked --lib --tests --summary-only --fail-under-lines 98`
 with the pinned toolchain and cargo-llvm-cov 0.9.1. With the same source,
 toolchain, and tool version the figure should match the CI log; a different
 toolchain or tool version can count regions differently and shift it.

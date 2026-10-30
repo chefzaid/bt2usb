@@ -76,6 +76,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
+| [ble/hid_gatt.rs](../src/ble/hid_gatt.rs) | Pure core | The GATT HID client's decisions: what each Report characteristic is used for, how each Report Map read request moves the read on or fails it, and which notifications reach the classifier. Not in the simulation build, which has no `hid` module |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives |
 | [ble/messages.rs](../src/ble/messages.rs) | Pure core | UI-to-coordinator commands and coordinator-to-UI events, generic over the address type |
 | [ble/pnp_id.rs](../src/ble/pnp_id.rs) | Pure core | Parsing of the Device Information Service PnP ID the bridge logs per link |
@@ -83,7 +84,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/slot_worker.rs](../src/ble/slot_worker.rs) | Board shell | Connection worker run once per slot: serves the coordinator's commands, reports slot events, retries in the background |
 | [ble/slot_link.rs](../src/ble/slot_link.rs) | Board shell | One attempt of a slot worker: connect, secure, discover HID, and run the notification loop, racing each phase against the slot's commands |
 | [ble/bonder.rs](../src/ble/bonder.rs) | Board shell | SoftDevice security handler: bond storage and the answer to connection-parameter requests |
-| [ble/hid_client.rs](../src/ble/hid_client.rs) | Board shell | GATT discovery, subscriptions, HID classification, notification loop |
+| [ble/hid_client.rs](../src/ble/hid_client.rs) | Board shell | GATT discovery, the Report Map read, the CCCD and LED writes, and the notification loop, deciding through `hid_gatt` |
 | [ble/device_info.rs](../src/ble/device_info.rs) | Board shell | Device Information Service discovery and the PnP ID read and log line, once per link |
 | [ble/scanner.rs](../src/ble/scanner.rs) | Board shell | User scan with HID advertisement filtering, and the shared reconnect scan |
 | [hid/mod.rs](../src/hid/mod.rs) | Pure core | Internal report type and notification classification |
@@ -117,7 +118,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, device_info, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -153,7 +154,7 @@ flowchart TD
         STK["stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, adv_parser, pnp_id"]
+        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, hid_gatt, adv_parser, pnp_id"]
         DG["diagnostics"]
         SL["stack_logic"]
         HID["hid modules"]
@@ -1092,8 +1093,9 @@ The descriptor parser is a classifier for supported report layouts, not a full
 HID bit-field translator. NKRO, 16-bit movement, and arbitrary vendor layouts need
 additional translation. Descriptor parsing bounds collection/global-state
 nesting and supports Push/Pop, but retains at most one report ID per supported
-kind. GATT discovery and notification buffers are bounded; see the current
-constants in `hid_client.rs` when adding report families.
+kind. GATT discovery and notification buffers are bounded; see `MAX_REPORTS` in
+`hid_client.rs` and `MAX_REPORT_LEN` in `hid_gatt.rs` when adding report
+families.
 
 Report Maps are read by offset across negotiated MTU boundaries into a bounded
 512-byte buffer using a small vendored SoftDevice API patch

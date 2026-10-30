@@ -8,6 +8,26 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, GATT HID Client Decisions
+
+This record covers the commit that moves the GATT HID client's decisions out
+of `src/ble/hid_client.rs` into the host-compiled `src/ble/hid_gatt.rs`, the
+first step of the P1 item "Host tests for the I/O shells" in
+[TODO.md](../TODO.md): `report_use` for each Report characteristic,
+`report_map_step` and `report_map` for the Report Map long read, and
+`notification` for the notification filter
+([modules without host tests](testing.md#modules-without-host-tests)). The
+client's behavior is meant to be unchanged; the checks ran locally on Linux in
+a container, and nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed after this record was added; 451 unit tests (11 new in `hid_gatt_tests.rs`) and the 13 integration, glyph, pairing-permission, and portal tests |
+| Same decisions as before | Review of the old `subscribe_all`, `read_report_map`, and `on_hvx` against the new functions | Each branch maps one to one: no CCCD gives the LED output or nothing, a CCCD on an Output or Feature reference is ignored, a numbered map skips an unresolved input, read errors keep their tags, and notifications over 32 bytes or from other handles are dropped. The kind no longer passes through `filter(ReportReference::is_input)`, which could only drop a reference the previous check had already returned on |
+| Notification fuzz target | `fuzz_report_notifications` | Its length limit is now `MAX_REPORT_LEN` from `hid_gatt.rs` instead of a copied 32 |
+| Release image | `release.py build` | Bridge 139,404 bytes of flash (68 fewer than at `3a439a5`) and 28,108 of RAM, within the budgets |
+| Board/radio/USB acceptance | Physical hardware | Not run; connecting a real keyboard and mouse still checks the SoftDevice calls left in `hid_client.rs` |
+
 ## Validation Record — 2026-10-30, Reproducible Release Images
 
 This record covers the commit that checks off the P1 item "Reproducible

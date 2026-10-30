@@ -56,6 +56,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [reconnect.rs](../../src/ble/reconnect.rs) | Which slot an advertisement from a saved device belongs to, whether two saved-device records are the same device, how long a sighting stays usable, when a slot is due a wake, and the reconnect scan's duty cycle ([ADR 0015](0015-shared-reconnect-scan.md)) | `find_saved_peer` and `update` in [scanner.rs](../../src/ble/scanner.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [conn_params.rs](../../src/ble/conn_params.rs) | The connection parameters granted to a peripheral's request ([ADR 0016](0016-bounded-peer-connection-parameters.md)) | `Bonder::conn_param_update_request` in [bonder.rs](../../src/ble/bonder.rs) |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
+| [hid_gatt.rs](../../src/ble/hid_gatt.rs) | Which Report characteristics are subscribed and with which kind, which one takes the keyboard LEDs, how each Report Map read request ends or fails the read, and which notifications are passed on whole | `subscribe_all`, `read_report_map`, and `on_hvx` in `hid_client.rs` |
 | [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [messages.rs](../../src/ble/messages.rs) | The commands and events between the UI and the BLE side, and the per-request management IDs they carry | The channels in [main.rs](../../src/main.rs) and `ble_task` in `multi_conn.rs` |
 | [pnp_id.rs](../../src/ble/pnp_id.rs) | What a Device Information Service PnP ID value says, and which values are malformed | `log_pnp_id` in [device_info.rs](../../src/ble/device_info.rs) |
@@ -175,9 +176,9 @@ Follow-up obligations:
 - [lib.rs](../../src/lib.rs) is `#![cfg_attr(not(test), no_std)]`. It exports
   `hid` verbatim, includes `ble/adv_parser.rs`, `ble/bond_table.rs`,
   `ble/conn_params.rs`, `ble/coordinator.rs`, `ble/reconnect.rs`,
-  `ble/scan_list.rs`, `ble/long_read.rs`, `ble/management.rs`,
-  `ble/messages.rs`, `ble/pnp_id.rs`, and the five pure `ui` files
-  (`controller.rs`, `display_logic.rs`, `input_logic.rs`, `layout.rs`,
+  `ble/scan_list.rs`, `ble/long_read.rs`, `ble/hid_gatt.rs`,
+  `ble/management.rs`, `ble/messages.rs`, `ble/pnp_id.rs`, and the five pure
+  `ui` files (`controller.rs`, `display_logic.rs`, `input_logic.rs`, `layout.rs`,
   `ui_logic.rs`) in inline `ble` and `ui` modules (through `#[path]` re-export
   facades until 2026-10-30), `power_logic.rs` as an ordinary module, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only

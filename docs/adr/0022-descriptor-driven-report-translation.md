@@ -39,16 +39,18 @@ byte layouts:
   nothing, silently
   ([operations](../operations.md#connect-fails-with-an-hid-error)). A hybrid
   keyboard's second keyboard report ID is not even subscribed:
-  `report_kind_for_id` knows only the first, so `subscribe_all` skips it with
-  `Skipping unknown or ambiguous HID report reference` (hid_client.rs).
+  `report_kind_for_id` knows only the first, so `report_use` (hid_gatt.rs)
+  leaves it unresolved and `subscribe_all` skips it with `Skipping unknown or
+  ambiguous HID report reference` (hid_client.rs).
   Eight buttons, 12-bit X and Y, and an 8-bit wheel fill exactly five
   bytes, a layout many BLE mice use (general knowledge, no fixture yet), so
   `from_ble_bytes` accepts it and reads X, Y, and wheel from the wrong bits. An
   8-byte keyboard report with seven key bytes loses the key in byte 1. A report
   ID with two kinds, and the one input report of an unnumbered map with two
   kinds, are never decoded as declared.
-- **Notification context.** `on_hvx` in
-  [hid_client.rs](../../src/ble/hid_client.rs) rejects payloads over
+- **Notification context.** `notification` in
+  [hid_gatt.rs](../../src/ble/hid_gatt.rs), which `on_hvx` in
+  [hid_client.rs](../../src/ble/hid_client.rs) calls, rejects payloads over
   `MAX_REPORT_LEN` (32 bytes). [sd_setup.rs](../../src/sd_setup.rs) sets
   `ATT_MTU = 64` for `softdevice_config`, and a notification carries at most
   ATT_MTU − 3 octets (Bluetooth Core, Vol 3, Part F, 3.4.7.1): 61 bytes, or 20

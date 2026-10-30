@@ -812,8 +812,9 @@ Files:
   for the keyboard and mouse interfaces (`BootRequestHandler`); the mouse's
   protocol decides whether `UsbReportSink::write` sends the three-byte boot
   layout.
-- [ble/hid_client.rs](../src/ble/hid_client.rs): `MAX_REPORTS` (8) and
-  `MAX_REPORT_LEN` (32) bound what discovery and notifications accept.
+- [ble/hid_client.rs](../src/ble/hid_client.rs): `MAX_REPORTS` (8), and
+  [ble/hid_gatt.rs](../src/ble/hid_gatt.rs): `MAX_REPORT_LEN` (32), bound what
+  discovery and notifications accept.
 - [selftest.rs](../src/selftest.rs) sends an all-zero mouse report; recheck it
   when the mouse format changes.
 

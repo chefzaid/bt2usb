@@ -520,7 +520,7 @@ Report Map supply the kind ([hid/mod.rs](../src/hid/mod.rs)).
 | Consumer | Exactly 2 bytes, usage at most `0x0FFF` | Other lengths, larger usages |
 
 A notification longer than 32 bytes (`MAX_REPORT_LEN` in
-[hid_client.rs](../src/ble/hid_client.rs)) is dropped, not truncated. Without a
+[hid_gatt.rs](../src/ble/hid_gatt.rs)) is dropped, not truncated. Without a
 Report Map, length alone selects the kind (8 keyboard, 3–5 mouse, 2 consumer
 below `0x1000`). A Report Map without report IDs that declares only a keyboard
 makes every input its keyboard report; any other map without report IDs

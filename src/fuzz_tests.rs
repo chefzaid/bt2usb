@@ -7,6 +7,7 @@
 use std::sync::OnceLock;
 
 use crate::ble::adv_parser::{advertised_name, contains_hid_service_uuid, extract_device_name};
+use crate::ble::hid_gatt::MAX_REPORT_LEN;
 use crate::ble::long_read::{EndOfValue, LongRead, ReadFailure, MAX_ATTRIBUTE_LEN};
 use crate::fuzz::{parse_corpus, run, Target};
 use crate::hid::consumer::{CONSUMER_REPORT_DESCRIPTOR, MAX_CONSUMER_USAGE};
@@ -210,9 +211,8 @@ fn fuzz_report_notifications() {
     let target = Target {
         name: "report",
         corpus: include_str!("../tests/fuzz-corpus/report.txt"),
-        // `MAX_REPORT_LEN` in `ble/hid_client.rs`, the longest notification
-        // the GATT client passes on.
-        max_len: 32,
+        // The longest notification the GATT client passes on.
+        max_len: MAX_REPORT_LEN,
     };
     run(&target, &[], check_report);
 }

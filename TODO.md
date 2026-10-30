@@ -1005,6 +1005,11 @@ Host tests, simulation, and code-health work. Context:
   hardware-free modules or test the shells against fakes. Accept when each
   has host tests for its error paths, or the testing guide records why it
   cannot ([testing](docs/testing.md#modules-without-host-tests)).
+  Progress (2026-10-30): the GATT HID client's decisions (which reports it
+  subscribes to and with which kind, the keyboard LED output, how each Report
+  Map read request ends or fails, and which notifications pass) are in
+  `src/ble/hid_gatt.rs` with 11 host tests; the testing guide records why the
+  SoftDevice calls left in `hid_client.rs` are not host-tested.
 - [x] **P1** **Host tests for the device store.** The in-memory store moved
   out of the `src/storage.rs` shell on 2026-10-10 into host-compiled modules
   under ADR 0003: `src/storage/devices.rs` (`DeviceList`: fail-closed load,

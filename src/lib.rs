@@ -32,6 +32,7 @@ pub mod ble {
     pub mod bond_table;
     pub mod conn_params;
     pub mod coordinator;
+    pub mod hid_gatt;
     pub mod long_read;
     pub mod management;
     pub mod messages;

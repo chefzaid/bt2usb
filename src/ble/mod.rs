@@ -41,6 +41,9 @@ pub mod bonder;
 pub mod device_info;
 #[cfg(feature = "embedded")]
 pub mod hid_client;
+// Pure, but it reads `crate::hid`, which the `sim` build leaves out.
+#[cfg(feature = "embedded")]
+pub mod hid_gatt;
 #[cfg(feature = "embedded")]
 pub mod multi_conn;
 #[cfg(feature = "embedded")]

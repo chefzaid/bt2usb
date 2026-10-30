@@ -13,8 +13,14 @@
 //!
 //! The `#[gatt_client]` macro can only bind a single characteristic per UUID,
 //! so this uses a hand-rolled [`gatt_client::Client`] implementation instead.
+//! What each step decides lives in the host-tested [`super::hid_gatt`]; this
+//! file runs the SoftDevice procedures and logs.
 
-use super::long_read::{EndOfValue, LongRead, ReadFailure, MAX_ATTRIBUTE_LEN};
+use super::hid_gatt::{
+    notification, report_map, report_map_step, report_use, Fragment, ReportNotification, ReportUse,
+    Subscription,
+};
+use super::long_read::{LongRead, MAX_ATTRIBUTE_LEN};
 use crate::ble::{device_info, BleErrorTag};
 use crate::diagnostics::{Counter, COUNTERS};
 use crate::hid;
@@ -22,7 +28,7 @@ use crate::hid::coalesce::ReportCoalescer;
 use crate::hid::delivery::HidEvent;
 use crate::hid::host_leds::forward_host_leds;
 use crate::hid::keyboard::KeyboardLeds;
-use crate::hid::report_protocol::{HidDescriptor, ReportKind, ReportReference, ReportType};
+use crate::hid::report_protocol::{HidDescriptor, ReportReference};
 use crate::usb::host_requests::LedReceiver;
 use core::cell::RefCell;
 use defmt::{info, warn};
@@ -48,10 +54,6 @@ const UUID_CCCD: u16 = 0x2902;
 /// A composite HID peripheral rarely exposes more than a handful of reports.
 const MAX_REPORTS: usize = 8;
 
-/// Largest notification payload we copy out of the GATT event (boot reports are
-/// ≤8 B; report-protocol notifications are capped by `att_mtu`).
-const MAX_REPORT_LEN: usize = 32;
-
 /// A discovered HID Report characteristic and the descriptor handles needed to
 /// subscribe to and classify it.
 #[derive(Clone, Copy)]
@@ -59,20 +61,6 @@ struct ReportCharacteristic {
     value_handle: u16,
     cccd_handle: Option<u16>,
     report_ref_handle: Option<u16>,
-}
-
-/// An active subscription: a notifying value handle and the report kind resolved
-/// for it (`None` → defer to the heuristic classifier).
-#[derive(Clone, Copy)]
-struct Subscription {
-    value_handle: u16,
-    kind: Option<ReportKind>,
-}
-
-/// Notification event surfaced by the GATT run loop.
-pub struct ReportNotification {
-    kind: Option<ReportKind>,
-    data: Vec<u8, MAX_REPORT_LEN>,
 }
 
 /// Hand-rolled HID-over-GATT client.
@@ -156,20 +144,7 @@ impl Client for HidServiceClient {
         if type_ != HvxType::Notification {
             return None;
         }
-        // Only surface notifications from handles we actually subscribed to.
-        let sub = self
-            .subscriptions
-            .iter()
-            .find(|s| s.value_handle == handle)?;
-
-        // Truncating an unsupported report can turn it into a different valid
-        // input (for example the prefix of a long keyboard report). Reject it.
-        let mut buf: Vec<u8, MAX_REPORT_LEN> = Vec::new();
-        buf.extend_from_slice(data).ok()?;
-        Some(ReportNotification {
-            kind: sub.kind,
-            data: buf,
-        })
+        notification(&self.subscriptions, handle, data)
     }
 }
 
@@ -199,46 +174,31 @@ impl HidServiceClient {
                 None => None,
             };
 
-            // No CCCD → not a notifiable input. If it's an Output report, it's the
-            // keyboard LED sink we write host Caps/Num/Scroll state to.
-            let Some(cccd) = report.cccd_handle else {
-                let is_output = matches!(report_ref, Some(r)
-                if r.report_type == ReportType::Output
-                    && descriptor.is_some_and(|d| d.is_keyboard_report(r.report_id)));
-                if is_output && self.keyboard_led_handle.is_none() {
+            let usage = report_use(report.cccd_handle.is_some(), report_ref, descriptor);
+            match (usage, report.cccd_handle) {
+                (ReportUse::Subscribe(kind), Some(cccd)) => {
+                    // Enable notifications (write 0x0001 to the CCCD).
+                    match gatt_client::write(conn, cccd, &[0x01, 0x00]).await {
+                        Ok(_) => {
+                            let _ = self.subscriptions.push(Subscription {
+                                value_handle: report.value_handle,
+                                kind,
+                            });
+                        }
+                        Err(_) => {
+                            warn!("Could not enable notifications on a report characteristic")
+                        }
+                    }
+                }
+                // The first one found is where host LED state is written.
+                (ReportUse::KeyboardLeds, _) if self.keyboard_led_handle.is_none() => {
                     self.keyboard_led_handle = Some(report.value_handle);
                     info!("Found keyboard LED output report");
                 }
-                continue;
-            };
-
-            // A CCCD does not override an explicit Output/Feature direction.
-            // Never turn an arbitrary notifiable output into host input.
-            if report_ref.is_some_and(|r| !r.is_input()) {
-                continue;
-            }
-
-            // Input report: resolve its kind from the Report Reference mapped
-            // through the Report Map's report-ID table. Anything we can't resolve
-            // is subscribed with `kind = None` and classified by the heuristic
-            // fallback at notification time.
-            let kind = report_ref
-                .filter(ReportReference::is_input)
-                .and_then(|r| descriptor.and_then(|d| d.report_kind_for_id(r.report_id)));
-            if descriptor.is_some_and(HidDescriptor::has_report_ids) && kind.is_none() {
-                warn!("Skipping unknown or ambiguous HID report reference");
-                continue;
-            }
-
-            // Enable notifications (write 0x0001 to the CCCD).
-            match gatt_client::write(conn, cccd, &[0x01, 0x00]).await {
-                Ok(_) => {
-                    let _ = self.subscriptions.push(Subscription {
-                        value_handle: report.value_handle,
-                        kind,
-                    });
+                (ReportUse::Unresolved, _) => {
+                    warn!("Skipping unknown or ambiguous HID report reference")
                 }
-                Err(_) => warn!("Could not enable notifications on a report characteristic"),
+                _ => {}
             }
         }
 
@@ -282,36 +242,28 @@ async fn read_report_map(
         return Ok(None);
     };
     let mut read = LongRead::new(conn.att_mtu()).map_err(|_| BleErrorTag::ReportMapReadFailed)?;
-    let mut fragment = [0u8; MAX_ATTRIBUTE_LEN];
+    let mut buffer = [0u8; MAX_ATTRIBUTE_LEN];
     loop {
-        let result = gatt_client::read_by_offset(conn, handle, read.offset(), &mut fragment).await;
-        let completed = match result {
-            Ok(n) => fragment
-                .get(..n)
-                .ok_or(ReadFailure::InvalidFragment)
-                .and_then(|bytes| read.append(bytes)),
+        let result = gatt_client::read_by_offset(conn, handle, read.offset(), &mut buffer).await;
+        let fragment = match result {
+            Ok(n) => buffer.get(..n).map_or(Fragment::Failed, Fragment::Data),
             Err(gatt_client::ReadError::Gatt(GattError::ATTERR_INVALID_OFFSET)) => {
-                read.finish_at_end(EndOfValue::InvalidOffset).map(|()| true)
+                Fragment::InvalidOffset
             }
-            Err(gatt_client::ReadError::Gatt(GattError::ATTERR_ATTRIBUTE_NOT_LONG)) => read
-                .finish_at_end(EndOfValue::AttributeNotLong)
-                .map(|()| true),
-            Err(gatt_client::ReadError::Truncated) => return Err(BleErrorTag::ReportMapTooLarge),
-            Err(_) => return Err(BleErrorTag::ReportMapReadFailed),
-        }
-        .map_err(|failure| match failure {
-            ReadFailure::TooLarge => BleErrorTag::ReportMapTooLarge,
-            _ => BleErrorTag::ReportMapReadFailed,
-        })?;
-        if completed {
+            Err(gatt_client::ReadError::Gatt(GattError::ATTERR_ATTRIBUTE_NOT_LONG)) => {
+                Fragment::AttributeNotLong
+            }
+            Err(gatt_client::ReadError::Truncated) => Fragment::Truncated,
+            Err(_) => Fragment::Failed,
+        };
+        if report_map_step(&mut read, fragment)? {
             break;
         }
     }
-    let bytes = read.value().ok_or(BleErrorTag::ReportMapReadFailed)?;
-    let descriptor = HidDescriptor::parse(bytes).ok_or(BleErrorTag::ReportMapInvalid)?;
+    let descriptor = report_map(&read)?;
     info!(
         "Complete report map ({} bytes): keyboard={} mouse={} consumer={}",
-        bytes.len(),
+        read.offset(),
         descriptor.has_keyboard,
         descriptor.has_mouse,
         descriptor.has_consumer

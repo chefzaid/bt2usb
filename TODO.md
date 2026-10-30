@@ -1721,15 +1721,20 @@ in by cable or paired directly.
 Items are taken one at a time with the owner's coding-agent loop
 ([CODING_AGENT.md](https://github.com/chefzaid/agents/blob/main/CODING_AGENT.md)):
 
-1. Pick an open [FIXME](#fixme) first; otherwise the simplest open item that
-   needs neither a board nor a decision from the owner. Items tagged
-   *(hardware)* wait for a board, and items listed under
-   [Needs Your Input](#needs-your-input) wait for an answer.
+1. Pick an open [FIXME](#fixme) first, then any
+   [Needs Your Input](#needs-your-input) entry the owner has answered;
+   otherwise the simplest open item that needs neither a board nor a decision
+   from the owner. Items tagged *(hardware)* wait for a board, unanswered
+   Needs Your Input entries wait for an answer, and an item marked
+   *(blocked: see FIXME › entry)* waits for that entry.
 2. Plan it, implement it, and pass it through the checklist below.
 3. Check it here with the implementing paths, update the guide that owns the
    behavior, and commit it on its own with a short message.
 4. Record any defect found on the way under [FIXME](#fixme), and any question
-   for the owner under [Needs Your Input](#needs-your-input), then repeat.
+   for the owner under [Needs Your Input](#needs-your-input), then repeat. A
+   check that cannot pass goes under FIXME, the item is marked blocked, and
+   its unfinished changes are set aside. An answered entry becomes workable
+   and is removed once implemented.
 
 The checklist, adapted to this firmware:
 
@@ -1739,9 +1744,9 @@ The checklist, adapted to this firmware:
 | Decomposition | No modified or new file over 500 lines; readable control flow; decisions in hardware-free modules ([ADR 0003](docs/adr/0003-pure-core-and-task-shell.md)) |
 | Reuse | No duplicated logic; existing helpers and constants are reused |
 | Static analysis | `cargo fmt`, and host, firmware, and simulation Clippy with `-D warnings`, rustdoc with warnings denied |
-| Security | Every peer-, host-, or flash-controlled value bounded and validated; no key material or keystrokes logged; no unreviewed dependency |
+| Security | Every peer-, host-, or flash-controlled value bounded and validated; no key material or keystrokes logged; no unreviewed dependency, and `cargo deny --locked check` passes |
 | Robustness | No lost wakeups, unbounded waits, or panics reachable from outside input; bounded work in callbacks |
-| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 98.2% on 2026-10-10); the Renode scenario stands in for browser end-to-end tests |
+| Tests | Host tests for the new behavior; host-library line coverage above 85% (`cargo llvm-cov --locked --lib --tests`; 98.9% on 2026-10-30); the Renode scenario stands in for browser end-to-end tests |
 | Documentation | The owning guide, ADRs, and this plan match the code; dependencies pinned and current |
 
 ## Updating This Checklist

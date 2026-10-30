@@ -8,6 +8,31 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, License Gate, Cleanup, And Storage Versions
+
+This record covers commits `2660200` to `fc9a597`: the CI audit moved from
+`cargo audit` to `cargo deny --locked check` with a license allow list and a
+source rule, the Renode installer checks its archive's SHA-256, the host
+library declares its shared modules inline instead of through `#[path]`
+facades, the fixed FIXME entries were shortened, these records moved out of
+the testing guide, stale guide statements were corrected, the self-test's
+`draw_home` lost two unused parameters, and the storage wire versions and a
+capacity-change test were added. The checks ran locally on Linux in a
+container on the tree at `fc9a597`, except where a row names another commit;
+nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Host unit/integration tests | Rust 1.95.0, Linux | Passed: 423 unit tests (1 new in `devices_format_tests.rs`), 3 integration tests, 3 glyph-table tests, and 5 vendored-portal tests |
+| Host coverage | `cargo llvm-cov --locked --lib --tests --summary-only`, cargo-llvm-cov 0.9.1 | 98.94% of lines, 98.95% of regions, 99.18% of functions |
+| `mask ci` steps | The recipe's script: formatting, Clippy for host, embedded, embedded with `log-sensitive-data`, and simulation, host tests, rustdoc for all five builds, the Markdown checks, release and simulation builds | Passed at `9ffd1d9`; formatting, host tests, and the Markdown checks passed again at `fc9a597`, whose only code change is a test |
+| Dependency audit | cargo-deny 0.20.2 built with `cargo install --locked`, `cargo deny --locked check` | Passed: advisories, bans, licenses, and sources ok. With the `BSD-2-Clause` allowance removed the license check fails on `Inflector 0.11.4`, and with `RUSTSEC-2026-0110` removed the advisory check fails |
+| Renode installer | `scripts/install-renode.sh` with a wrong `RENODE_SHA256`, then the pinned one | The wrong digest stopped the install before extraction and deleted the archive; the pinned digest installed Renode 1.16.1 |
+| Script tests and lint | `python3 -m unittest discover -s scripts -p '*_test.py'`; `scripts/lint_scripts.py` with Ruff 0.16.9 and ShellCheck 0.9.0 from the distribution, not the pinned 0.11.0 | Passed: 52 tests; lint clean |
+| Headless Renode tests | Renode 1.16.1 portable, `renode-test renode/bt2usb-sim.robot` with the platform copy without `ApplySVD` | Passed at `9ffd1d9` |
+| Hosted CI | GitHub Actions | Push run 41034387330 (`2660200`) passed every job, including the new cargo-deny audit and actionlint over the changed workflow; actionlint was not run locally |
+| Board/radio/USB acceptance | Physical hardware | Not performed |
+
 ## Validation Record — 2026-10-11, Stack Guard Review Fixes
 
 This record covers the commit that fixes the P2 FIXME "The stack guard's

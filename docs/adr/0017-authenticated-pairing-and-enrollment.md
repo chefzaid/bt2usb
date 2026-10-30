@@ -340,9 +340,11 @@ refusals; and gives "Display-less plug-in dongle" its pairing flow.
   vendored defaults, encryption before HID discovery, pairing only on an
   explicit connection, and identity-scoped bonds
   ([ADR 0011](0011-interim-just-works-pairing.md)).
-- **Software-verified:** nothing of this proposal. The security flow in
-  `bonder.rs` and `slot_link.rs` has no host tests
-  ([testing](../testing.md#modules-without-host-tests)), and the binding gaps
+- **Software-verified:** nothing of this proposal. Of the security flow in
+  `bonder.rs` and `slot_link.rs`, only the errors a link that would not
+  encrypt reports are host-tested (`securing_error` in
+  [slot_policy.rs](../../src/ble/slot_policy.rs);
+  [testing](../testing.md#modules-without-host-tests)), and the binding gaps
   and the race in [Context](#context) come from reading the source.
 - **Hardware-verified:** not yet; no board record covers any pairing.
 

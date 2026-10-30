@@ -34,6 +34,7 @@ pub mod messages;
 pub mod pnp_id;
 pub mod reconnect;
 pub mod scan_list;
+pub mod slot_policy;
 
 #[cfg(feature = "embedded")]
 pub mod bonder;

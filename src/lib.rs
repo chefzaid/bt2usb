@@ -39,6 +39,7 @@ pub mod ble {
     pub mod pnp_id;
     pub mod reconnect;
     pub mod scan_list;
+    pub mod slot_policy;
 }
 
 // The pure parts of the paired-device store: the device list, its record

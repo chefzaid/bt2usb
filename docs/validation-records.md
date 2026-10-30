@@ -8,6 +8,23 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Connection Slot Decisions
+
+This record covers the commit that moves a connection slot's decisions out of
+`src/ble/slot_link.rs` and `src/ble/slot_worker.rs` into the host-compiled
+`src/ble/slot_policy.rs`, the second step of the P1 item "Host tests for the
+I/O shells" in [TODO.md](../TODO.md): `securing_error`, the error a link that
+would not encrypt fails with, and `after_attempt`, what the slot does once an
+attempt ends ([modules without host tests](testing.md#modules-without-host-tests)).
+The workers' behavior is meant to be unchanged; the checks ran locally on
+Linux in a container, and nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script, as in the record below | Passed after this record was added; 458 unit tests (7 new in `slot_policy_tests.rs`) and the 13 integration, glyph, pairing-permission, and portal tests |
+| Same decisions as before | Review of the old `match` blocks in `secure_and_discover` and `connection_slot_task` against the new functions | Each arm maps to one case: an encrypted link or completed pairing passes; refused keys give `KeysRejected`, a failed pairing `PairingFailed`, a background reconnect without keys `KeysMissing`, anything else `ConnectFailed`; a closed link reconnects or, without keys, reports `KeysMissing`; a background `ConnectFailed` retries quietly; a takeover makes the user's connection; any other failure reports and resumes the replaced retry only while its keys remain and the error does not need a new pairing. A superseded attempt is still handled in the worker, as before. The log lines the guides quote are unchanged |
+| Board/radio/USB acceptance | Physical hardware | Not run; connecting, losing, and re-pairing real peripherals still checks the procedures left in the two shells |
+
 ## Validation Record — 2026-10-30, GATT HID Client Decisions
 
 This record covers the commit that moves the GATT HID client's decisions out

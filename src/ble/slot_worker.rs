@@ -22,6 +22,7 @@ use crate::ble::bonder::bonder;
 use crate::ble::multi_conn::{SlotCommand, SlotEvent};
 use crate::ble::scanner::SavedPeer;
 use crate::ble::slot_link::{connect_and_run_secure, ConnectionRequest, SlotOutcome};
+use crate::ble::slot_policy::{after_attempt, AttemptEnd, NextStep};
 use crate::ble::{scanner, BleErrorTag, DiscoveredDevice};
 use crate::config;
 use crate::diagnostics::{Counter, COUNTERS};
@@ -173,23 +174,31 @@ pub async fn connection_slot_task(
             led_rx.as_mut(),
         )
         .await;
-        match outcome {
-            SlotOutcome::Closed => COUNTERS.bump(Counter::LinksLost),
-            SlotOutcome::Failed(_) if silent => COUNTERS.bump(Counter::ReconnectFailures),
-            _ => {}
-        }
-        match outcome {
-            // Without keys for the device (its pairing was refused, the
-            // peripheral paired without bonding, or a newer pairing evicted
-            // them), a background reconnect, which never pairs, could never
-            // secure the link: free the slot instead.
-            SlotOutcome::Closed if bonder().bond_for_address(device.address).is_none() => {
-                info!("slot {} link lost; no keys to reconnect", slot);
-                keys_missing(slot, attempt, slot_event_tx).await;
-            }
+        let end = match outcome {
             SlotOutcome::Closed => {
-                // The peer dropped a working link: keep the slot for it and
-                // reconnect as soon as it advertises again.
+                COUNTERS.bump(Counter::LinksLost);
+                AttemptEnd::Closed
+            }
+            SlotOutcome::Failed(tag) => {
+                if silent {
+                    COUNTERS.bump(Counter::ReconnectFailures);
+                }
+                AttemptEnd::Failed(tag)
+            }
+            SlotOutcome::TakenOver(next) => AttemptEnd::TakenOver(next),
+            SlotOutcome::Superseded(next_cmd) => {
+                pending_cmd = superseded(slot, attempt, next_cmd, slot_event_tx).await;
+                scanner::clear_reconnect(slot);
+                continue;
+            }
+        };
+        let closed = matches!(end, AttemptEnd::Closed);
+        let has_keys =
+            |target: &DiscoveredDevice| bonder().bond_for_address(target.address).is_some();
+        match after_attempt(end, device, silent, replaced_retry, has_keys) {
+            // The peer dropped a working link: keep the slot for it and
+            // reconnect as soon as it advertises again.
+            NextStep::LinkLost(device) => {
                 info!("slot {} link lost; reconnecting", slot);
                 slot_event_tx
                     .send(SlotEvent::LinkLost {
@@ -200,33 +209,25 @@ pub async fn connection_slot_task(
                     .await;
                 retry = Some(device);
             }
-            // The user's connection took over this background attempt, which
-            // then failed: make that connection now, with pairing allowed,
-            // and come back to this retry if it fails too.
-            SlotOutcome::TakenOver(next) => {
-                replaced = Some(device);
-                pending_cmd = Some(SlotCommand::Connect {
-                    device: next,
-                    attempt,
-                });
-            }
             // Not found in this attempt's window (or the link couldn't be
             // secured): nothing new to report, try again. Meanwhile the other
             // slot's scans ignore this device for a while, in case it
             // advertises but will not connect.
-            SlotOutcome::Failed(BleErrorTag::ConnectFailed) if silent => {
+            NextStep::RetryQuietly(device) => {
                 scanner::reconnect_attempt_failed(slot);
                 retry = Some(device);
             }
-            // A failed user connection that took over a background retry
-            // hands the slot back to that retry while the device's keys
-            // remain, so it still reconnects when it next advertises, unless
-            // the keys were found wanting. Any other failure of a background
-            // reconnect, such as a peer that refused its keys, ends it.
-            SlotOutcome::Failed(tag) => {
-                let resume = replaced_retry.filter(|target| {
-                    !tag.needs_new_pairing() && bonder().bond_for_address(target.address).is_some()
-                });
+            // The user's connection took over this background attempt, which
+            // then failed: make that connection now, with pairing allowed,
+            // and come back to this retry if it fails too.
+            NextStep::Connect { device, resume } => {
+                replaced = Some(resume);
+                pending_cmd = Some(SlotCommand::Connect { device, attempt });
+            }
+            NextStep::Report { tag, resume } => {
+                if closed {
+                    info!("slot {} link lost; no keys to reconnect", slot);
+                }
                 slot_event_tx
                     .send(SlotEvent::Error {
                         slot,
@@ -236,9 +237,6 @@ pub async fn connection_slot_task(
                     })
                     .await;
                 retry = resume;
-            }
-            SlotOutcome::Superseded(next_cmd) => {
-                pending_cmd = superseded(slot, attempt, next_cmd, slot_event_tx).await;
             }
         }
         if retry.is_none() {

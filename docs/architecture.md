@@ -75,6 +75,7 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ble/coordinator.rs](../src/ble/coordinator.rs) | Pure core | Pure connection-slot state and command reducers; the slot-event reducers are in its child module [coordinator_events.rs](../src/ble/coordinator_events.rs) |
 | [ble/scan_list.rs](../src/ble/scan_list.rs) | Pure core | The bounded user-scan device list: HID-UUID admission, strongest-signal replacement when full, name updates |
 | [ble/reconnect.rs](../src/ble/reconnect.rs) | Pure core | Background-reconnect table shared by both slots: saved-device identity, targets, sightings handed between slots, wakes, scan duty |
+| [ble/slot_policy.rs](../src/ble/slot_policy.rs) | Pure core | A connection slot's decisions: the error a link that would not encrypt fails with, and whether the slot reconnects in the background, reports an error, or resumes the retry a user's connection replaced once an attempt ends |
 | [ble/long_read.rs](../src/ble/long_read.rs) | Pure core | Bounded fragmented Report Map acquisition |
 | [ble/hid_gatt.rs](../src/ble/hid_gatt.rs) | Pure core | The GATT HID client's decisions: what each Report characteristic is used for, how each Report Map read request moves the read on or fails it, and which notifications reach the classifier. Not in the simulation build, which has no `hid` module |
 | [ble/management.rs](../src/ble/management.rs) | Pure core | Peer-management targets, quiescence, and transactional commit primitives |
@@ -118,7 +119,7 @@ module that imports a hardware crate stops `cargo test` from building.
 
 | Layer | Modules | Compiled into | Verified by |
 | --- | --- | --- | --- |
-| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
+| Pure core | `hid::*`, `ble::{adv_parser, bond_table, conn_params, coordinator, scan_list, reconnect, slot_policy, long_read, hid_gatt, management, messages, pnp_id}`, `diagnostics`, `stack_logic`, `power_logic`, `ui::{controller, ui_logic, input_logic, layout, display_logic}`, `storage::{codec, devices, framing, record}` | Host crate and each firmware binary that declares them | Host tests; the Renode scenario runs the UI, layout, coordinator, management, and storage modules on the simulated target |
 | Board shell | `ble::{mod, multi_conn, slot_worker, slot_link, bonder, hid_client, device_info, scanner}`, `usb::{hid_device, host_requests}`, the `storage` shell, `power`, `sd_setup`, `stack`, `ui::{display, buttons}` | Firmware binaries only | Embedded build and Clippy; board self-test; hardware acceptance; the Renode scenario also runs `ui::{display, buttons}` on modelled peripherals |
 | Entry points | `main.rs`, `selftest.rs`, `sim.rs` (with `sim_ble.rs`) | One binary each | Embedded or simulation build; Renode for `sim.rs` |
 | Constants | `config.rs` | Host crate, each firmware binary, and `build.rs` | Review; documented in [hardware](hardware.md#configuration-defaults); the linker checks the storage range |
@@ -154,7 +155,7 @@ flowchart TD
         STK["stack"]
     end
     subgraph core [Pure core exported by lib.rs]
-        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, management, long_read, hid_gatt, adv_parser, pnp_id"]
+        BC["ble::coordinator, scan_list, bond_table, messages, reconnect, conn_params, slot_policy, management, long_read, hid_gatt, adv_parser, pnp_id"]
         DG["diagnostics"]
         SL["stack_logic"]
         HID["hid modules"]
@@ -1323,9 +1324,9 @@ should do about each message is in
 | Path | Bound | On failure | Source |
 | --- | --- | --- | --- |
 | User scan | 8 s window, 10 s backstop | Results so far are used; a SoftDevice error shows "Scan failed" | [scanner.rs](../src/ble/scanner.rs) |
-| Connect attempt | 6 s whitelist scan | User connect: error, and a connection that took over a background retry goes back to it while the device's keys remain. Silent: retry after 500 ms | [slot_worker.rs](../src/ble/slot_worker.rs), [slot_link.rs](../src/ble/slot_link.rs) |
+| Connect attempt | 6 s whitelist scan | User connect: error, and a connection that took over a background retry goes back to it while the device's keys remain. Silent: retry after 500 ms | [slot_policy.rs](../src/ble/slot_policy.rs) (`after_attempt`), [slot_worker.rs](../src/ble/slot_worker.rs), [slot_link.rs](../src/ble/slot_link.rs) |
 | Reconnect scan | 6 s; fast duty cycle for 30 s after power-up or a lost link | Retry after 500 ms, or at once when the other slot's scan sees the device | [scanner.rs](../src/ble/scanner.rs), [reconnect.rs](../src/ble/reconnect.rs) |
-| Encryption | 25 polls, 200 ms apart | `KeysRejected` when the SoftDevice reported the link unencrypted after the stored keys were sent; `PairingFailed` for a new pairing on a link still up; otherwise `ConnectFailed` | [slot_link.rs](../src/ble/slot_link.rs), [bonder.rs](../src/ble/bonder.rs) |
+| Encryption | 25 polls, 200 ms apart | `KeysRejected` when the SoftDevice reported the link unencrypted after the stored keys were sent; `PairingFailed` for a new pairing on a link still up; `KeysMissing` for a background reconnect to a peer the bridge holds no keys for; otherwise `ConnectFailed` | [slot_policy.rs](../src/ble/slot_policy.rs) (`securing_error`), [slot_link.rs](../src/ble/slot_link.rs), [bonder.rs](../src/ble/bonder.rs) |
 | GATT reads, writes, discovery, MTU exchange | SoftDevice ATT timeout, returned as a `Timeout` error by the vendored `gatt_client` instead of a panic | Service discovery: `HidNotFound`; Report Map read: `ReportMapReadFailed`; MTU exchange inside the connect call: `ConnectFailed`. When the link itself dropped, any discovery failure becomes `ConnectFailed`, which a background reconnect retries. A failed Report Reference read, Protocol Mode write, or CCCD write is logged or skipped, not fatal | [vendor/nrf-softdevice](../vendor/nrf-softdevice/README.bt2usb.md), [hid_client.rs](../src/ble/hid_client.rs) |
 | Flash write | 3 attempts, 20 ms apart | `NotPersisted` for a new or changed device, otherwise `StorageFailed`; cache and bonds unchanged for Forget and Factory reset | [storage.rs](../src/storage.rs) |
 | USB endpoint write | 100 ms deadline | Replay current state; back off 20 ms doubling to 1 s | [delivery.rs](../src/hid/delivery.rs) |

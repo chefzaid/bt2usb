@@ -629,7 +629,10 @@ Not covered by automated tests:
   conversion to SoftDevice address and key types, and IRK resolution through
   the SoftDevice
 - USB `set_report` validation and the `slot_link.rs`, `slot_worker.rs`, and
-  `bonder.rs` security flow (encryption wait, `allow_pairing`, bond replacement)
+  `bonder.rs` security flow (encryption wait, `allow_pairing`, bond
+  replacement); only the errors a link that would not encrypt reports are
+  host-tested (`securing_error` in
+  [slot_policy.rs](../src/ble/slot_policy.rs))
 - fuzzing of the vendored discovery code, power-loss injection, and any on-air
   security test (the pure parsers are fuzzed; see
   [parser fuzzing](testing.md#parser-fuzzing))

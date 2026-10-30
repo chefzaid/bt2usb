@@ -14,6 +14,7 @@
 
 use crate::ble::bonder::{bonder, encrypts};
 use crate::ble::multi_conn::{SlotCommand, SlotEvent};
+use crate::ble::slot_policy::{securing_error, Securing};
 use crate::ble::{hid_client, scanner, BleErrorTag, DiscoveredDevice};
 use crate::config;
 use crate::hid::delivery::HidEvent;
@@ -98,11 +99,8 @@ async fn wait_for_secure_link(conn: &Connection) -> bool {
 /// (`allow_pairing` false) never initiates a replacement pairing; fresh
 /// pairing is restricted to an explicit user connection.
 ///
-/// A link that does not encrypt fails with what the user must do about it:
-/// `KeysRejected` when the peer refused the stored keys, `PairingFailed` when
-/// a new pairing did not complete, `KeysMissing` when a background reconnect
-/// finds no keys, and otherwise `ConnectFailed`, which a background
-/// reconnect retries.
+/// A link that does not encrypt fails with what the user must do about it
+/// ([`securing_error`]).
 async fn secure_and_discover(
     conn: &Connection,
     allow_pairing: bool,
@@ -111,17 +109,18 @@ async fn secure_and_discover(
     let peer = conn.peer_address();
     // A refusal noted on an earlier link from this address is not this one's.
     bonder().take_keys_rejected(peer);
-    let failure = match conn.encrypt() {
-        Ok(()) if wait_for_secure_link(conn).await => None,
-        Ok(()) if bonder().take_keys_rejected(peer) => Some(BleErrorTag::KeysRejected),
+    let securing = match conn.encrypt() {
+        Ok(()) if wait_for_secure_link(conn).await => Securing::Encrypted,
+        Ok(()) => Securing::KeysNotAccepted {
+            refused: bonder().take_keys_rejected(peer),
+        },
         Err(EncryptError::PeerKeysNotFound) if allow_pairing => {
-            let paired = conn.request_pairing().is_ok() && wait_for_secure_link(conn).await;
-            (!paired).then_some(BleErrorTag::PairingFailed)
+            Securing::Paired(conn.request_pairing().is_ok() && wait_for_secure_link(conn).await)
         }
-        Err(EncryptError::PeerKeysNotFound) => Some(BleErrorTag::KeysMissing),
-        Ok(()) | Err(_) => Some(BleErrorTag::ConnectFailed),
+        Err(EncryptError::PeerKeysNotFound) => Securing::NoKeys,
+        Err(_) => Securing::Failed,
     };
-    if let Some(tag) = failure {
+    if let Some(tag) = securing_error(securing) {
         warn!("slot {} failed to secure BLE link: {}", slot, tag);
         return Err(tag);
     }

@@ -58,7 +58,7 @@ Split each subsystem into a hardware-free core and a thin asynchronous shell:
 | [slot_policy.rs](../../src/ble/slot_policy.rs) | The error a link that would not encrypt fails with, and what a slot does once an attempt ends: reconnect in the background, report, or make the user's connection that took the attempt over | `secure_and_discover` in [slot_link.rs](../../src/ble/slot_link.rs), `connection_slot_task` in [slot_worker.rs](../../src/ble/slot_worker.rs) |
 | [long_read.rs](../../src/ble/long_read.rs) | Assembly and bounds of a fragmented ATT read | `read_report_map` in `hid_client.rs` |
 | [hid_gatt.rs](../../src/ble/hid_gatt.rs) | Which Report characteristics are subscribed and with which kind, which one takes the keyboard LEDs, how each Report Map read request ends or fails the read, and which notifications are passed on whole | `subscribe_all`, `read_report_map`, and `on_hvx` in `hid_client.rs` |
-| [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish | `manage_devices` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
+| [management.rs](../../src/ble/management.rs) | Worker quiescence barrier and commit-then-publish, and what the user is told once a connected device's store write ends (`Stored`, `persist_report`) | `manage_devices` and `execute_action` in `multi_conn.rs`, `DeviceStore` in [storage.rs](../../src/storage.rs) |
 | [messages.rs](../../src/ble/messages.rs) | The commands and events between the UI and the BLE side, and the per-request management IDs they carry | The channels in [main.rs](../../src/main.rs) and `ble_task` in `multi_conn.rs` |
 | [pnp_id.rs](../../src/ble/pnp_id.rs) | What a Device Information Service PnP ID value says, and which values are malformed | `log_pnp_id` in [device_info.rs](../../src/ble/device_info.rs) |
 | [adv_parser.rs](../../src/ble/adv_parser.rs) | HID service detection and device names in advertisements | [scanner.rs](../../src/ble/scanner.rs) |
@@ -178,9 +178,9 @@ Follow-up obligations:
   `hid` verbatim, includes `ble/adv_parser.rs`, `ble/bond_table.rs`,
   `ble/conn_params.rs`, `ble/coordinator.rs`, `ble/reconnect.rs`,
   `ble/scan_list.rs`, `ble/slot_policy.rs`, `ble/long_read.rs`,
-  `ble/hid_gatt.rs`, `ble/management.rs`, `ble/messages.rs`, `ble/pnp_id.rs`, and the five pure
-  `ui` files (`controller.rs`, `display_logic.rs`, `input_logic.rs`, `layout.rs`,
-  `ui_logic.rs`) in inline `ble` and `ui` modules (through `#[path]` re-export
+  `ble/hid_gatt.rs`, `ble/management.rs`, `ble/messages.rs`, `ble/pnp_id.rs`,
+  and the five pure `ui` files (`controller.rs`, `display_logic.rs`,
+  `input_logic.rs`, `layout.rs`, `ui_logic.rs`) in inline `ble` and `ui` modules (through `#[path]` re-export
   facades until 2026-10-30), `power_logic.rs` as an ordinary module, and
   includes `storage/codec.rs`, `devices.rs`, `framing.rs`, and `record.rs` only
   under `#[cfg(test)]`, in an inline `storage` module. It declares `config`

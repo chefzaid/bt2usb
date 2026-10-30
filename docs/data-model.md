@@ -691,7 +691,7 @@ display line holds. How errors propagate is in
 | `HidNotFound` | GATT discovery of the HID service failed or found no Report characteristic (`discover_and_subscribe`) | `No HID service` |
 | `NotifyFailed` | No input report characteristic could be subscribed | `Notify failed` |
 | `StorageFailed` | The store was unreadable or invalid at boot; a save after a connection that changed nothing in the store, or after a refused bond, failed (an earlier failed save left changes pending); a Forget or Factory reset could not be persisted. Every `StoreError` except a failed save of a new or changed device maps here | `Storage failed` |
-| `NotPersisted` | The device that connected was new or changed (`Stored` other than `Unchanged`), and saving it failed, including while the store is read-only; RAM keeps it until power-off ([multi_conn.rs](../src/ble/multi_conn.rs)) | `Kept until power-off` |
+| `NotPersisted` | The device that connected was new or changed (`Stored` other than `Unchanged`), and saving it failed, including while the store is read-only; RAM keeps it until power-off (`persist_report` in [management.rs](../src/ble/management.rs)) | `Kept until power-off` |
 | `BondRefused` | A pairing's bond names an identity that is not a public or random static address, so neither the device nor its new keys were stored; or (which the SoftDevice does not cause) the connected device's own address has a reserved type and nothing was stored ([write rules](#write-rules)) | `Pairing not saved` |
 | `ManagementFailed` | Forget named an identity that `DeviceStore::find` no longer matches | `Action failed; retry` |
 | `ReportMapReadFailed` | The Report Map read returned an error, the ATT MTU is outside the 23–517 bytes the long-read assembler accepts, or a fragment or the end of the value was malformed | `HID map read failed` |
@@ -709,7 +709,8 @@ come from `ui_logic.rs`.
 
 After a save succeeds, `execute_action` also sends `Event::Notice` with a
 `PairingNotice` ([messages.rs](../src/ble/messages.rs)) when the device list's
-`add` changed another saved device. The UI shows it on the **Paired** screen
+`add` changed another saved device (`persist_report` in
+[management.rs](../src/ble/management.rs)). The UI shows it on the **Paired** screen
 unless an error is showing (`controller::notice_message`):
 
 | Notice | Raised by | OLED message |

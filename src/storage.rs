@@ -52,20 +52,7 @@ const FLASH_RETRY_BACKOFF_MS: u64 = 20;
 pub struct BondRefused;
 
 /// What [`DeviceStore::add`] did with a device it stored.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Stored {
-    /// Already saved as given.
-    Unchanged,
-    /// Saved as a new device, or over a saved one's address, name, or missing
-    /// keys.
-    Saved,
-    /// Saved over the different keys held for the same identity.
-    ReplacedBond,
-    /// Saved after removing the oldest device to make room. Holds that
-    /// device's identity address when it had keys, which the bonder must drop
-    /// as well.
-    RemovedOldest(Option<Address>),
-}
+pub type Stored = crate::ble::management::Stored<Address>;
 
 fn refuse_bond<T>() -> Result<T, BondRefused> {
     warn!("Device store refused a bond whose identity is not public or random static");

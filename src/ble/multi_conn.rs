@@ -11,7 +11,6 @@
 use crate::ble::bonder::{bonder, key_matches};
 use crate::ble::coordinator::{self, Action, ConnManager, MAX_CONNECTIONS};
 use crate::ble::management::{self, Quiescence};
-use crate::ble::messages::PairingNotice;
 use crate::ble::scanner::ScanResult;
 use crate::ble::{scanner, BleCommand, BleErrorTag, BleEvent, DiscoveredDevice};
 use crate::config::MAX_PAIRED_DEVICES;
@@ -411,24 +410,8 @@ async fn execute_action(
                     None
                 }
             };
-            let event = match (store.save_to_flash(flash).await, stored) {
-                // What the pairing did to another saved device, told once
-                // saved.
-                (Ok(()), Some(Stored::ReplacedBond)) => {
-                    Some(BleEvent::Notice(PairingNotice::ReplacedBond))
-                }
-                (Ok(()), Some(Stored::RemovedOldest(_))) => {
-                    Some(BleEvent::Notice(PairingNotice::RemovedOldest))
-                }
-                (Ok(()), _) => None,
-                // A new or changed device that is not in flash is lost at
-                // power-off.
-                (Err(_), Some(stored)) if stored != Stored::Unchanged => {
-                    Some(BleEvent::Error(BleErrorTag::NotPersisted))
-                }
-                (Err(_), _) => Some(BleEvent::Error(BleErrorTag::StorageFailed)),
-            };
-            if let Some(event) = event {
+            let saved = store.save_to_flash(flash).await.is_ok();
+            if let Some(event) = management::persist_report(stored.as_ref(), saved) {
                 event_tx.send(event).await;
             }
         }

@@ -8,6 +8,24 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Persistence Report
+
+This record covers the commit that moves what the user is told after a
+connected device's store write out of `execute_action` in
+`src/ble/multi_conn.rs` into `persist_report` in the host-compiled
+`src/ble/management.rs`, together with the `Stored` outcome it reads (now
+`management::Stored<A>`, which `src/storage.rs` names for the SoftDevice
+address), the third step of the P1 item "Host tests for the I/O shells" in
+[TODO.md](../TODO.md). The behavior is meant to be unchanged; the checks ran
+locally on Linux in a container, and nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script, as in the HFXO record | Passed after this record was added; 460 unit tests (2 new in `management.rs`) and the 13 integration, glyph, pairing-permission, and portal tests |
+| Same decisions as before | Review of the old `match` on the save result and `Stored` against `persist_report` | Each arm maps one to one: after a save, `ReplacedBond` and `RemovedOldest` give their notices and anything else nothing; after a failed save, a saved, replacing, or evicting add gives `NotPersisted`, and an unchanged or refused one `StorageFailed` |
+| Simulation | `src/sim_ble.rs` | Unchanged: it keeps its own store write, which reports `StorageFailed` for any failed save and sends no notices ([modules without host tests](testing.md#modules-without-host-tests)) |
+| Board/radio/USB acceptance | Physical hardware | Not run |
+
 ## Validation Record — 2026-10-30, Connection Slot Decisions
 
 This record covers the commit that moves a connection slot's decisions out of

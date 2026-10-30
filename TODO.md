@@ -1011,9 +1011,11 @@ Host tests, simulation, and code-health work. Context:
   `src/ble/hid_gatt.rs` with 11 host tests, and the slot workers' (the error
   a link that would not encrypt fails with, and whether a slot reconnects,
   reports, or resumes a replaced retry once an attempt ends) in
-  `src/ble/slot_policy.rs` with 7; the testing guide records why the
-  SoftDevice procedures left in `hid_client.rs`, `slot_link.rs`, and
-  `slot_worker.rs` are not host-tested.
+  `src/ble/slot_policy.rs` with 7, and the coordinator task's report after a
+  connected device's store write in `persist_report` in
+  `src/ble/management.rs` with 2; the testing guide records why the SoftDevice
+  procedures left in `hid_client.rs`, `slot_link.rs`, `slot_worker.rs`, and
+  `multi_conn.rs` are not host-tested.
 - [x] **P1** **Host tests for the device store.** The in-memory store moved
   out of the `src/storage.rs` shell on 2026-10-10 into host-compiled modules
   under ADR 0003: `src/storage/devices.rs` (`DeviceList`: fail-closed load,

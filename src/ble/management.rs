@@ -1,6 +1,8 @@
-//! Management transaction primitives shared by the live BLE tasks and tests.
+//! Management transaction primitives shared by the live BLE tasks and tests,
+//! and what the user is told once a connected device is saved.
 
-use crate::ble::coordinator::{ConnManager, MAX_CONNECTIONS};
+use crate::ble::coordinator::{ConnManager, ErrorTag, MAX_CONNECTIONS};
+use crate::ble::messages::{Event, PairingNotice};
 
 /// A command-specific barrier prevents a queued Connected/LinkLost event from
 /// recreating a forgotten bond while connection workers are cancelling. Workers
@@ -49,6 +51,40 @@ pub fn forget_targets<A: Clone + PartialEq>(
     is_peer: impl Fn(&A) -> bool,
 ) -> [bool; MAX_CONNECTIONS] {
     core::array::from_fn(|slot| manager.slot_address(slot).is_some_and(&is_peer))
+}
+
+/// What adding a connected device did to the saved devices.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stored<A> {
+    /// Already saved as given.
+    Unchanged,
+    /// Saved as a new device, or over a saved one's address, name, or missing
+    /// keys.
+    Saved,
+    /// Saved over the different keys held for the same identity.
+    ReplacedBond,
+    /// Saved after removing the oldest device to make room. Holds that
+    /// device's identity address when it had keys, which the bonder must drop
+    /// as well.
+    RemovedOldest(Option<A>),
+}
+
+/// What the user is told once the store holding a connected device was
+/// written. `stored` is what adding the device did, `None` when the store
+/// refused it (reported already as `BondRefused`), and `saved` whether the
+/// write reached flash. A pairing's effect on another device is told only
+/// once it is saved; a new or changed device that did not reach flash is lost
+/// at power-off.
+pub fn persist_report<A, B>(stored: Option<&Stored<A>>, saved: bool) -> Option<Event<B>> {
+    match (saved, stored) {
+        (true, Some(Stored::ReplacedBond)) => Some(Event::Notice(PairingNotice::ReplacedBond)),
+        (true, Some(Stored::RemovedOldest(_))) => Some(Event::Notice(PairingNotice::RemovedOldest)),
+        (true, _) => None,
+        (false, Some(Stored::Saved | Stored::ReplacedBond | Stored::RemovedOldest(_))) => {
+            Some(Event::Error(ErrorTag::NotPersisted))
+        }
+        (false, _) => Some(Event::Error(ErrorTag::StorageFailed)),
+    }
 }
 
 /// Publish a new in-memory store only after persistence succeeds. The live
@@ -143,6 +179,45 @@ mod tests {
         assert_eq!(forget_targets(&manager, |a| *a == 9), [false, true]);
         assert_eq!(forget_targets(&manager, |a| *a == 7), [true, false]);
         assert_eq!(forget_targets(&manager, |a| *a == 8), [false, false]);
+    }
+
+    #[test]
+    fn a_saved_pairing_tells_only_what_it_did_to_another_device() {
+        let told = |stored: Option<Stored<u8>>| persist_report::<u8, u8>(stored.as_ref(), true);
+        assert_eq!(
+            told(Some(Stored::ReplacedBond)),
+            Some(Event::Notice(PairingNotice::ReplacedBond))
+        );
+        for evicted in [None, Some(3)] {
+            assert_eq!(
+                told(Some(Stored::RemovedOldest(evicted))),
+                Some(Event::Notice(PairingNotice::RemovedOldest))
+            );
+        }
+        // Refused devices were reported as `BondRefused` already.
+        for stored in [None, Some(Stored::Unchanged), Some(Stored::Saved)] {
+            assert_eq!(told(stored), None);
+        }
+    }
+
+    #[test]
+    fn a_failed_write_says_whether_the_connected_device_is_lost_at_power_off() {
+        let failed = |stored: Option<Stored<u8>>| persist_report::<u8, u8>(stored.as_ref(), false);
+        for stored in [
+            Stored::Saved,
+            Stored::ReplacedBond,
+            Stored::RemovedOldest(Some(3)),
+        ] {
+            assert_eq!(
+                failed(Some(stored)),
+                Some(Event::Error(ErrorTag::NotPersisted))
+            );
+        }
+        // Flash already held this device, or the store refused it: the write
+        // failed for the rest of the store.
+        for stored in [None, Some(Stored::Unchanged)] {
+            assert_eq!(failed(stored), Some(Event::Error(ErrorTag::StorageFailed)));
+        }
     }
 
     #[test]

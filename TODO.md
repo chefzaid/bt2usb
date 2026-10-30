@@ -29,7 +29,7 @@ probe, or USB host to close.
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
 | [Input Aggregation And Delivery](#input-aggregation-and-delivery) | 3 | 2 | 2 |
-| [Pairing Storage](#pairing-storage) | 4 | 5 | 3 |
+| [Pairing Storage](#pairing-storage) | 5 | 4 | 3 |
 | [UI, Display And Power](#ui-display-and-power) | 9 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **144** | **69** | **21** |
+| **Total** | **145** | **68** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -590,14 +590,15 @@ Context: [data model](docs/data-model.md#pairing-store),
   when interrupted writes retain the last committed valid state or take a
   documented safe reset path, without accepting corrupted bond material or
   silently replacing it ([data model](docs/data-model.md#write-rules)).
-- [ ] **P1** **Versioned storage migration.** Document each wire version and
-  supported upgrade/downgrade paths. The legacy parser and the identity merge
-  moved into the host-tested `src/storage/devices.rs` on 2026-10-10, whose tests
-  already refuse future versions and cover a valid legacy conversion and
-  malformed items; capacity changes and a written migration policy remain. Accept
-  when fixture tests reject unknown versions and cover valid legacy
-  conversion, malformed data, and capacity changes
-  ([data model](docs/data-model.md#schema-change-rules)).
+- [x] **P1** **Versioned storage migration.** Each wire version and every
+  upgrade, downgrade, and capacity path is documented
+  ([wire versions](docs/data-model.md#wire-versions-and-upgrade-paths)),
+  including that firmware before `c37d568` misreads a version 1 store and
+  overwrites it. Fixture tests in `src/storage/devices_format_tests.rs` refuse
+  unknown versions and malformed data, convert a legacy store, and refuse a
+  well-formed frame with more records than `MAX_PAIRED_DEVICES` while loading
+  smaller ones (`a_frame_from_another_capacity_loads_only_within_this_one`).
+  How a future layout change migrates is the open ADR 0019 decision.
 - [ ] **P1** **Pairing region survives application reflash.** *(hardware)*
   Normal application flashing is expected to preserve pages 240 to 243, but the
   erase behavior of `probe-rs` in `mask run --release` has not been checked.

@@ -219,6 +219,24 @@ fn a_malformed_or_future_item_disables_saves() {
 }
 
 #[test]
+fn a_frame_from_another_capacity_loads_only_within_this_one() {
+    // A release with a larger `MAX_PAIRED_DEVICES` can write a well-formed
+    // frame with more records than this one holds; it is refused whole rather
+    // than loaded in part, and saves stay off so it is not overwritten.
+    let devices: std::vec::Vec<StoredDevice> = (1..=MAX_PAIRED_DEVICES as u8 + 1)
+        .map(|n| device(identity(n), "D"))
+        .collect();
+    let (list, valid) = loaded(&raw_item(&devices));
+    assert!(!valid && !list.is_writable() && list.len() == 0);
+    // Fewer records than the capacity, as a smaller release writes, load
+    // unchanged.
+    for count in 0..=MAX_PAIRED_DEVICES {
+        let (list, valid) = loaded(&raw_item(&devices[..count]));
+        assert!(valid && list.is_writable() && list.len() == count);
+    }
+}
+
+#[test]
 fn an_unreadable_store_refuses_saves_and_forget_until_reset() {
     let mut list = DeviceList::new();
     list.add(device(identity(1), "Mouse"), &resolve);

@@ -67,7 +67,7 @@ not covered by `cargo test --lib --tests`, whatever tests it contains.
 | Store framing (magic, version, count, length prefixes) | [storage/framing.rs](../src/storage/framing.rs) | 8 host tests | None recorded |
 | Record prefix and bond-flag validation | [storage/record.rs](../src/storage/record.rs) | 3 host tests | None recorded |
 | Device, address, and bond record codec | [storage/codec.rs](../src/storage/codec.rs) | Round-trip and boundary tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs) | None recorded |
-| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 15 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 18 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
+| Fail-closed load, legacy parse, merge, eviction, Forget and reset candidates | [storage/devices.rs](../src/storage/devices.rs) | 16 load and codec tests in [devices_format_tests.rs](../src/storage/devices_format_tests.rs), shared with the codec row, and 18 merge, identity, eviction, and transaction tests in [devices_tests.rs](../src/storage/devices_tests.rs) | None recorded |
 | Flash load and save, write retries, SoftDevice type conversion, IRK resolution | [storage.rs](../src/storage.rs) | Firmware build and Clippy only; no tests | None recorded |
 | Persist-then-publish commit, Forget targets, and quiescence barrier | [ble/management.rs](../src/ble/management.rs) | 6 host tests; Renode scenario | None recorded |
 | USB report layouts and descriptors | [hid/](../src/hid/) | Host tests in [lib_tests.rs](../src/lib_tests.rs), [hid_classify_tests.rs](../src/hid_classify_tests.rs) and [hid_descriptor_tests.rs](../src/hid_descriptor_tests.rs), including `parses_actual_usb_descriptors_without_cross_classifying_pan` | None recorded |
@@ -819,8 +819,26 @@ policy is in [hardware](hardware.md#power).
   this), keeps channel capacities bounded, and updates the Renode scenario when
   coordinator or UI reducers change.
 
-Versioned migration beyond the legacy format is open work in
-[TODO.md](../TODO.md).
+### Wire Versions And Upgrade Paths
+
+| Format | Written by | Loaded by the current firmware |
+| --- | --- | --- |
+| Legacy (first byte is a count, no magic) | Firmware before commit `c37d568` (2026-06-21) | Yes, without bonds, which that firmware never stored; the next change rewrites it as version 1 ([legacy format](#legacy-format)) |
+| Version 1 (`0xB2 0x01`) | Commit `c37d568` and later | Yes; the current format |
+| Version 2 or later | No release yet | No: refused whole, saves disabled until Factory reset ([load rules](#load-rules)) |
+
+| Path | What happens |
+| --- | --- |
+| Legacy to version 1 | Automatic: the store loads, every device must pair again (no bonds existed), and the next save writes version 1 |
+| Version 1 to legacy (downgrade to firmware before `c37d568`) | Unsupported and not fail-closed. That firmware reads the `0xB2` magic as a count of 178, decodes frame bytes as device records until it holds four or the data ends, and overwrites the frame with the legacy format at its next save, losing every bond. Erase pages 240 to 243 before flashing such firmware |
+| Version 1 to a future version | Not defined yet. ADR 0019 proposes how a release that changes the layout may migrate; until it is accepted, a release must not change the frame or record layout ([Needs Your Input](../TODO.md#needs-your-input)) |
+| A future version back to version 1 | Fail-closed: version 1 firmware refuses the unknown version and never overwrites it |
+| A capacity change | A frame with more records than `MAX_PAIRED_DEVICES` is refused whole, with saves disabled; a frame with fewer loads unchanged. A release that lowers the capacity must therefore migrate, under the same ADR 0019 rule, and one that raises it cannot be downgraded without Factory reset |
+
+`a_frame_from_another_capacity_loads_only_within_this_one`,
+`a_malformed_or_future_item_disables_saves`, and the legacy tests in
+[devices_format_tests.rs](../src/storage/devices_format_tests.rs) pin these
+load results.
 
 ## Privacy And Retention
 

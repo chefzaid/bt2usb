@@ -109,6 +109,16 @@ impl KeyboardLeds {
         Self(byte & Self::DEFINED)
     }
 
+    /// The LED state in the host's output report for the USB keyboard. Its
+    /// descriptor declares no report IDs, so the report is the one LED byte;
+    /// a report of any other length is refused.
+    pub const fn from_output_report(data: &[u8]) -> Option<Self> {
+        match *data {
+            [byte] => Some(Self::from_byte(byte)),
+            _ => None,
+        }
+    }
+
     /// The wire byte to forward to the BLE keyboard's output report.
     pub const fn byte(self) -> u8 {
         self.0
@@ -210,6 +220,19 @@ mod led_tests {
         // to the BLE keyboard is well-formed.
         assert_eq!(KeyboardLeds::from_byte(0xE5).byte(), 0x05);
         assert_eq!(KeyboardLeds::from_byte(0x07).byte(), 0x07);
+    }
+
+    #[test]
+    fn the_host_output_report_is_exactly_the_led_byte() {
+        let leds = KeyboardLeds::from_output_report(&[0x02]);
+        assert!(leds.is_some_and(KeyboardLeds::caps_lock));
+        assert_eq!(
+            KeyboardLeds::from_output_report(&[0xE1]).map(KeyboardLeds::byte),
+            Some(0x01)
+        );
+        for data in [&[][..], &[0x02, 0x00], &[0x01; 8]] {
+            assert!(KeyboardLeds::from_output_report(data).is_none(), "{data:?}");
+        }
     }
 
     #[test]

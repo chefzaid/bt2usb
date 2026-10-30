@@ -152,7 +152,7 @@ implemented in the source cited; none is hardware-verified.
 | Paired peripheral | Hold keys down, or vanish while holding them | A slot's held state is cleared on disconnect (`HidEvent::Disconnected`); supervision timeout of 4 s, and a peripheral's request for a longer one is bounded to 4 s (`conn_params::bound_request`, [conn_params.rs](../src/ble/conn_params.rs)) | Hardware release timing unmeasured. TODO: [Multi-device aggregation hardware acceptance](../TODO.md#input-aggregation-and-delivery) |
 | Newly paired device | Claim an existing peer's identity address to replace its bond | Requires the user to pair it explicitly; once saved, the screen shows **Paired** with `Replaced old pairing` (`AddOutcome::BondReplaced` in [devices.rs](../src/storage/devices.rs)) | Identity is asserted by the peer; `on_bonded` and `DeviceStore::add` still replace the matching record, and the notice comes after the fact. TODO: [Authenticated pairing and enrollment policy](../TODO.md#ble-central-and-pairing) |
 | Malicious USB host | Observe or log everything typed | None possible: the host is the input's destination | Inherent; pair only with hosts you trust |
-| Malicious USB host | Send malformed control requests | `set_report` accepts only a one-byte keyboard output report and masks it to defined LED bits; protocol changes only switch report layout ([host_requests.rs](../src/usb/host_requests.rs)) | `GET_REPORT`/`SET_IDLE` behavior comes from `embassy-usb` defaults and is unreviewed. TODO: [HID/USB conformance](../TODO.md#usb-hid-device) |
+| Malicious USB host | Send malformed control requests | `set_report` accepts only a one-byte keyboard output report and masks it to defined LED bits; protocol changes only switch report layout ([host_requests.rs](../src/usb/host_requests.rs); the length and mask are `KeyboardLeds::from_output_report`, host-tested in [keyboard.rs](../src/hid/keyboard.rs)) | `GET_REPORT`/`SET_IDLE` behavior comes from `embassy-usb` defaults and is unreviewed. TODO: [HID/USB conformance](../TODO.md#usb-hid-device) |
 | Malicious USB host | Read bonds, change pairings, or reflash over USB | Only keyboard, mouse, and consumer HID interfaces exist; no vendor, CDC, mass-storage, or DFU interface (`hid_device::init`) | A future DFU or host management interface (for a companion app or browser configuration page) would change this; the planned host management ADR requires every change from a host to be confirmed on the bridge, because every host behind a KVM shares it. TODO: [Signed USB/BLE DFU](../TODO.md#updates-and-host-tools), TODO: [ADR: host management interface](../TODO.md#updates-and-host-tools) |
 | Malicious USB host | Fingerprint or track the unit | None | Development VID/PID `0x1209`/`0x0001` and a stable FICR-derived serial. TODO: [USB production identity](../TODO.md#usb-hid-device) |
 | Physical attacker with SWD | Read LTK/IRK from flash, impersonate peers, or decrypt recorded traffic | None | No readout protection: every boot leaves the debug port open ([Physical Access And Debug Port](#physical-access-and-debug-port)); keys unencrypted. TODO: [Provisioning and physical key protection](../TODO.md#device-security-and-provisioning) |
@@ -628,11 +628,14 @@ Not covered by automated tests:
 - the `src/storage.rs` shell: flash reads and writes, write retries, the
   conversion to SoftDevice address and key types, and IRK resolution through
   the SoftDevice
-- USB `set_report` validation and the `slot_link.rs`, `slot_worker.rs`, and
-  `bonder.rs` security flow (encryption wait, `allow_pairing`, bond
-  replacement); only the errors a link that would not encrypt reports are
-  host-tested (`securing_error` in
-  [slot_policy.rs](../src/ble/slot_policy.rs))
+- USB `set_report`'s report ID check (its length check and LED mask are
+  host-tested), and the security flow in `slot_link.rs`, `slot_worker.rs`,
+  and `bonder.rs`: the encryption wait, `allow_pairing`, and the refusals in
+  `on_bonded`. Its decisions are host-tested: the error a link that would not
+  encrypt reports (`securing_error` in
+  [slot_policy.rs](../src/ble/slot_policy.rs)), and which keys are held,
+  replaced, or dropped and which links are flagged
+  ([bond_table.rs](../src/ble/bond_table.rs))
 - fuzzing of the vendored discovery code, power-loss injection, and any on-air
   security test (the pure parsers are fuzzed; see
   [parser fuzzing](testing.md#parser-fuzzing))

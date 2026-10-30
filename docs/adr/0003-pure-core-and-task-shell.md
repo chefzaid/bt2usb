@@ -150,7 +150,12 @@ Negative:
   `storage.rs` shell (flash I/O, write retries, and the conversion to
   SoftDevice types). Since 2026-10-10 the store's load, merge, and eviction
   rules and its codec are in the host-tested `storage/devices.rs` and
-  `storage/codec.rs`.
+  `storage/codec.rs`, and since 2026-10-30 the GATT HID client's, the slot
+  workers', the coordinator task's, and the security handler's remaining
+  decisions are in `hid_gatt.rs`, `slot_policy.rs`, `management.rs`, and
+  `bond_table.rs`; the testing guide lists what each shell keeps and why it
+  is not host-tested
+  ([modules without host tests](../testing.md#modules-without-host-tests)).
 - Coverage percentages describe only the host library, not the firmware.
 - A test placed in a firmware-only module, such as `src/ble/scanner.rs`, is
   never compiled, because that module depends on the SoftDevice and is not part

@@ -856,7 +856,8 @@ touching the other source. The policy is host-tested in
 
 1. The host sends a one-byte output report to the keyboard interface.
    `BootRequestHandler::set_report` in
-   [host_requests.rs](../src/usb/host_requests.rs) rejects anything else, logs
+   [host_requests.rs](../src/usb/host_requests.rs) rejects anything else
+   (the length check is `KeyboardLeds::from_output_report`), logs
    `"Host LEDs: num={} caps={} scroll={}"`, and sends the value to the
    `KEYBOARD_LEDS` watch.
 2. Each connection worker holds one of the watch's two receivers for its

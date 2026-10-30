@@ -8,6 +8,28 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Security Handler And USB Checks
+
+This record covers the commit that checks off the P1 item "Host tests for the
+I/O shells" in
+[TODO.md](../TODO.md#verification-and-code-quality): the security handler's
+per-link flags move from `src/ble/bonder.rs` into `LinkFlags` in the
+host-compiled `src/ble/bond_table.rs`, the length check of the host's LED
+output report moves from `set_report` in `src/usb/host_requests.rs` into
+`KeyboardLeds::from_output_report` in `src/hid/keyboard.rs`, and the
+[testing guide](testing.md#modules-without-host-tests) now says, for every
+shell, which of its decisions are host-tested and why the code left is not.
+Together with the three records below, the item moved decisions out of five
+shells with 22 new host tests. The behavior is meant to be unchanged; the
+checks ran locally on Linux in a container, and nothing ran on a board.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| `mask ci` steps | The recipe's script, as in the HFXO record | Passed after this record was added; 463 unit tests (2 new for `LinkFlags`, 1 for `from_output_report`) and the 13 integration, glyph, pairing-permission, and portal tests |
+| Same behavior as before | Review of the old `LinkFlags` in `bonder.rs` and the old `let &[byte] = data` check against the new code | `LinkFlags` is the same code over a generic address, its `RefCell` now held by `Bonder`; `from_output_report` accepts exactly one byte and masks it with `from_byte`, as before |
+| Shells left | Reading each shell for decisions that build without the firmware target | None found that is not covered: what remains awaits SoftDevice, `embassy-usb`, or `embassy-nrf` types and calls. The OLED retry after a bus error is recorded as the one error path no automated check reaches |
+| Board/radio/USB acceptance | Physical hardware | Not run |
+
 ## Validation Record — 2026-10-30, Persistence Report
 
 This record covers the commit that moves what the user is told after a

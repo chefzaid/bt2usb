@@ -14,7 +14,7 @@
 
 use core::cell::RefCell;
 
-use crate::ble::bond_table::{BondTable, Inserted, BOND_SLOTS};
+use crate::ble::bond_table::{BondTable, Inserted, LinkFlags, BOND_SLOTS};
 use crate::ble::conn_params::{self, ConnParamLimits, ConnParams};
 use crate::config;
 use crate::config::{BLE_MAX_CONNECTIONS, MAX_PAIRED_DEVICES};
@@ -60,60 +60,26 @@ pub(crate) fn encrypts(mode: SecurityMode) -> bool {
     )
 }
 
-/// Links a security callback flagged, by peer address, until the slot worker
-/// reads the flag. One entry per connection; the oldest goes when full.
-struct LinkFlags(RefCell<Vec<Address, BLE_MAX_CONNECTIONS>>);
-
-impl LinkFlags {
-    fn new() -> Self {
-        Self(RefCell::new(Vec::new()))
-    }
-
-    fn set(&self, link: Address) {
-        let mut links = self.0.borrow_mut();
-        if links.contains(&link) {
-            return;
-        }
-        if links.is_full() {
-            links.remove(0);
-        }
-        let _ = links.push(link);
-    }
-
-    /// Whether `link` was flagged, clearing the flag.
-    fn take(&self, link: Address) -> bool {
-        let mut links = self.0.borrow_mut();
-        match links.iter().position(|flagged| *flagged == link) {
-            Some(index) => {
-                links.remove(index);
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn clear(&self) {
-        self.0.borrow_mut().clear();
-    }
-}
+/// One flag per connection, by peer address.
+type Flags = RefCell<LinkFlags<Address, BLE_MAX_CONNECTIONS>>;
 
 pub(crate) struct Bonder {
     /// The saved devices' keys and those of pairings not saved yet.
     peers: RefCell<BondTable<BondInfo, BOND_SLOTS>>,
     /// Links whose pairing named an identity the store refuses, until
     /// [`Self::take_refused`] reports them.
-    refused: LinkFlags,
+    refused: Flags,
     /// Links that stayed unencrypted after the stored keys were sent, until
     /// [`Self::take_keys_rejected`] reports them.
-    keys_rejected: LinkFlags,
+    keys_rejected: Flags,
 }
 
 impl Bonder {
     fn new() -> Self {
         Self {
             peers: RefCell::new(BondTable::new()),
-            refused: LinkFlags::new(),
-            keys_rejected: LinkFlags::new(),
+            refused: RefCell::new(LinkFlags::new()),
+            keys_rejected: RefCell::new(LinkFlags::new()),
         }
     }
 
@@ -132,13 +98,13 @@ impl Bonder {
     /// Whether the pairing on the link to `address` was refused, forgetting
     /// the refusal.
     pub(crate) fn take_refused(&self, address: Address) -> bool {
-        self.refused.take(address)
+        self.refused.borrow_mut().take(address)
     }
 
     /// Whether the peer at `address` refused the stored keys since the last
     /// call: the link's security was updated without encryption.
     pub(crate) fn take_keys_rejected(&self, address: Address) -> bool {
-        self.keys_rejected.take(address)
+        self.keys_rejected.borrow_mut().take(address)
     }
 
     /// Hold exactly the store's bonds, all saved.
@@ -196,8 +162,8 @@ impl Bonder {
 
     pub(crate) fn clear(&self) {
         self.peers.borrow_mut().clear();
-        self.refused.clear();
-        self.keys_rejected.clear();
+        self.refused.borrow_mut().clear();
+        self.keys_rejected.borrow_mut().clear();
     }
 }
 
@@ -224,14 +190,14 @@ impl SecurityHandler for Bonder {
             warn!("Bond refused: this link was not opened for pairing");
             return;
         }
-        self.refused.take(link);
+        self.refused.borrow_mut().take(link);
         // The peer chose its identity address. The store refuses one that is
         // not public or random static (a reload would refuse the whole store),
         // so keep no such bond: it would only displace a valid one here.
         // `execute_action` reports the refusal when the link is persisted.
         if !is_identity_address(peer_id.addr) {
             warn!("Bond refused: identity address is not public or random static");
-            self.refused.set(link);
+            self.refused.borrow_mut().set(link);
             return;
         }
         let bond = BondInfo {
@@ -272,7 +238,7 @@ impl SecurityHandler for Bonder {
         // keys sent: it has none for this bridge any more.
         if !encrypts(mode) {
             warn!("peer refused the stored keys");
-            self.keys_rejected.set(conn.peer_address());
+            self.keys_rejected.borrow_mut().set(conn.peer_address());
         }
     }
 

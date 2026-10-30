@@ -1,6 +1,7 @@
 //! Host tests for the bond table: a new pairing never displaces a saved
 //! device's keys, a pairing that is not saved is discarded without touching
 //! saved ones, and a store eviction or Forget drops exactly the keys it names.
+//! Also the per-link flags the security handler keeps for the slot workers.
 
 use super::*;
 
@@ -127,4 +128,30 @@ fn marking_saved_needs_the_exact_bond() {
     assert_eq!(table.saved_len(), 1);
     table.clear();
     assert_eq!(table.iter().count(), 0);
+}
+
+#[test]
+fn a_link_flag_is_reported_once_and_only_for_its_link() {
+    let mut flags = LinkFlags::<u8, 2>::new();
+    assert!(!flags.take(1));
+    flags.set(1);
+    flags.set(1);
+    assert!(!flags.take(2));
+    assert!(flags.take(1));
+    // Taking clears it, and a second `set` of the same link added nothing.
+    assert!(!flags.take(1));
+}
+
+#[test]
+fn link_flags_keep_one_entry_per_connection_and_drop_the_oldest() {
+    let mut flags = LinkFlags::<u8, 2>::new();
+    flags.set(1);
+    flags.set(2);
+    flags.set(3);
+    assert!(!flags.take(1));
+    assert!(flags.take(2));
+    assert!(flags.take(3));
+    flags.set(4);
+    flags.clear();
+    assert!(!flags.take(4));
 }

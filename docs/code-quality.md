@@ -550,8 +550,8 @@ panic path:
   longer than its buffer (`hid_client.rs`);
 - `first_chunk`, `split_first_chunk_mut`, and `split_at_checked` for fixed
   layouts: the keyboard, mouse, and consumer decoders and the record codec;
-- slice patterns, such as `let &[byte] = data else { … }` for the host's LED
-  report in `set_report`;
+- slice patterns, such as `match *data { [byte] => …, _ => None }` for the
+  host's LED report (`KeyboardLeds::from_output_report`);
 - iterators instead of index loops, such as `ad_structures`, which walks the
   advertising data and stops at a zero-length or overrunning structure;
 - types that carry the bound: `encode_address` and `encode_bond` return

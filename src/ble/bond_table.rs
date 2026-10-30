@@ -11,7 +11,9 @@
 //!
 //! Generic over the bond type, with the caller deciding which bonds belong to
 //! one peer, so the policy is host-tested without SoftDevice types; the
-//! firmware's `Bonder` wraps it.
+//! firmware's `Bonder` wraps it. [`LinkFlags`] holds the links whose pairing
+//! or stored keys a security callback found wanting, until the slot worker
+//! asks.
 
 use crate::config::{BLE_MAX_CONNECTIONS, MAX_PAIRED_DEVICES};
 use heapless::Vec;
@@ -131,6 +133,49 @@ impl<B: Copy + PartialEq, const N: usize> BondTable<B, N> {
     /// How many bonds the store holds.
     pub fn saved_len(&self) -> usize {
         self.entries.iter().filter(|e| e.saved).count()
+    }
+}
+
+/// Links a security callback flagged, by peer address, until the slot worker
+/// reads the flag: one entry per connection, and the oldest goes when full.
+pub struct LinkFlags<A, const N: usize> {
+    links: Vec<A, N>,
+}
+
+impl<A: Copy + PartialEq, const N: usize> Default for LinkFlags<A, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<A: Copy + PartialEq, const N: usize> LinkFlags<A, N> {
+    pub const fn new() -> Self {
+        Self { links: Vec::new() }
+    }
+
+    pub fn set(&mut self, link: A) {
+        if self.links.contains(&link) {
+            return;
+        }
+        if self.links.is_full() {
+            self.links.remove(0);
+        }
+        let _ = self.links.push(link);
+    }
+
+    /// Whether `link` was flagged, clearing the flag.
+    pub fn take(&mut self, link: A) -> bool {
+        match self.links.iter().position(|flagged| *flagged == link) {
+            Some(index) => {
+                self.links.remove(index);
+                true
+            }
+            None => false,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.links.clear();
     }
 }
 

@@ -34,12 +34,12 @@ probe, or USB host to close.
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
-| [Verification And Code Quality](#verification-and-code-quality) | 14 | 2 | 0 |
+| [Verification And Code Quality](#verification-and-code-quality) | 15 | 1 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 7 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 28 | 0 |
-| **Total** | **151** | **65** | **20** |
+| **Total** | **152** | **64** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -994,28 +994,29 @@ Host tests, simulation, and code-health work. Context:
   device disappearance during discovery. Accept when deterministic test cases
   assert completion, retry policy, and UI state without relying only on reducer
   tests ([testing](docs/testing.md#known-verification-gaps)).
-- [ ] **P1** **Host tests for the I/O shells.** The connection workers,
+- [x] **P1** **Host tests for the I/O shells.** The connection workers,
   security handler, GATT HID client, USB device, and display driver
   (`src/ble/multi_conn.rs`, `src/ble/slot_worker.rs`, `src/ble/slot_link.rs`,
   `src/ble/bonder.rs`, `src/ble/hid_client.rs`, `src/usb/hid_device.rs`,
-  `src/usb/host_requests.rs`,
-  `src/ui/display.rs`) have no host tests; only the pure modules they call do.
-  The storage shell (`src/storage.rs`) is down to flash I/O and SoftDevice type
-  conversion since the device-store move. Move remaining decisions into
-  hardware-free modules or test the shells against fakes. Accept when each
-  has host tests for its error paths, or the testing guide records why it
-  cannot ([testing](docs/testing.md#modules-without-host-tests)).
-  Progress (2026-10-30): the GATT HID client's decisions (which reports it
-  subscribes to and with which kind, the keyboard LED output, how each Report
-  Map read request ends or fails, and which notifications pass) are in
-  `src/ble/hid_gatt.rs` with 11 host tests, and the slot workers' (the error
-  a link that would not encrypt fails with, and whether a slot reconnects,
-  reports, or resumes a replaced retry once an attempt ends) in
-  `src/ble/slot_policy.rs` with 7, and the coordinator task's report after a
-  connected device's store write in `persist_report` in
-  `src/ble/management.rs` with 2; the testing guide records why the SoftDevice
-  procedures left in `hid_client.rs`, `slot_link.rs`, `slot_worker.rs`, and
-  `multi_conn.rs` are not host-tested.
+  `src/usb/host_requests.rs`, `src/ui/display.rs`) had no host tests; only the
+  pure modules they call did. Done 2026-10-30 by moving the remaining
+  decisions into host-compiled modules, with 22 new host tests: the GATT HID
+  client's (which reports it subscribes to and with which kind, the keyboard
+  LED output, how each Report Map read request ends or fails, and which
+  notifications pass) into `src/ble/hid_gatt.rs`; the slot workers' (the
+  error a link that would not encrypt fails with, and whether a slot
+  reconnects, reports, or resumes a replaced retry once an attempt ends) into
+  `src/ble/slot_policy.rs`; the coordinator task's report after a store write
+  into `persist_report` in `src/ble/management.rs`; the security handler's
+  per-link flags into `LinkFlags` in `src/ble/bond_table.rs`; and the host LED
+  report check into `KeyboardLeds::from_output_report`. For each shell, and
+  for `src/storage.rs`, the testing guide lists what stays untested and why:
+  the code left awaits SoftDevice, `embassy-usb`, or `embassy-nrf` types and
+  calls that build only for the firmware target
+  ([testing](docs/testing.md#modules-without-host-tests),
+  [validation records](docs/validation-records.md#validation-record--2026-10-30-security-handler-and-usb-checks)).
+  The OLED retry after a bus error is the one error path no automated check
+  reaches.
 - [x] **P1** **Host tests for the device store.** The in-memory store moved
   out of the `src/storage.rs` shell on 2026-10-10 into host-compiled modules
   under ADR 0003: `src/storage/devices.rs` (`DeviceList`: fail-closed load,

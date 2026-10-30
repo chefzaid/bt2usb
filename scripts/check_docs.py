@@ -19,10 +19,12 @@ commands  ``mask`` recipes, ``--bin`` and ``--features`` names, and file
 tests     Each Test Map row in ``docs/testing.md`` gives its file's
           ``#[test]`` count, every Rust file with tests has a row, and the
           totals sentence adds up.
+status    The Status At A Glance table in ``TODO.md`` gives each section's
+          done, open, and open P0 item counts, and their totals.
 
 A line ending in ``<!-- check-docs: ignore -->`` is skipped by the config,
-memory, commands, and tests checks, for a sentence that quotes an old value on
-purpose. Validation records (headings that start with "Validation Record")
+memory, commands, tests, and status checks, for a sentence that quotes an old
+value on purpose. Validation records (headings that start with "Validation Record")
 are skipped by the same checks, because they describe the tree as it was.
 """
 
@@ -32,16 +34,17 @@ import argparse
 import sys
 from pathlib import Path
 
-from docs_checks import commands, config, counts, links, memory
+from docs_checks import commands, config, counts, links, memory, status
 from docs_checks.model import Finding, load_documents
 
-CHECKS = ("links", "config", "memory", "commands", "tests")
+CHECKS = ("links", "config", "memory", "commands", "tests", "status")
 RUNNERS = {
     "links": links.check,
     "config": config.check,
     "memory": memory.check,
     "commands": commands.check,
     "tests": counts.check,
+    "status": status.check,
 }
 
 

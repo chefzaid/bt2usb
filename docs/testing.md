@@ -62,7 +62,7 @@ PowerShell, use the direct command.
 | Headless Renode test | `mask sim-test` | `renode-test renode/bt2usb-sim.robot` |
 | Interactive Renode | `mask sim` | `renode renode/bt2usb-sim.resc` |
 | Release helper tests | — | `python -m unittest discover -s scripts -p "release*_test.py" -v` |
-| Markdown links, constants, memory map, commands, and test counts | `mask docs-check` | `python scripts/check_docs.py`, and its tests with `python -m unittest discover -s scripts -p "check_docs_test.py" -v` |
+| Markdown links, constants, memory map, commands, test counts, and the plan's status table | `mask docs-check` | `python scripts/check_docs.py`, and its tests with `python -m unittest discover -s scripts -p "check_docs_test.py" -v` |
 | Format check | `mask fmt-check` | `cargo fmt --package bt2usb -- --check` |
 | API documentation, every build, warnings denied | `mask rustdoc-check` | `cargo doc --locked --no-deps --document-private-items` with `RUSTDOCFLAGS=-D warnings`, once per build ([commands](code-quality.md#documentation-comments)) |
 | Workflow lint | — | `actionlint` |
@@ -890,7 +890,8 @@ Not yet first-class:
 - USB conformance captures and a peripheral/host/hub compatibility matrix
 - soak, latency, and reconnect-time measurements
 - documentation checks beyond links, the configuration table, named
-  constants, the memory map, commands, and the Test Map's test counts: prose
+  constants, the memory map, commands, the Test Map's test counts, and the
+  plan's status table: prose
   values without a constant's name, test counts in prose, sizes, and coverage
   figures are checked by hand
   ([Markdown checks](code-quality.md#markdown-checks))

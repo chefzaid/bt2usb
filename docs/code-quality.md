@@ -270,9 +270,9 @@ modules carry `///` comments that state units, bounds, and error meanings.
 | --- | --- | --- |
 | Line endings | [.gitattributes](../.gitattributes) forces LF for shell scripts, `maskfile.md`, Renode files, Rust, TOML, linker scripts, Markdown, JSON, and YAML | Enforced by Git when files are committed and checked out |
 | `.github/workflows/ci.yml` | actionlint 1.7.12 in the Linux host job, which passes each `run:` script to the pinned ShellCheck 0.11.0 | Enforced |
-| Python: `scripts/release.py` with `scripts/release_sbom.py` and `scripts/release_image.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 30 release-helper, 27 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
+| Python: `scripts/release.py` with `scripts/release_sbom.py` and `scripts/release_image.py`, `scripts/check_docs.py` with `scripts/docs_checks/`, `scripts/lint_scripts.py`, and their tests | Ruff 0.16.9 lint and format check ([Python And Shell Checks](#python-and-shell-checks)); 30 release-helper, 29 documentation-checker, and 7 script-linter unit tests; no type checker | Enforced |
 | `scripts/*.sh`, `.devcontainer/post-create.sh`, Bash recipes in `maskfile.md` | ShellCheck 0.11.0 ([Python And Shell Checks](#python-and-shell-checks)) | Enforced |
-| Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, commands, and the Test Map's test counts ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
+| Markdown: `docs/`, the root guides, `maskfile.md`, the issue templates, and the vendored patch README | `scripts/check_docs.py` in the Linux host job: links, the configuration table, inline constants, the memory map, commands, the Test Map's test counts, and the plan's status table ([Markdown Checks](#markdown-checks)) | Enforced for what it covers; other figures are checked by hand |
 | Renode `.robot`, `.resc`, `.repl`, `.cs` | Exercised by the Renode job, which compiles the C# models when it loads them; not linted | Partial |
 
 ### Markdown Checks
@@ -290,9 +290,10 @@ both what the document says and what the repository has.
 | `memory` | A memory-map table row (Application flash, Pairing/bond storage, Application RAM, and the other region labels in [hardware](hardware.md#memory-layout) and [ADR 0010](adr/0010-static-memory-layout.md)) whose range or KiB size differs from `memory_sd.x`, `memory_sim.x`, and the storage constants; a code-formatted address range that starts at a region's first address but ends elsewhere; and "pages N–M" near the words pairing, bond, or storage that differ from `STORAGE_FLASH_PAGE_START`/`COUNT` |
 | `commands` | `mask <name>` in code with no such recipe, `--bin` or `--features` names that `Cargo.toml` does not define, and a code-formatted path (with a directory, or a `.rs` file name) that matches no tracked file |
 | `tests` | A row of the [Test Map](testing.md#test-map) whose first link names a file and whose count is not that file's number of lines containing `#[test]`; a Rust file under `src/` or `tests/` with a test but no row; and the Test Map's sentence "The tree holds N `#[test]` functions: M in files compiled into the host library, K in `tests/…`" when N, M, or a K disagrees ([counts.py](../scripts/docs_checks/counts.py)) |
+| `status` | A row of the [Status At A Glance](../TODO.md#status-at-a-glance) table in `TODO.md` whose done, open, or open P0 count differs from the top-level `- [x]` and `- [ ]` items under that `##` section (open P0 means an open item marked `**P0**`), a section with items but no row, and a Total row that differs from the sums ([status.py](../scripts/docs_checks/status.py)) |
 
-Two kinds of text are exempt from the `config`, `memory`, `commands`, and
-`tests` checks, because they quote the tree as it was: everything under a heading that
+Two kinds of text are exempt from the `config`, `memory`, `commands`,
+`tests`, and `status` checks, because they quote the tree as it was: everything under a heading that
 starts with "Validation Record", and a line ending in
 `<!-- check-docs: ignore -->`. A proposed ADR is exempt from the path check,
 since it names files it would add. File names that may appear although no

@@ -8,6 +8,21 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-10-30, Plan Status Check
+
+This record covers the commit that checks off the P2 item "Check the Status
+At A Glance counts" in [TODO.md](../TODO.md#documentation): a `status` check
+in the new `scripts/docs_checks/status.py` counts the done, open, and open P0
+items under each `##` section of the plan and compares them with the table.
+No firmware code changes.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Checker on the tree | `python3 scripts/check_docs.py` | Passed, with the six checks over 49 Markdown files |
+| Mutant | In the real table, the FIXME row deleted, Documentation's open count raised by one, and the total open P0 raised by one, then restored | Failed with `FIXME has items but no row`, `Documentation has 1 open items, not 2`, and `the plan has 20 open P0 items, not 21` |
+| Checker tests | `python3 -m unittest discover -s scripts -p "check_docs_test.py"` | 29 passed, 1 new: a section without a row, then wrong done, open P0, and total counts |
+| Script linters | `python3 scripts/lint_scripts.py` | Passed: Ruff over 18 Python files, ShellCheck over 3 shell scripts and 36 recipes |
+
 ## Validation Record — 2026-10-30, Test Count Check
 
 This record covers the commit that checks off the P2 item "Check the Test

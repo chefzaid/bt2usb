@@ -445,13 +445,14 @@ echo "All documentation builds are free of warnings."
 
 ## docs-check
 
-> Check the Markdown guides' links, documented constants, memory map, commands, and test counts
+> Check the Markdown guides' links, documented constants, memory map, commands, test counts, and plan status table
 
 Runs [scripts/check_docs.py](scripts/check_docs.py) over every tracked
 Markdown file and its unit tests. A broken link or anchor, a value that
 disagrees with `src/config.rs` or the linker scripts, an unknown `mask` recipe,
-binary, or feature, a file path that no longer exists, or a Test Map test
-count that disagrees with the tree fails the task, with the file and line of
+binary, or feature, a file path that no longer exists, a Test Map test
+count that disagrees with the tree, or a TODO.md status count that disagrees
+with its items fails the task, with the file and line of
 each finding.
 
 ```bash

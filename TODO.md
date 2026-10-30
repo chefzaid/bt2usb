@@ -37,9 +37,9 @@ probe, or USB host to close.
 | [Verification And Code Quality](#verification-and-code-quality) | 17 | 1 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
-| [Documentation](#documentation) | 8 | 1 | 0 |
+| [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 0 | 32 | 0 |
-| **Total** | **156** | **69** | **20** |
+| **Total** | **157** | **68** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1459,11 +1459,15 @@ Guides, ADRs, and this plan. Context:
   count in the real guide failed it
   ([Markdown checks](docs/code-quality.md#markdown-checks),
   [validation record](docs/validation-records.md#validation-record--2026-10-30-test-count-check)).
-- [ ] **P2** **Check the Status At A Glance counts.** The table at the top of
+- [x] **P2** **Check the Status At A Glance counts.** The table at the top of
   this plan is kept by hand and must change with every item checked or added.
   Accept when the documentation checker fails on a section whose done, open,
   or open P0 count differs from its items, and on a wrong total, with a
-  regression test ([Markdown checks](docs/code-quality.md#markdown-checks)).
+  regression test. Done 2026-10-30: the `status` check in
+  `scripts/docs_checks/status.py`, with a regression test; wrong counts in
+  the real table failed it
+  ([Markdown checks](docs/code-quality.md#markdown-checks),
+  [validation record](docs/validation-records.md#validation-record--2026-10-30-plan-status-check)).
 
 ## Product Extensions
 

@@ -453,6 +453,28 @@ class CheckDocsTests(unittest.TestCase):
             ],
         )
 
+    def test_status_counts(self):
+        self.write(
+            "TODO.md",
+            "# Plan\n\n## Status At A Glance\n\n| Section | Done | Open | Open P0 |\n"
+            "| --- | ---: | ---: | ---: |\n| [A](#a) | 1 | 1 | 1 |\n"
+            "| **Total** | **1** | **2** | **1** |\n\n## A\n\n- [x] **P1** Done.\n"
+            "- [ ] **P0** Open.\n  - [ ] A nested line.\n\n## B\n\n- [ ] **P2** B.\n",
+        )
+        missing = "TODO.md:3: B has items but no row"
+        self.assertEqual(self.messages("status"), [missing])
+        self.edit("TODO.md", "| 1 | 1 | 1 |", "| 2 | 1 | 0 |")
+        self.edit("TODO.md", "**2** |", "**3** |")
+        self.assertEqual(
+            self.messages("status"),
+            [
+                missing,
+                "TODO.md:7: A has 1 done items, not 2",
+                "TODO.md:7: A has 1 open P0 items, not 0",
+                "TODO.md:8: the plan has 2 open items, not 3",
+            ],
+        )
+
     def test_main_reports_and_exits(self):
         output = io.StringIO()
         with contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):

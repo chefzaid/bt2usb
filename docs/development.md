@@ -286,7 +286,7 @@ On Windows, use WSL/Bash for mask tasks or run Cargo directly in PowerShell.
 | `mask release-build` | Build the release images byte for byte as a release does |
 | `mask doc` | Generate embedded API documentation |
 | `mask rustdoc-check` | Check every rustdoc build with warnings denied, as CI does |
-| `mask docs-check` | Check Markdown links, documented constants, memory map, and commands |
+| `mask docs-check` | Check Markdown links, documented constants, memory map, commands, test counts, and the plan's status table |
 | `mask lint-scripts` | Lint the Python helpers, shell scripts, and recipes with Ruff and ShellCheck |
 
 The [mask command reference](#mask-command-reference) below lists every
@@ -390,7 +390,7 @@ keeps the SoftDevice. The scenario and assertions are described in
 | `mask size` | `cargo size --locked --features embedded --target <arm> --release --bin bt2usb -- -A` | Per-section sizes of the release bridge; needs cargo-binutils and the LLVM tools component |
 | `mask bloat` | `cargo bloat --locked --features embedded --target <arm> --release --bin bt2usb -n 30` | The 30 largest functions |
 | `mask doc` | `cargo doc --locked --features embedded --target <arm> --open` | Firmware API documentation, dependencies included, for reading. Warnings are not denied here |
-| `mask docs-check` | `python3 -m unittest discover -s scripts -p "check_docs_test.py"`, then `python3 scripts/check_docs.py` (or `python` where `python3` is missing) | Fails with `path:line: [check] message` for each broken link or anchor, value that disagrees with `config.rs` or the linker scripts, unknown recipe, binary, or feature, and missing file ([code quality](code-quality.md#markdown-checks)) |
+| `mask docs-check` | `python3 -m unittest discover -s scripts -p "check_docs_test.py"`, then `python3 scripts/check_docs.py` (or `python` where `python3` is missing) | Fails with `path:line: [check] message` for each broken link or anchor, value that disagrees with `config.rs` or the linker scripts, unknown recipe, binary, or feature, missing file, wrong Test Map count, and wrong plan status count ([code quality](code-quality.md#markdown-checks)) |
 | `mask rustdoc-check` | With `RUSTDOCFLAGS="-D warnings"`, `cargo doc --locked --no-deps --document-private-items` for `--lib`, for `--features embedded --target <arm> --lib`, for `--features embedded --target <arm> --bin bt2usb --bin bt2usb-selftest`, and for `--features sim --target <arm> --bin bt2usb-sim` | The same four builds CI checks ([code quality](code-quality.md#documentation-comments)); fails on the first warning |
 
 ### Environment Setup

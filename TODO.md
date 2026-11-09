@@ -900,10 +900,11 @@ Getting firmware onto real boards and recording what works. Context:
   [first-flash.md](docs/first-flash.md)).
 - [x] Fix self-test flash ownership and pairing-record buffer capacity; reject
   combined firmware/simulation features (`src/selftest.rs`, `build.rs`).
-- [x] Prototype hardware brief for a hardware partner: block diagram, pin map,
-  schematic outline, bill of materials, power, USB, antenna, SWD access,
-  enclosure, acceptance on delivery, and open questions
-  ([hardware-brief.md](docs/hardware-brief.md), 2026-11-09). The
+- [x] Custom board requirements for a hardware partner: block diagram, pin
+  map, schematic outline, bill of materials, supply modes, USB, antenna, SWD
+  access, enclosure, acceptance on delivery, and open questions
+  ([hardware: custom board](docs/hardware.md#custom-board), 2026-11-09; first
+  written as a separate brief, merged into the hardware guide the same day). The
   board it describes feeds the open "Production hardware definition" item
   below.
 - [ ] **P0** **First board bring-up.** *(hardware)* Install S140 v7.3.0, run

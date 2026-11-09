@@ -7,11 +7,10 @@ supplies, and flash layout. There are no implemented ESP32, RP2040, or STM32 por
 This guide is the reference for what the firmware expects from the hardware:
 parts, wiring, electrical behavior of the buttons and display, power, clocks
 and radio settings, compile-time configuration, the memory map, and what to
-change for another nRF52840 board. Bring-up steps are in
+change for another nRF52840 board, and what a hardware partner needs to
+build a [custom board](#custom-board). Bring-up steps are in
 [first flash](first-flash.md); the byte formats stored in flash are in the
-[data model](data-model.md); the requirements for a custom prototype board,
-written for a hardware partner, are in the
-[prototype hardware brief](hardware-brief.md).
+[data model](data-model.md).
 
 No hardware acceptance record is committed yet (see the validation record in
 [testing](testing.md)). Statements below about pins, clocks and memory come
@@ -34,7 +33,7 @@ first-flash run covers them.
 | Jumper wires | As needed | Female-to-female or to the DK headers | OLED SDA, SCL, VDD, GND; external buttons if used |
 | BLE peripherals | Up to 2 active, 4 stored | BLE HID-over-GATT keyboard and mouse | Bluetooth Classic devices are not supported |
 | Host side | 1 each | PC; monitor with a USB hub | The hub's upstream cable goes to the PC; hub power behavior affects the bridge (see [Power](#power)) |
-| Enclosure | Optional | Board-specific | No enclosure design is maintained in this repository; the requirements for one are in the [prototype hardware brief](hardware-brief.md#enclosure) |
+| Enclosure | Optional | Board-specific | No enclosure design is maintained in this repository; the requirements for one are under [Enclosure](#enclosure) |
 
 ### Wiring
 
@@ -47,6 +46,23 @@ first-flash run covers them.
 | OLED SCL | P0.27 | SSD1306 SCL |
 | OLED power | VDD / GND | The board's I/O supply rail and common ground; not a 5 V rail |
 | USB D+/D− | Native USB connector | Routed on the DK; no jumper wiring |
+
+```text
+   nRF52840-DK                                0.96" SSD1306 I2C module
+ ┌───────────────────────┐                   ┌──────────────────┐
+ │ VDD  ─────────────────┼───────────────────┤ VCC              │
+ │ GND  ─────────────────┼───────────┬───────┤ GND              │
+ │ P0.26 ────────────────┼───────────┼───────┤ SDA              │
+ │ P0.27 ────────────────┼───────────┼───────┤ SCL              │
+ │                       │           │       └──────────────────┘
+ │ P0.11 (Button 1) ─────┼──[UP]─────┤
+ │ P0.12 (Button 2) ─────┼──[DOWN]───┤      external buttons optional:
+ │ P0.24 (Button 3) ─────┼──[SELECT]─┘      the DK's buttons 1–3 are
+ │                       │                  already on these pins
+ │ nRF USB (J3) ─────────┼──► PC or monitor hub (data cable)
+ │ Debugger USB (J2) ────┼──► PC used for flashing
+ └───────────────────────┘
+```
 
 The firmware's pin assignments are instantiated in [main.rs](../src/main.rs),
 [selftest.rs](../src/selftest.rs), and [sim.rs](../src/sim.rs). The comments in
@@ -237,19 +253,31 @@ Hub and DK considerations:
 - Record the supply arrangement with the hardware acceptance evidence, as
   [testing](testing.md#hardware-acceptance-evidence) requires.
 
-A board can supply the nRF52840 in either of its two modes. In
-normal-voltage mode, as on the nRF52840-DK, an external 3.3 V regulator feeds
-VDD with VDDH tied to it, and `REGOUT0` has no effect. In high-voltage mode
-5 V goes into VDDH and the chip's REG0 makes VDD at the voltage UICR
-`REGOUT0` selects; an erased UICR selects 1.8 V, too low for the OLED module.
-The bridge and the self-test therefore set `reg0_voltage` to 3.3 V before
-`embassy_nrf::init`, which writes `REGOUT0` on the first boot after a UICR
-erase and resets once ([security](security.md#physical-access-and-debug-port)).
-VDD is wrong for the first few milliseconds of that boot only, before `init`
-runs. A UICR that already holds a lower voltage cannot be raised without an
-erase; `init` then logs `Failed to set regulator voltage` and VDD stays low.
-Which mode a partner-built board uses is in the
-[prototype hardware brief](hardware-brief.md#supply-mode).
+### Supply Mode
+
+The nRF52840 can be supplied two ways, and the firmware supports both:
+
+- **Normal-voltage mode (recommended).** An external 3.3 V regulator feeds
+  VDD and VDDH is tied to VDD. This is how the nRF52840-DK is supplied, and
+  VDD is 3.3 V from the first instant whatever UICR holds; `REGOUT0` has no
+  effect.
+- **High-voltage mode.** VBUS (5 V) goes into VDDH and the chip's REG0 makes
+  VDD at the voltage UICR `REGOUT0` selects, so no external regulator is
+  needed. An erased UICR selects 1.8 V, too low for the OLED module, so the
+  bridge and the self-test set `reg0_voltage` to 3.3 V before
+  `embassy_nrf::init`, which writes `REGOUT0` on the first boot after a UICR
+  erase and resets once ([security](security.md#physical-access-and-debug-port)).
+  VDD is 1.8 V only for the few milliseconds before `init` runs on that boot.
+  REG0 supplies at most 25 mA to circuits outside the chip (nRF52840 product
+  specification), which covers the OLED; check a module's datasheet for its
+  own limit. A UICR that already holds a lower voltage, for example from a
+  module maker's test firmware, cannot be raised without an erase; `init` then
+  logs `Failed to set regulator voltage` and VDD stays low until a full chip
+  erase.
+
+Either way the OLED and the I2C pull-ups run from VDD, and nothing on the
+board takes VBUS directly except the regulator (if fitted), VDDH (in
+high-voltage mode), and the nRF52840 VBUS pin.
 
 ## Clocks And Radio
 
@@ -450,6 +478,308 @@ The simulation build has no SoftDevice and owns the whole device:
 | Flash ([memory_sim.x](../memory_sim.x)) | `0x00000000–0x00100000` | 1024 KiB |
 | RAM | `0x20000000–0x20040000` | 256 KiB |
 
+## Custom Board
+
+This section is what a hardware partner needs to design and build a bt2usb
+board that runs the firmware unchanged: requirements, a schematic outline, a
+bill of materials, layout, debug access, enclosure, delivery checks and the
+questions still open. It builds on the sections above, which say how the
+firmware uses each part; it does not repeat them. No custom board exists yet,
+and the [first-flash checklist](first-flash.md) is its acceptance test
+([TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance)).
+
+The product is a small bus-powered box on a monitor's USB hub or a KVM. It
+connects up to two Bluetooth LE keyboards and mice and presents them to the
+computer as a wired USB keyboard, mouse and media-control device, so they work
+in the BIOS and follow the hub or KVM to the selected computer, with no
+Bluetooth or software on the computer ([features](features.md)).
+
+| Responsibility | Hardware partner | Firmware owner |
+| --- | --- | --- |
+| Schematic, PCB layout, fabrication, assembly, part sourcing | Yes | Reviews against this section |
+| Enclosure design and parts | Yes | Reviews fit and button feel |
+| Electrical check of each unit | Yes, see [Acceptance On Delivery](#acceptance-on-delivery) | — |
+| SoftDevice S140 and firmware programming | No; ship blank | Yes, over SWD |
+| Functional test | No | `mask selftest`, then [first flash](first-flash.md) |
+
+### Block Diagram
+
+```mermaid
+flowchart LR
+    subgraph HOST[Computer side]
+        PC[PC or monitor USB hub / KVM]
+    end
+    subgraph BOARD[bt2usb board]
+        USBC[USB Type-C receptacle<br/>USB 2.0 full speed]
+        ESD[ESD protection<br/>D+ D- VBUS]
+        LDO[3.3 V LDO<br/>VBUS 5 V in]
+        MOD[nRF52840 module<br/>BLE 5 radio + antenna<br/>native USB, 1 MB flash, 256 KB RAM]
+        OLED[SSD1306 128x64 OLED<br/>I2C 0x3C]
+        BTN[3 tactile buttons<br/>UP DOWN SELECT]
+        SWD[SWD header<br/>flashing and debug]
+    end
+    KB[BLE keyboard]
+    MS[BLE mouse]
+    PC <-->|USB cable| USBC
+    USBC --- ESD
+    ESD -->|VBUS 5 V| LDO
+    ESD -->|VBUS sense| MOD
+    ESD <-->|D+ D-| MOD
+    LDO -->|3V3| MOD
+    LDO -->|3V3| OLED
+    MOD <-->|I2C SDA P0.26, SCL P0.27| OLED
+    BTN -->|P0.11, P0.12, P0.24 to GND| MOD
+    SWD <-->|SWDIO, SWDCLK, RESET P0.18| MOD
+    KB -.->|2.4 GHz BLE| MOD
+    MS -.->|2.4 GHz BLE| MOD
+```
+
+### Board Requirements
+
+| Area | Requirement | Details |
+| --- | --- | --- |
+| MCU | nRF52840, package QIAA (aQFN73), on a pre-certified module | [Module Choice](#module-choice), [Memory Layout](#memory-layout) |
+| Chip revision | Revision 3 (build code F or later) preferred | [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md), still Proposed |
+| Radio | Antenna integrated in the module; 0 dBm, no amplifier | [Antenna And RF](#antenna-and-rf), [Clocks And Radio](#clocks-and-radio) |
+| Crystals | 32 MHz HFXO, ±40 ppm or better (inside the module); no 32.768 kHz crystal needed | [Clocks And Radio](#clocks-and-radio) |
+| Supply | USB VBUS only; 3.3 V regulator into VDD with VDDH tied to VDD, or 5 V into VDDH | [Supply Mode](#supply-mode) |
+| USB | Native nRF52840 USB 2.0 full speed; VBUS to the nRF52840 VBUS pin | [USB Connection](#usb-connection), [Board Power And USB](#board-power-and-usb) |
+| Display | SSD1306 128×64 I2C module at `0x3C`, powered from VDD | [OLED Display](#oled-display) |
+| Buttons | Three normally open switches, each from its GPIO to GND, no other parts | [Buttons](#buttons) |
+| Debug | SWD reachable without desoldering; no bootloader | [Debug And Flash Access](#debug-and-flash-access) |
+| Enclosure | Plastic, OLED window, three actuators, USB-C opening | [Enclosure](#enclosure) |
+
+### Module Choice
+
+A pre-certified module keeps its radio approvals and avoids an RF matching
+design. Every nRF52840 has 1 MB of flash and 256 KB of RAM, so the choice is
+about the module's antenna and pin breakout:
+
+| Module | Antenna | Notes |
+| --- | --- | --- |
+| Raytac MDBT50Q-1MV2 | Chip antenna | Preferred example; breaks out USB D+, D−, VBUS and most GPIOs |
+| Raytac MDBT50Q-P1MV2 | PCB antenna | Same family |
+| Ebyte E73-2G4M08S1C | PCB antenna | Check that USB and VBUS are broken out |
+| Minew MS88SF2 | Chip antenna | Check the GPIO breakout |
+
+The module's datasheet must show the USB D+, D− and VBUS pins, VDD and VDDH
+(or its supply mode), SWDIO, SWDCLK and P0.18, and the GPIOs in the
+[wiring table](#wiring). If a GPIO is not broken out, propose another free one
+and change it as the [porting checklist](#porting-to-another-nrf52840-board)
+describes. A preloaded bootloader or test firmware does not matter, because
+the firmware owner erases the whole chip over SWD. A chip-down design needs
+Nordic's reference circuit (crystal, DEC1 to DEC6 decoupling, RF matching,
+antenna), an RF layout review and its own certification, and is not
+recommended for a prototype.
+
+### Board Pin Map
+
+The button and display pins are in the [wiring table](#wiring). The board adds:
+
+| Signal | nRF52840 pin | Connect to | Notes |
+| --- | --- | --- | --- |
+| USB_DP | D+ | Connector D+ (A6 and B6 on Type-C) | 90 Ω differential, short, no series resistors |
+| USB_DM | D− | Connector D− (A7 and B7 on Type-C) | As above |
+| VBUS | VBUS | Connector VBUS after ESD | Required for USB to start |
+| SWDIO, SWDCLK | SWDIO, SWDCLK | SWD connector | — |
+| nRESET | P0.18 | SWD connector, optional reset switch to GND | Kept as the pin reset ([pin usage](#pin-and-peripheral-usage)) |
+| TP1, TP2 | P0.06, P0.08 | Optional test pads | Unused by the bridge; useful for a debug UART |
+
+Leave P0.00 and P0.01 (32.768 kHz crystal), P0.09 and P0.10 (NFC) and P0.18
+free of anything that drives them. No LED is driven by the firmware; a power
+LED on VDD is optional at 1 mA or less.
+
+### Schematic Outline
+
+Part values are recommendations; equivalents are acceptable. The circuit is
+drawn for normal-voltage mode; for high-voltage mode, leave out U3, C2 to C4
+and connect VBUS_5V to VDDH as well as VBUS ([Supply Mode](#supply-mode)).
+
+#### Power And USB Circuit
+
+```text
+ USB-C receptacle (16-pin, USB 2.0)
+ ┌──────────────┐
+ │ VBUS A4/A9/  ├──┬──[F1 PTC 500 mA, optional]──┬───────────────► VBUS_5V
+ │      B4/B9   │  │                             │
+ │ CC1  A5      ├──┼──[R1 5.1 kΩ]── GND          ├──[C1 4.7 µF]── GND   (≤ 10 µF total on VBUS)
+ │ CC2  B5      ├──┼──[R2 5.1 kΩ]── GND          │
+ │ D+   A6, B6  ├──┼───────┬──────────────────────────────────────► USB_DP (to nRF D+)
+ │ D−   A7, B7  ├──┼───────┼──┬───────────────────────────────────► USB_DM (to nRF D−)
+ │ GND  A1/A12/ ├──┴─ GND  │  │
+ │      B1/B12  │          │  │
+ │ SHIELD       ├──[R 1 MΩ ∥ C 4.7 nF]── GND   (or direct to GND, partner's choice)
+ └──────────────┘          │  │
+                        ┌──┴──┴──┐
+                        │  U2    │  USBLC6-2SC6 ESD array: I/O1 = D+, I/O2 = D−,
+                        │  ESD   │  VBUS pin = VBUS_5V, GND = GND
+                        └────────┘
+
+ VBUS_5V ──┬─────────────────────────────────────► nRF52840 VBUS pin
+           │
+           └──► U3 AP2112K-3.3 (or equivalent, ≥ 300 mA, ≤ 6 V in)
+                IN ── C2 1 µF ── GND
+                EN ── tied to IN
+                OUT ──┬── C3 1 µF ── GND
+                      ├── C4 10 µF ── GND
+                      └──────────────► 3V3 rail
+
+ 3V3 ──► nRF52840 VDD and VDDH (tied together: normal-voltage mode),
+         module decoupling per its datasheet,
+         OLED VCC, I2C pull-ups, SWD VTref
+```
+
+#### MCU, Buttons, Display And Debug Circuit
+
+```text
+                       nRF52840 module (U1)
+                  ┌───────────────────────────┐
+ 3V3 ────────────►│ VDD, VDDH                 │
+ VBUS_5V ────────►│ VBUS                      │
+ USB_DP ◄────────►│ D+                        │
+ USB_DM ◄────────►│ D−                        │
+                  │                      P0.11├──── SW1 (UP) ────── GND
+                  │                      P0.12├──── SW2 (DOWN) ──── GND
+                  │                      P0.24├──── SW3 (SELECT) ── GND
+                  │                      P0.26├──┬─────────────────► OLED SDA
+                  │                      P0.27├──┼──┬──────────────► OLED SCL
+                  │                           │  R4 R5 4.7 kΩ to 3V3 (may be DNP)
+ SWD J2 pin 2 ◄──►│ SWDIO                     │
+ SWD J2 pin 4 ───►│ SWDCLK                    │
+ SWD J2 pin 10 ──►│ P0.18 / nRESET       P0.06├──── TP1 (optional test pad)
+                  │                      P0.08├──── TP2 (optional test pad)
+ GND ────────────►│ GND (all pads)            │
+                  └───────────────────────────┘
+
+ OLED J3 (4-pin, 2.54 mm, or soldered module): GND, VCC = 3V3, SCL, SDA
+   Pin order differs between OLED modules: match the chosen module's
+   silkscreen, never assume VCC-GND or GND-VCC.
+
+ SWD J2, ARM Cortex 10-pin 1.27 mm (2×5) or Tag-Connect TC2030-NL footprint:
+   1 VTref (3V3)   2 SWDIO
+   3 GND           4 SWDCLK
+   5 GND           6 SWO (NC)
+   7 KEY (NC)      8 NC
+   9 GND          10 nRESET (P0.18)
+```
+
+The buttons need no resistors or capacitors. Use switches rated for at least
+50,000 cycles, because SELECT is pressed often. The firmware uses the LDO
+regulators, not the DC/DC converters, so DC/DC inductors may be left
+unfitted on a chip-down design.
+
+### Board Power And USB
+
+The firmware's power behavior and the 100 mA declaration are under
+[Power](#power); current draw is unmeasured but expected well below 100 mA.
+
+| Item | Requirement |
+| --- | --- |
+| Input | USB VBUS, 4.4–5.25 V |
+| Regulator (normal-voltage mode) | 3.3 V, at least 300 mA, input rating at least 6 V |
+| VBUS capacitance | 10 µF or less before the regulator (USB inrush limit) |
+| Connector | USB Type-C receptacle, USB 2.0 only, 5.1 kΩ pull-downs on CC1 and CC2 so C-to-C cables supply power |
+| Cable | One data-capable USB-C to USB-A cable per unit; a charge-only cable fails enumeration |
+| ESD | Low-capacitance TVS array on D+, D− and VBUS next to the connector |
+| Routing | D+/D− as a 90 Ω differential pair, matched length, no stubs, continuous ground under it |
+
+### Antenna And RF
+
+- Follow the module maker's reference layout: antenna end at the board edge,
+  the copper keep-out on every layer as drawn, and ground stitching vias
+  along the module's ground pads.
+- Keep the USB connector, the OLED and any metal out of the keep-out.
+- The bridge often sits on a monitor's metal back: put the antenna at the end
+  of the case away from the mounting face, and use a plastic case with no
+  metal paint or metallized label over it.
+- No NFC antenna is fitted. No range or coexistence measurement exists yet.
+
+### Debug And Flash Access
+
+All programming and recovery uses SWD. Each board needs a Tag-Connect
+TC2030-NL footprint (preferred, no part fitted) or a 2×5 1.27 mm ARM Cortex
+header with the pinout above, reachable through a cover, slot or screws; VTref
+on VDD; and USB power while it is programmed. The partner must not program
+anything, enable readout protection or write UICR; the firmware owner erases
+the chip, installs the SoftDevice and flashes
+([first flash](first-flash.md#1-softdevice-once-per-board)). One SWD probe
+that `probe-rs` supports, such as a SEGGER J-Link EDU Mini or a CMSIS-DAP
+probe, and a TC2030-CTX-NL cable if that footprint is used, are needed per
+order.
+
+### Custom Board Bill Of Materials
+
+Per unit, for normal-voltage mode. The requirement column holds where a
+partner substitutes parts.
+
+| Ref | Qty | Part | Example part number | Requirement |
+| --- | ---: | --- | --- | --- |
+| U1 | 1 | nRF52840 module | Raytac MDBT50Q-1MV2 | See [Module Choice](#module-choice) |
+| U2 | 1 | USB ESD array | ST USBLC6-2SC6 | Low capacitance on D+/D−, VBUS clamp |
+| U3 | 1 | 3.3 V LDO | Diodes AP2112K-3.3TRG1 | ≥ 300 mA, ≤ 6 V input; not fitted in high-voltage mode |
+| J1 | 1 | USB Type-C receptacle, 16-pin, USB 2.0 | GCT USB4105-GF-A | Through-hole shell tabs for strength |
+| J2 | 1 | SWD footprint or header | TC2030-NL footprint, or Samtec FTSH-105-01-L-DV-K | ARM 10-pin pinout |
+| J3 | 1 | OLED connection | 4-pin 2.54 mm header, or the module soldered on | Matches the module's pin order |
+| DS1 | 1 | OLED module | 0.96" 128×64 SSD1306 I2C, 4-pin | Address `0x3C`, runs from 3.3 V |
+| SW1–SW3 | 3 | Tactile switch | C&K PTS645SM43SMTR92 LFS | Normally open, ≥ 50,000 cycles |
+| R1, R2 | 2 | 5.1 kΩ 1% 0402 | Any | Type-C CC pull-downs |
+| R4, R5 | 2 | 4.7 kΩ 0402 | Any | I2C pull-ups to VDD, may be left unfitted |
+| C1 | 1 | 4.7 µF 10 V X5R 0603 | Any | VBUS bulk |
+| C2, C3 | 2 | 1 µF 10 V X5R 0402 | Any | LDO input and output |
+| C4 | 1 | 10 µF 10 V X5R 0603 | Any | VDD bulk |
+| — | — | Module decoupling | Per U1 datasheet | As the module maker specifies |
+| F1 | 1 | PTC fuse 500 mA, optional | Any 0805/1206 | VBUS protection |
+| — | 1 | PCB | 2 or 4 layers, 1.0–1.6 mm FR-4 | Module reference layout |
+| — | 1 | Enclosure set | Partner design | See [Enclosure](#enclosure) |
+| — | 1 | USB-C to USB-A cable, 1 m | Any | Data-capable |
+
+### Enclosure
+
+| Item | Requirement |
+| --- | --- |
+| Material | ABS, PC or PC/ABS; no metal over the antenna |
+| Size | As small as the board allows; partner proposes dimensions |
+| Display | Window over the OLED's active area, readable from the front |
+| Buttons | Three actuators in a row by the display, marked UP, DOWN, SELECT (or ▲, ▼, ●) |
+| USB | Opening that fits common cable overmolds, at least 12.5 × 7 mm |
+| Debug access | SWD reachable through a cover, slot or screws, not glue or breaking snap-fits |
+| Mounting | Flat back for an adhesive pad; antenna end away from the mounting face |
+| Labels | Board revision on the silkscreen; button names on the case |
+| Environment | Indoor office use; no ingress rating |
+
+### Acceptance On Delivery
+
+The partner checks every unit: VDD within 3.2–3.4 V on USB power; an SWD
+probe connects (for example `probe-rs info`); SDA, SCL, VCC and GND of the
+OLED reach P0.26, P0.27, VDD and GND; each button shorts its GPIO to GND only
+while pressed; and the antenna keep-out and USB solder joints pass visual
+inspection. The firmware owner then runs `mask selftest` and the
+[first-flash checklist](first-flash.md) and files a
+[hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-result.md).
+
+Deliverables expected from the partner: schematic (PDF and native files),
+layout, Gerbers, drill and pick-and-place files; a BOM with manufacturer part
+numbers and the module revision; the enclosure STEP model; the assembled
+units, cables and probe; and two or three spare bare PCBs.
+
+### Open Questions
+
+| # | Question | Recommendation |
+| ---: | --- | --- |
+| 1 | How many units? | 5 assembled prototypes plus 3 bare PCBs |
+| 2 | Custom PCB, or a ready-made nRF52840 board wired as in [Wiring](#wiring)? | A ready-made board first; a custom PCB on a module after the first-flash run |
+| 3 | USB Type-C receptacle, captive cable, or USB-A plug? | Type-C with a C-to-A cable |
+| 4 | OLED module on a header, or a bare SSD1306 panel on an FPC? | Module for the prototype; a bare panel needs its charge-pump capacitors |
+| 5 | Require nRF52840 revision 3? | Yes, so the [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md) lock policy stays available |
+| 6 | Normal-voltage or high-voltage mode? | Normal-voltage for the prototype; both work ([Supply Mode](#supply-mode)) |
+| 7 | Which module, and which free GPIOs if it lacks a listed one? | Partner proposal against [Module Choice](#module-choice) |
+| 8 | Enclosure colour, finish, labels and mounting | Partner proposal; adhesive pad mounting |
+
+Known gaps that do not block a prototype: current, range and coexistence are
+unmeasured; the production USB identity is not chosen
+([ADR 0018](adr/0018-production-usb-identity.md)); product-level EMC and USB
+compliance testing is not planned.
+
 ## Porting To Another nRF52840 Board
 
 Work through this list for any board other than the nRF52840-DK, then run the
@@ -538,7 +868,6 @@ the additional MCU item in [TODO.md](../TODO.md).
 ## Related Guides
 
 - [First flash](first-flash.md)
-- [Prototype hardware brief](hardware-brief.md)
 - [Architecture and ADRs](architecture.md)
 - [Data model](data-model.md)
 - [Development](development.md)

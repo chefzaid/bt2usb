@@ -1653,7 +1653,6 @@ Links to guides, other ADRs, and TODO.md items.
 - [Features](features.md)
 - [Data Model](data-model.md)
 - [Hardware](hardware.md)
-- [Prototype Hardware Brief](hardware-brief.md)
 - [Development](development.md)
 - [Code Quality](code-quality.md)
 - [Testing](testing.md)

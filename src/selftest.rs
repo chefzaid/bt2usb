@@ -139,6 +139,10 @@ async fn main(spawner: Spawner) {
     let mut nrf_config = embassy_nrf::config::Config::default();
     nrf_config.gpiote_interrupt_priority = Priority::P2;
     nrf_config.time_interrupt_priority = Priority::P2;
+    // A board that feeds 5 V into VDDH runs VDD from REG0, whose erased UICR
+    // REGOUT0 means 1.8 V: too low for the OLED. Ask for 3.3 V; `init` writes
+    // it once and resets. Boards in normal-voltage mode ignore the register.
+    nrf_config.dcdc.reg0_voltage = Some(embassy_nrf::config::Reg0Voltage::_3V3);
     let p = embassy_nrf::init(nrf_config);
     interrupt::USBD.set_priority(Priority::P2);
     interrupt::TWISPI0.set_priority(Priority::P2);

@@ -363,13 +363,14 @@ these UICR words, before the SoftDevice is enabled:
 | `APPROTECT` | `0x5A`, the library's "disabled" value, only on chips whose FICR build code is `F` or later (`APPROTECT_MIN_BUILD_CODE` in `chips/nrf52840.rs`); `init` also writes `0x5A` to the `APPROTECT.DISABLE` register on those chips. Older build codes are left alone | Keeps the SWD debug port open on every boot |
 | `PSELRESET[0]`, `PSELRESET[1]` | `18` (`RESET_PIN`) | P0.18 becomes the pin reset |
 | `NFCPINS` bit 0 | `1` | P0.09 and P0.10 stay in NFC antenna mode; an erased UICR already holds this value |
+| `REGOUT0` bits 0–2 | `5` (3.3 V), because the bridge and the self-test set `reg0_voltage` | REG0 makes 3.3 V on VDD in high-voltage mode instead of the erased value's 1.8 V; no effect in normal-voltage mode ([hardware](hardware.md#power)) |
 
 The library writes a word only when its value differs, and only when the write
 clears bits; a word that would need bits set back to 1 is left unchanged, and
-for `PSELRESET` and `NFCPINS` a warning says to erase UICR. If any word was
+for `PSELRESET`, `NFCPINS` and `REGOUT0` a warning says to erase UICR. If any word was
 written, `init` resets the chip (`SCB::sys_reset`) before returning. The first
-boot after UICR is erased therefore writes `PSELRESET` (and `APPROTECT` on
-build-code `F` or later chips) and resets once, so the boot log shows
+boot after UICR is erased therefore writes `PSELRESET` and `REGOUT0` (and
+`APPROTECT` on build-code `F` or later chips) and resets once, so the boot log shows
 `bt2usb firmware starting` (or `==== bt2usb self-test ====`) twice; later boots
 find the values in place and do not reset. Which build code the development
 boards carry has not been recorded.

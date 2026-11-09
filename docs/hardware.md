@@ -205,7 +205,7 @@ and to stay connected rather than sleep
 | What the states change | Only whether the OLED is on; `LowPower` turns it off | `PowerManager::display_on` |
 | OLED auto-off | After 120 s without activity (the sources are listed below) | `SCREEN_AUTO_OFF_TIMEOUT_SECS` |
 | Declared USB power | 100 mA in the configuration descriptor | [usb/hid_device.rs](../src/usb/hid_device.rs) |
-| Supply regulators | Left as `embassy-nrf` 0.7 configures them by default: the internal LDOs, no DC/DC converter, and UICR `REGOUT0` not written | `main` in [main.rs](../src/main.rs) and [selftest.rs](../src/selftest.rs) |
+| Supply regulators | The internal LDOs, no DC/DC converter; UICR `REGOUT0` set to 3.3 V (`reg0_voltage`), which only a board in high-voltage mode uses | `main` in [main.rs](../src/main.rs) and [selftest.rs](../src/selftest.rs) |
 | Measured current | Not measured; no figure is recorded in this repository | — |
 
 The 100 mA declaration is a budget the host or hub may enforce, not a measured
@@ -237,13 +237,19 @@ Hub and DK considerations:
 - Record the supply arrangement with the hardware acceptance evidence, as
   [testing](testing.md#hardware-acceptance-evidence) requires.
 
-Because `REGOUT0` is never written, a board that feeds 5 V into VDDH
-(high-voltage mode) runs VDD at the erased-UICR default of 1.8 V, too low for
-the OLED module. Boards for this firmware therefore supply VDD from an
-external 3.3 V regulator with VDDH tied to VDD (normal-voltage mode), as the
-nRF52840-DK does; a high-voltage-mode board needs a firmware change that sets
-`reg0_voltage` in the `embassy_nrf` configuration first
-([prototype hardware brief](hardware-brief.md#why-normal-voltage-mode)).
+A board can supply the nRF52840 in either of its two modes. In
+normal-voltage mode, as on the nRF52840-DK, an external 3.3 V regulator feeds
+VDD with VDDH tied to it, and `REGOUT0` has no effect. In high-voltage mode
+5 V goes into VDDH and the chip's REG0 makes VDD at the voltage UICR
+`REGOUT0` selects; an erased UICR selects 1.8 V, too low for the OLED module.
+The bridge and the self-test therefore set `reg0_voltage` to 3.3 V before
+`embassy_nrf::init`, which writes `REGOUT0` on the first boot after a UICR
+erase and resets once ([security](security.md#physical-access-and-debug-port)).
+VDD is wrong for the first few milliseconds of that boot only, before `init`
+runs. A UICR that already holds a lower voltage cannot be raised without an
+erase; `init` then logs `Failed to set regulator voltage` and VDD stays low.
+Which mode a partner-built board uses is in the
+[prototype hardware brief](hardware-brief.md#supply-mode).
 
 ## Clocks And Radio
 
@@ -489,7 +495,9 @@ another board yet.
 - [ ] **USB identity.** Replace the development VID/PID before anything
       leaves the lab ([data model](data-model.md#usb-device-identity)).
 - [ ] **Supply mode.** Feed VDD from a 3.3 V regulator with VDDH tied to VDD,
-      or program `REGOUT0` before using high-voltage mode; see [Power](#power).
+      or 5 V into VDDH; in the second case confirm VDD reads 3.3 V after the
+      first boot and that the log has no `Failed to set regulator voltage`
+      line; see [Power](#power).
 - [ ] **Power.** Measure current with the new board and display, and decide
       whether the 100 mA declaration holds; see [Power](#power).
 - [ ] **Re-verify.** Run `mask selftest`, record the SoftDevice RAM line and

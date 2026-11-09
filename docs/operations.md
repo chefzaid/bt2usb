@@ -122,8 +122,8 @@ bridge firmware, so flash the bridge again afterwards. The
 The main task logs these lines in this order, with no `.await` between them, so
 no other task can interleave. At the release `info` level no other line
 appears between them, except an `embassy-nrf` warning right after
-`reset reason` when UICR already holds a different reset-pin or
-NFC-pin setting ([dependency logs](security.md#dependency-logs)); a local
+`reset reason` when UICR already holds a different reset-pin,
+NFC-pin or regulator-voltage setting ([dependency logs](security.md#dependency-logs)); a local
 `debug` build adds dependency lines. Placeholders are shown as `N`, `X`, and
 `<...>`.
 
@@ -181,8 +181,9 @@ UI and isolated OLED tasks started
   only the regulator status read fails, the line is simply missing; in both
   cases [sd_setup.rs](../src/sd_setup.rs) assumes VBUS is present.
 - On the first boot after UICR was erased, `bt2usb firmware starting` can
-  appear twice: `embassy_nrf::init` writes the reset-pin setting (and, on
-  chips with build code `F` or later, the debug-port setting) to UICR and
+  appear twice: `embassy_nrf::init` writes the reset-pin and regulator-voltage
+  settings (and, on chips with build code `F` or later, the debug-port
+  setting) to UICR and
   resets the chip once before the rest of the sequence, and the second boot
   reports `reset reason: soft reset`. Later boots log it once. This is source-derived, not
   observed on a board; see

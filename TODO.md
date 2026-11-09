@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 56 | 0 | 0 |
+| [FIXME](#fixme) | 57 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 16 | 4 | 2 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -39,7 +39,7 @@ probe, or USB host to close.
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **163** | **63** | **20** |
+| **Total** | **164** | **63** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -201,6 +201,11 @@ two what fixed it; its commit and validation record hold the details.
   `enable_guard` turns other MPU regions off, `StackGuard::is_overflow` counts
   refused data accesses, and the self-test bounds its deliberate overflow
   *(hardware evidence pending)*.
+- [x] **P1** **A board in high-voltage mode would run at 1.8 V.** Nothing
+  programmed UICR `REGOUT0`, whose erased value makes REG0 output 1.8 V, too
+  low for the OLED. The bridge and the self-test now set `reg0_voltage` to
+  3.3 V before `embassy_nrf::init` (`src/main.rs`, `src/selftest.rs`;
+  [hardware](docs/hardware.md#power)) *(hardware evidence pending)*.
 - [x] **P1** **USB never requested the crystal it clocks from.** Neither
   `embassy-nrf` nor the SoftDevice keeps the HFXO running for USB; the bridge
   and the self-test now request it through the SoftDevice at boot
@@ -897,11 +902,8 @@ Getting firmware onto real boards and recording what works. Context:
   combined firmware/simulation features (`src/selftest.rs`, `build.rs`).
 - [x] Prototype hardware brief for a hardware partner: block diagram, pin map,
   schematic outline, bill of materials, power, USB, antenna, SWD access,
-  enclosure, acceptance on delivery, and open questions. Writing it found
-  that the firmware never programs UICR `REGOUT0`, so a high-voltage-mode
-  board would run at 1.8 V; the brief and
-  [hardware](docs/hardware.md#power) now require a 3.3 V regulator with VDDH
-  tied to VDD ([hardware-brief.md](docs/hardware-brief.md), 2026-11-09). The
+  enclosure, acceptance on delivery, and open questions
+  ([hardware-brief.md](docs/hardware-brief.md), 2026-11-09). The
   board it describes feeds the open "Production hardware definition" item
   below.
 - [ ] **P0** **First board bring-up.** *(hardware)* Install S140 v7.3.0, run

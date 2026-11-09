@@ -80,7 +80,7 @@ drops USB ([ADR 0012](adr/0012-bus-powered-no-system-off.md)).
 | Antenna | Integrated in a pre-certified module (chip or PCB antenna) | Keeps the module's FCC/CE/IC grants and avoids an RF matching design |
 | High-frequency crystal | 32 MHz, ±40 ppm or better (inside the module) | USB and the radio both run from it; the firmware requests it at boot |
 | Low-frequency crystal | Not required | The firmware uses the internal RC oscillator; a module that has the 32.768 kHz crystal is fine |
-| Supply | USB VBUS 5 V only; external 3.3 V LDO feeding VDD, nRF52840 in normal-voltage mode | The firmware does not program the internal regulator's output voltage; see [Power](#power-and-usb) |
+| Supply | USB VBUS 5 V only; external 3.3 V LDO feeding VDD, nRF52840 in normal-voltage mode (recommended), or 5 V into VDDH | Both work with the firmware; see [Supply Mode](#supply-mode) |
 | USB | Native nRF52840 USB 2.0 full speed, D+ and D− straight to the connector, VBUS to the nRF52840 VBUS pin | The firmware learns about the cable only from VBUS events |
 | Display | SSD1306 128×64 monochrome OLED, I2C address 0x3C, powered from 3.3 V | Fixed in the firmware ([OLED display](hardware.md#oled-display)) |
 | Buttons | Three normally open momentary switches, each from its GPIO to GND | Internal pull-ups and 50 ms software debounce; no external parts ([buttons](hardware.md#buttons)) |
@@ -233,17 +233,27 @@ The buttons need no resistors or capacitors: the firmware enables the internal
 pull-ups and debounces for 50 ms. Use switches rated for at least 50,000
 cycles because SELECT is pressed often.
 
-### Why Normal-Voltage Mode
+### Supply Mode
 
-The nRF52840 can take 5 V on VDDH and make its own VDD (high-voltage mode).
-In that mode VDD is set by the UICR `REGOUT0` register, which reads 1.8 V on
-an erased chip, and the firmware does not program it (`embassy-nrf` 0.7 leaves
-it alone unless told to). At 1.8 V the OLED module and its pull-ups would not
-work reliably. An external 3.3 V LDO with VDDH tied to VDD avoids the
-question, matches the nRF52840-DK the firmware was developed on, and needs no
-firmware change. If the partner prefers high-voltage mode to save the LDO,
-that is possible after a firmware change that programs `REGOUT0` to 3.3 V;
-raise it as a question first ([hardware: power](hardware.md#power)).
+The nRF52840 can be supplied two ways, and the firmware supports both:
+
+- **Normal-voltage mode (recommended for the prototype).** An external 3.3 V
+  LDO feeds VDD and VDDH is tied to VDD, as drawn above. This is how the
+  nRF52840-DK the firmware was developed on is supplied, and VDD is 3.3 V
+  from the first instant regardless of what UICR holds.
+- **High-voltage mode.** VBUS (5 V) goes into VDDH and the chip's internal
+  REG0 makes VDD, so the external LDO is not fitted. REG0's output is set by
+  the UICR `REGOUT0` register, which is 1.8 V on an erased chip; the firmware
+  sets it to 3.3 V on its first boot and resets once, so VDD is 1.8 V only for
+  the few milliseconds before that. Up to 25 mA may be drawn from VDD in this
+  mode (nRF52840 product specification), which covers the OLED; check the
+  chosen module's datasheet for its own limit. If the module maker programs
+  `REGOUT0` to a lower voltage at their factory, a full chip erase clears it
+  ([hardware: power](hardware.md#power)).
+
+Either way, the 3V3 rail must power the OLED and the I2C pull-ups, and
+nothing on the board may be powered from VBUS directly except the LDO (if
+fitted), VDDH (in high-voltage mode), and the nRF52840 VBUS pin.
 
 The firmware uses the LDO regulators, not the DC/DC converters. A module that
 already fits the DC/DC inductors is fine; a chip-down design may leave them
@@ -427,7 +437,7 @@ For the partner to answer:
 | # | Question |
 | ---: | --- |
 | 8 | Which nRF52840 module do you propose, and does it break out every pin in the [pin map](#pin-map)? If not, which free GPIOs would you use instead? |
-| 9 | Do you see a reason to use high-voltage mode instead of the 3.3 V LDO? It needs a firmware change ([Why Normal-Voltage Mode](#why-normal-voltage-mode)) |
+| 9 | Do you prefer high-voltage mode (no LDO) over the 3.3 V LDO? Both work with the firmware ([Supply Mode](#supply-mode)) |
 | 10 | Lead time and cost for the prototype quantity, and for a later small batch (for example 50 or 100) |
 | 11 | Can the delivered modules be guaranteed to be nRF52840 revision 3? |
 | 12 | Any concern with the antenna placement in your enclosure design? |

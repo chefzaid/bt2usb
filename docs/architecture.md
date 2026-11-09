@@ -1556,6 +1556,7 @@ change.
 - [ADR 0026: Guard The Bottom Of The Stack With An MPU Region](adr/0026-mpu-stack-guard.md)
 - [ADR 0027: Fuzz The Parsers With A Seeded In-Tree Harness On The Stable Toolchain](adr/0027-seeded-parser-fuzzing.md)
 - [ADR 0028: Build Release Images Reproducibly And Hold Them To Size Budgets](adr/0028-reproducible-budgeted-release-images.md)
+- [ADR 0029: Build The Rev A Board On A Certified nRF52840 Module With The Firmware's Pin Map](adr/0029-rev-a-board-on-a-certified-module.md)
 
 ## Proposed ADRs
 

@@ -33,13 +33,13 @@ probe, or USB host to close.
 | [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
-| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 3 | 5 | 3 |
+| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 4 | 6 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **164** | **63** | **20** |
+| **Total** | **165** | **64** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -904,7 +904,21 @@ Getting firmware onto real boards and recording what works. Context:
   map, schematic outline, bill of materials, supply modes, USB, antenna, SWD
   access, enclosure, acceptance on delivery, and open questions
   ([hardware: custom board](docs/hardware.md#custom-board), 2026-11-09; first
-  written as a separate brief, merged into the hardware guide the same day). The
+  written as a separate brief, merged into the hardware guide the same day).
+- [x] Rev A board design in KiCad: a Raytac MDBT50Q-1MV2 module on the
+  firmware's pin map, USB-C with ESD, a 3.3 V LDO, OLED header, three
+  buttons and an SWD header on a 74 × 32 mm two-layer board, with Gerbers,
+  drill, BOM and placement files. KiCad 7 DRC is clean and the netlist
+  matches the pin map (`hardware/bt2usb-board`,
+  [hardware: KiCad project](docs/hardware.md#kicad-project-rev-a),
+  [ADR 0029](docs/adr/0029-rev-a-board-on-a-certified-module.md); 2026-11-09).
+- [ ] **P1** **Review and build the rev A board.** *(hardware)* Run ERC and
+  DRC in KiCad 8 or 9, compare the module footprint with Raytac's drawing,
+  confirm the OLED module's pin order, tidy the USB pair, then order a few
+  assembled boards ([where to build it](docs/hardware.md#where-to-build-it)).
+  Accept when the review findings are fixed and one rev A board has a
+  first-flash record; that record also serves "Production hardware
+  definition" if rev A is the chosen board. The
   board it describes feeds the open "Production hardware definition" item
   below.
 - [ ] **P0** **First board bring-up.** *(hardware)* Install S140 v7.3.0, run

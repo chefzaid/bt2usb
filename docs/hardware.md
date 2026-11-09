@@ -480,13 +480,15 @@ The simulation build has no SoftDevice and owns the whole device:
 
 ## Custom Board
 
-This section is what a hardware partner needs to design and build a bt2usb
-board that runs the firmware unchanged: requirements, a schematic outline, a
-bill of materials, layout, debug access, enclosure, delivery checks and the
-questions still open. It builds on the sections above, which say how the
-firmware uses each part; it does not repeat them. No custom board exists yet,
-and the [first-flash checklist](first-flash.md) is its acceptance test
-([TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance)).
+This section is the bt2usb board that runs the firmware unchanged: its
+requirements, the rev A KiCad design and production files, debug access,
+enclosure, delivery checks, the questions still open, and where to have it
+made. It builds on the sections above, which say how the firmware uses each
+part; it does not repeat them. Rev A is designed but not yet built or
+reviewed by a second person, and the [first-flash checklist](first-flash.md)
+is its acceptance test
+([TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance),
+[ADR 0029](adr/0029-rev-a-board-on-a-certified-module.md)).
 
 The product is a small bus-powered box on a monitor's USB hub or a KVM. It
 connects up to two Bluetooth LE keyboards and mice and presents them to the
@@ -496,7 +498,8 @@ Bluetooth or software on the computer ([features](features.md)).
 
 | Responsibility | Hardware partner | Firmware owner |
 | --- | --- | --- |
-| Schematic, PCB layout, fabrication, assembly, part sourcing | Yes | Reviews against this section |
+| Schematic and PCB layout | Reviews rev A for manufacturability | Owns the [KiCad project](#kicad-project-rev-a) |
+| Fabrication, assembly, part sourcing | Yes, from the [production files](#kicad-project-rev-a) | Reviews substitutions |
 | Enclosure design and parts | Yes | Reviews fit and button feel |
 | Electrical check of each unit | Yes, see [Acceptance On Delivery](#acceptance-on-delivery) | — |
 | SoftDevice S140 and firmware programming | No; ship blank | Yes, over SWD |
@@ -583,90 +586,64 @@ The button and display pins are in the [wiring table](#wiring). The board adds:
 | VBUS | VBUS | Connector VBUS after ESD | Required for USB to start |
 | SWDIO, SWDCLK | SWDIO, SWDCLK | SWD connector | — |
 | nRESET | P0.18 | SWD connector, optional reset switch to GND | Kept as the pin reset ([pin usage](#pin-and-peripheral-usage)) |
-| TP1, TP2 | P0.06, P0.08 | Optional test pads | Unused by the bridge; useful for a debug UART |
+| TP1, TP2 | P0.06, P0.08 | Test pads | Unused by the bridge; useful for a debug UART |
+| TP3, TP4, TP5 | — | Test pads | 3V3, VBUS and GND, for the [delivery checks](#acceptance-on-delivery) |
 
 Leave P0.00 and P0.01 (32.768 kHz crystal), P0.09 and P0.10 (NFC) and P0.18
 free of anything that drives them. No LED is driven by the firmware; a power
 LED on VDD is optional at 1 mA or less.
 
-### Schematic Outline
+### KiCad Project (Rev A)
 
-Part values are recommendations; equivalents are acceptable. The circuit is
-drawn for normal-voltage mode; for high-voltage mode, leave out U3, C2 to C4
-and connect VBUS_5V to VDDH as well as VBUS ([Supply Mode](#supply-mode)).
+The board is a KiCad project in `hardware/bt2usb-board`, drawn with KiCad
+7.0.11; KiCad 8 and 9 open it and convert it on save.
 
-#### Power And USB Circuit
+| File | Contents |
+| --- | --- |
+| `hardware/bt2usb-board/bt2usb-board.kicad_pro` | Project, with the design rules below |
+| `hardware/bt2usb-board/bt2usb-board.kicad_sch` | Schematic, one A4 sheet, with design notes |
+| `hardware/bt2usb-board/bt2usb-board.kicad_pcb` | Placed and routed two-layer board |
+| `hardware/bt2usb-board/bt2usb-board-schematic.pdf` | Schematic as PDF, for reading without KiCad |
+| `hardware/bt2usb-board/fab/bt2usb-board-gerbers.zip` | Gerbers (copper, mask, paste, silkscreen, outline), Excellon drill file and drill map |
+| `hardware/bt2usb-board/fab/bt2usb-board-bom.csv` | Bill of materials with manufacturer part numbers |
+| `hardware/bt2usb-board/fab/bt2usb-board-placement.csv` | Pick-and-place file, origin at the bottom-left board corner |
+| `hardware/bt2usb-board/images/top.png`, `bottom.png` | Copper and silkscreen of each side |
 
-```text
- USB-C receptacle (16-pin, USB 2.0)
- ┌──────────────┐
- │ VBUS A4/A9/  ├──┬──[F1 PTC 500 mA, optional]──┬───────────────► VBUS_5V
- │      B4/B9   │  │                             │
- │ CC1  A5      ├──┼──[R1 5.1 kΩ]── GND          ├──[C1 4.7 µF]── GND   (≤ 10 µF total on VBUS)
- │ CC2  B5      ├──┼──[R2 5.1 kΩ]── GND          │
- │ D+   A6, B6  ├──┼───────┬──────────────────────────────────────► USB_DP (to nRF D+)
- │ D−   A7, B7  ├──┼───────┼──┬───────────────────────────────────► USB_DM (to nRF D−)
- │ GND  A1/A12/ ├──┴─ GND  │  │
- │      B1/B12  │          │  │
- │ SHIELD       ├──[R 1 MΩ ∥ C 4.7 nF]── GND   (or direct to GND, partner's choice)
- └──────────────┘          │  │
-                        ┌──┴──┴──┐
-                        │  U2    │  USBLC6-2SC6 ESD array: I/O1 = D+, I/O2 = D−,
-                        │  ESD   │  VBUS pin = VBUS_5V, GND = GND
-                        └────────┘
+![Rev A, top side](../hardware/bt2usb-board/images/top.png)
 
- VBUS_5V ──┬─────────────────────────────────────► nRF52840 VBUS pin
-           │
-           └──► U3 AP2112K-3.3 (or equivalent, ≥ 300 mA, ≤ 6 V in)
-                IN ── C2 1 µF ── GND
-                EN ── tied to IN
-                OUT ──┬── C3 1 µF ── GND
-                      ├── C4 10 µF ── GND
-                      └──────────────► 3V3 rail
+| Property | Rev A |
+| --- | --- |
+| Size | 74 × 32 mm, two layers, 1.6 mm FR-4 recommended |
+| Rules | Track 0.2 mm signals and 0.3 mm power, 0.15 mm minimum; clearance 0.15 mm; vias 0.6 mm on 0.3 mm drill; copper to edge 0.3 mm; copper to hole 0.18 mm, which the USB connector's own footprint needs |
+| Layout | USB-C on the left edge, the OLED header along the top with the module hanging over the supply parts, buttons in a column right of the display, the module on the right with its antenna at the board edge and a keep-out on both layers to the edge, SWD header below the module, two M2 holes |
+| Ground | A ground pour on both layers; the bottom is an almost unbroken plane under the USB pair |
+| Supply | Normal-voltage mode ([Supply Mode](#supply-mode)): U3 makes 3.3 V, VDDH tied to VDD |
+| OLED | Soldered to J3, which expects GND, VCC, SCL, SDA from pin 1; check the module's order |
 
- 3V3 ──► nRF52840 VDD and VDDH (tied together: normal-voltage mode),
-         module decoupling per its datasheet,
-         OLED VCC, I2C pull-ups, SWD VTref
-```
+What has been checked: KiCad's DRC reports no violations, no unconnected
+items and no library footprint issues, and the schematic's netlist
+matches the [pin map](#board-pin-map) and the firmware's pins pin for pin.
+What has not: KiCad's electrical rules check (ERC), which KiCad 7's command
+line cannot run; a second person's review; and any built board. The traces
+were placed by an automatic grid router, so they are correct but not
+tidy. Before ordering:
 
-#### MCU, Buttons, Display And Debug Circuit
+- [ ] Open the project in KiCad 8 or 9, run ERC and DRC, and fix anything new.
+- [ ] Compare the module footprint with Raytac's current MDBT50Q-1MV2 drawing,
+      and confirm the OLED module's pin order and hole spacing against J3.
+- [ ] Tidy the USB D+/D− pair: about 55 mm long on the top layer over the
+      bottom plane, side by side but not impedance-controlled. Full-speed USB
+      tolerates this; shorter is better.
+- [ ] Check the enclosure fit: the OLED rides about 2.5 mm above the board on
+      its header and covers the supply parts, so nothing under it may be taller.
 
-```text
-                       nRF52840 module (U1)
-                  ┌───────────────────────────┐
- 3V3 ────────────►│ VDD, VDDH                 │
- VBUS_5V ────────►│ VBUS                      │
- USB_DP ◄────────►│ D+                        │
- USB_DM ◄────────►│ D−                        │
-                  │                      P0.11├──── SW1 (UP) ────── GND
-                  │                      P0.12├──── SW2 (DOWN) ──── GND
-                  │                      P0.24├──── SW3 (SELECT) ── GND
-                  │                      P0.26├──┬─────────────────► OLED SDA
-                  │                      P0.27├──┼──┬──────────────► OLED SCL
-                  │                           │  R4 R5 4.7 kΩ to 3V3 (may be DNP)
- SWD J2 pin 2 ◄──►│ SWDIO                     │
- SWD J2 pin 4 ───►│ SWDCLK                    │
- SWD J2 pin 10 ──►│ P0.18 / nRESET       P0.06├──── TP1 (optional test pad)
-                  │                      P0.08├──── TP2 (optional test pad)
- GND ────────────►│ GND (all pads)            │
-                  └───────────────────────────┘
-
- OLED J3 (4-pin, 2.54 mm, or soldered module): GND, VCC = 3V3, SCL, SDA
-   Pin order differs between OLED modules: match the chosen module's
-   silkscreen, never assume VCC-GND or GND-VCC.
-
- SWD J2, ARM Cortex 10-pin 1.27 mm (2×5) or Tag-Connect TC2030-NL footprint:
-   1 VTref (3V3)   2 SWDIO
-   3 GND           4 SWDCLK
-   5 GND           6 SWO (NC)
-   7 KEY (NC)      8 NC
-   9 GND          10 nRESET (P0.18)
-```
+To order, upload the Gerber zip to the fab, and for assembled boards add the
+BOM and placement file. The OLED module, the cable and the probe are bought
+separately (see [Bill Of Materials](#custom-board-bill-of-materials)).
 
 The buttons need no resistors or capacitors. Use switches rated for at least
 50,000 cycles, because SELECT is pressed often. The firmware uses the LDO
-regulators, not the DC/DC converters, so DC/DC inductors may be left
-unfitted on a chip-down design.
+regulators, not the DC/DC converters.
 
 ### Board Power And USB
 
@@ -696,42 +673,30 @@ The firmware's power behavior and the 100 mA declaration are under
 
 ### Debug And Flash Access
 
-All programming and recovery uses SWD. Each board needs a Tag-Connect
-TC2030-NL footprint (preferred, no part fitted) or a 2×5 1.27 mm ARM Cortex
-header with the pinout above, reachable through a cover, slot or screws; VTref
-on VDD; and USB power while it is programmed. The partner must not program
+All programming and recovery uses SWD. Rev A has J2, a 2×5 1.27 mm ARM Cortex
+debug header that a J-Link or CMSIS-DAP 10-pin cable plugs into: pin 1 VTref
+(3.3 V), 2 SWDIO, 4 SWCLK, 10 nRESET (P0.18), 3, 5 and 9 GND, 6 and 8 not
+connected, 7 key. The enclosure must leave it reachable through a cover, slot
+or screws, and the board is powered from USB while it is programmed. The partner must not program
 anything, enable readout protection or write UICR; the firmware owner erases
 the chip, installs the SoftDevice and flashes
 ([first flash](first-flash.md#1-softdevice-once-per-board)). One SWD probe
 that `probe-rs` supports, such as a SEGGER J-Link EDU Mini or a CMSIS-DAP
-probe, and a TC2030-CTX-NL cable if that footprint is used, are needed per
-order.
+probe, is needed per order.
 
 ### Custom Board Bill Of Materials
 
-Per unit, for normal-voltage mode. The requirement column holds where a
-partner substitutes parts.
+The parts placed on the board, with manufacturer part numbers, are in
+`hardware/bt2usb-board/fab/bt2usb-board-bom.csv`. The passives are generic
+0603 parts; ceramic capacitors are X5R or X7R rated 10 V or more. Also needed
+per unit, and not in that file:
 
-| Ref | Qty | Part | Example part number | Requirement |
-| --- | ---: | --- | --- | --- |
-| U1 | 1 | nRF52840 module | Raytac MDBT50Q-1MV2 | See [Module Choice](#module-choice) |
-| U2 | 1 | USB ESD array | ST USBLC6-2SC6 | Low capacitance on D+/D−, VBUS clamp |
-| U3 | 1 | 3.3 V LDO | Diodes AP2112K-3.3TRG1 | ≥ 300 mA, ≤ 6 V input; not fitted in high-voltage mode |
-| J1 | 1 | USB Type-C receptacle, 16-pin, USB 2.0 | GCT USB4105-GF-A | Through-hole shell tabs for strength |
-| J2 | 1 | SWD footprint or header | TC2030-NL footprint, or Samtec FTSH-105-01-L-DV-K | ARM 10-pin pinout |
-| J3 | 1 | OLED connection | 4-pin 2.54 mm header, or the module soldered on | Matches the module's pin order |
-| DS1 | 1 | OLED module | 0.96" 128×64 SSD1306 I2C, 4-pin | Address `0x3C`, runs from 3.3 V |
-| SW1–SW3 | 3 | Tactile switch | C&K PTS645SM43SMTR92 LFS | Normally open, ≥ 50,000 cycles |
-| R1, R2 | 2 | 5.1 kΩ 1% 0402 | Any | Type-C CC pull-downs |
-| R4, R5 | 2 | 4.7 kΩ 0402 | Any | I2C pull-ups to VDD, may be left unfitted |
-| C1 | 1 | 4.7 µF 10 V X5R 0603 | Any | VBUS bulk |
-| C2, C3 | 2 | 1 µF 10 V X5R 0402 | Any | LDO input and output |
-| C4 | 1 | 10 µF 10 V X5R 0603 | Any | VDD bulk |
-| — | — | Module decoupling | Per U1 datasheet | As the module maker specifies |
-| F1 | 1 | PTC fuse 500 mA, optional | Any 0805/1206 | VBUS protection |
-| — | 1 | PCB | 2 or 4 layers, 1.0–1.6 mm FR-4 | Module reference layout |
-| — | 1 | Enclosure set | Partner design | See [Enclosure](#enclosure) |
-| — | 1 | USB-C to USB-A cable, 1 m | Any | Data-capable |
+| Item | Requirement |
+| --- | --- |
+| OLED module | 0.96" 128×64 SSD1306 I2C, 4-pin, address `0x3C`, runs from 3.3 V |
+| PCB | Rev A Gerbers, 1.6 mm FR-4, two layers |
+| Enclosure set | See [Enclosure](#enclosure) |
+| Cable | USB-C to USB-A, 1 m, data-capable |
 
 ### Enclosure
 
@@ -757,10 +722,9 @@ inspection. The firmware owner then runs `mask selftest` and the
 [first-flash checklist](first-flash.md) and files a
 [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-result.md).
 
-Deliverables expected from the partner: schematic (PDF and native files),
-layout, Gerbers, drill and pick-and-place files; a BOM with manufacturer part
-numbers and the module revision; the enclosure STEP model; the assembled
-units, cables and probe; and two or three spare bare PCBs.
+Deliverables expected from the partner: manufacturability findings on rev A
+before building; the module revision used; the enclosure STEP model; the
+assembled units, cables and probe; and two or three spare bare PCBs.
 
 ### Open Questions
 
@@ -768,11 +732,11 @@ units, cables and probe; and two or three spare bare PCBs.
 | ---: | --- | --- |
 | 1 | How many units? | 5 assembled prototypes plus 3 bare PCBs |
 | 2 | Custom PCB, or a ready-made nRF52840 board wired as in [Wiring](#wiring)? | A ready-made board first; a custom PCB on a module after the first-flash run |
-| 3 | USB Type-C receptacle, captive cable, or USB-A plug? | Type-C with a C-to-A cable |
+| 3 | USB Type-C receptacle, captive cable, or USB-A plug? | Type-C with a C-to-A cable, as in rev A |
 | 4 | OLED module on a header, or a bare SSD1306 panel on an FPC? | Module for the prototype; a bare panel needs its charge-pump capacitors |
 | 5 | Require nRF52840 revision 3? | Yes, so the [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md) lock policy stays available |
 | 6 | Normal-voltage or high-voltage mode? | Normal-voltage for the prototype; both work ([Supply Mode](#supply-mode)) |
-| 7 | Which module, and which free GPIOs if it lacks a listed one? | Partner proposal against [Module Choice](#module-choice) |
+| 7 | Keep rev A's Raytac MDBT50Q-1MV2? | Yes; another module needs a new footprint and a pin check against [Module Choice](#module-choice) |
 | 8 | Enclosure colour, finish, labels and mounting | Partner proposal; adhesive pad mounting |
 
 Known gaps that do not block a prototype: current, range and coexistence are
@@ -794,8 +758,8 @@ Europe. Order a custom board only after that run passes.
 **A custom board is built from production files,** not from this section:
 the schematic, the PCB layout as Gerbers and drill files, a bill of materials
 with manufacturer part numbers, and a pick-and-place file. The fabs below
-build to those files and offer no design work. The KiCad project for this
-board is the source of those files once it exists.
+build to those files and offer no design work. Rev A's are in
+`hardware/bt2usb-board/fab` ([KiCad Project](#kicad-project-rev-a)).
 
 | Service | Where | Assembled boards | Parts sourcing | Turnaround | Notes |
 | --- | --- | --- | --- | --- | --- |

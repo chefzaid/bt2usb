@@ -805,13 +805,6 @@ board is the source of those files once it exists.
 | [PCBWay](https://www.pcbway.com/pcb-assembly.html) | China | The quote form starts at 5 boards | Sources from DigiKey, Mouser, Arrow and Avnet | 3 to 5 days for assembly, plus shipping | Signs an NDA on request. Its [sponsorship](https://www.pcbway.com/project/sponsor/learnsponsor.aspx) gives a coupon for bare PCBs to approved non-profit projects; assembly and delivery are not covered |
 | [Seeed Fusion](https://www.seeedstudio.com/fusion_pcb.html) | China | "From one to thousands" | Its Open Parts Library and purchasing | About 7 days for assembly | Free DFM/DFA review and free functional testing |
 
-No established service builds a custom board free of charge. The only free
-offer found is PCBWay's bare-board coupon above. A free design-and-build
-offer from an unknown company is a reason for caution, not a bargain. The
-firmware and this guide are public under the GPL, so a fab receives nothing
-that is not already published; keep a custom PCB design out of the public
-repository only if it should stay private.
-
 ## Porting To Another nRF52840 Board
 
 Work through this list for any board other than the nRF52840-DK, then run the

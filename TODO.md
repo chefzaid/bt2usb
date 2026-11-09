@@ -33,13 +33,13 @@ probe, or USB host to close.
 | [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
-| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 2 | 5 | 3 |
+| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 3 | 5 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **162** | **63** | **20** |
+| **Total** | **163** | **63** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -895,6 +895,15 @@ Getting firmware onto real boards and recording what works. Context:
   [first-flash.md](docs/first-flash.md)).
 - [x] Fix self-test flash ownership and pairing-record buffer capacity; reject
   combined firmware/simulation features (`src/selftest.rs`, `build.rs`).
+- [x] Prototype hardware brief for a hardware partner: block diagram, pin map,
+  schematic outline, bill of materials, power, USB, antenna, SWD access,
+  enclosure, acceptance on delivery, and open questions. Writing it found
+  that the firmware never programs UICR `REGOUT0`, so a high-voltage-mode
+  board would run at 1.8 V; the brief and
+  [hardware](docs/hardware.md#power) now require a 3.3 V regulator with VDDH
+  tied to VDD ([hardware-brief.md](docs/hardware-brief.md), 2026-11-09). The
+  board it describes feeds the open "Production hardware definition" item
+  below.
 - [ ] **P0** **First board bring-up.** *(hardware)* Install S140 v7.3.0, run
   `mask selftest`, then run the bridge on an nRF52840-DK with the documented
   wiring, one BLE keyboard, one BLE mouse, a direct host connection, and then a

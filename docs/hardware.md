@@ -9,7 +9,9 @@ parts, wiring, electrical behavior of the buttons and display, power, clocks
 and radio settings, compile-time configuration, the memory map, and what to
 change for another nRF52840 board. Bring-up steps are in
 [first flash](first-flash.md); the byte formats stored in flash are in the
-[data model](data-model.md).
+[data model](data-model.md); the requirements for a custom prototype board,
+written for a hardware partner, are in the
+[prototype hardware brief](hardware-brief.md).
 
 No hardware acceptance record is committed yet (see the validation record in
 [testing](testing.md)). Statements below about pins, clocks and memory come
@@ -32,7 +34,7 @@ first-flash run covers them.
 | Jumper wires | As needed | Female-to-female or to the DK headers | OLED SDA, SCL, VDD, GND; external buttons if used |
 | BLE peripherals | Up to 2 active, 4 stored | BLE HID-over-GATT keyboard and mouse | Bluetooth Classic devices are not supported |
 | Host side | 1 each | PC; monitor with a USB hub | The hub's upstream cable goes to the PC; hub power behavior affects the bridge (see [Power](#power)) |
-| Enclosure | Optional | Board-specific | No enclosure design is maintained in this repository |
+| Enclosure | Optional | Board-specific | No enclosure design is maintained in this repository; the requirements for one are in the [prototype hardware brief](hardware-brief.md#enclosure) |
 
 ### Wiring
 
@@ -203,6 +205,7 @@ and to stay connected rather than sleep
 | What the states change | Only whether the OLED is on; `LowPower` turns it off | `PowerManager::display_on` |
 | OLED auto-off | After 120 s without activity (the sources are listed below) | `SCREEN_AUTO_OFF_TIMEOUT_SECS` |
 | Declared USB power | 100 mA in the configuration descriptor | [usb/hid_device.rs](../src/usb/hid_device.rs) |
+| Supply regulators | Left as `embassy-nrf` 0.7 configures them by default: the internal LDOs, no DC/DC converter, and UICR `REGOUT0` not written | `main` in [main.rs](../src/main.rs) and [selftest.rs](../src/selftest.rs) |
 | Measured current | Not measured; no figure is recorded in this repository | — |
 
 The 100 mA declaration is a budget the host or hub may enforce, not a measured
@@ -233,6 +236,14 @@ Hub and DK considerations:
   firmware cannot detect how the board is powered.
 - Record the supply arrangement with the hardware acceptance evidence, as
   [testing](testing.md#hardware-acceptance-evidence) requires.
+
+Because `REGOUT0` is never written, a board that feeds 5 V into VDDH
+(high-voltage mode) runs VDD at the erased-UICR default of 1.8 V, too low for
+the OLED module. Boards for this firmware therefore supply VDD from an
+external 3.3 V regulator with VDDH tied to VDD (normal-voltage mode), as the
+nRF52840-DK does; a high-voltage-mode board needs a firmware change that sets
+`reg0_voltage` in the `embassy_nrf` configuration first
+([prototype hardware brief](hardware-brief.md#why-normal-voltage-mode)).
 
 ## Clocks And Radio
 
@@ -477,6 +488,8 @@ another board yet.
       values.
 - [ ] **USB identity.** Replace the development VID/PID before anything
       leaves the lab ([data model](data-model.md#usb-device-identity)).
+- [ ] **Supply mode.** Feed VDD from a 3.3 V regulator with VDDH tied to VDD,
+      or program `REGOUT0` before using high-voltage mode; see [Power](#power).
 - [ ] **Power.** Measure current with the new board and display, and decide
       whether the 100 mA declaration holds; see [Power](#power).
 - [ ] **Re-verify.** Run `mask selftest`, record the SoftDevice RAM line and
@@ -517,6 +530,7 @@ the additional MCU item in [TODO.md](../TODO.md).
 ## Related Guides
 
 - [First flash](first-flash.md)
+- [Prototype hardware brief](hardware-brief.md)
 - [Architecture and ADRs](architecture.md)
 - [Data model](data-model.md)
 - [Development](development.md)

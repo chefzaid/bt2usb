@@ -54,6 +54,7 @@ chosen by who reads it:
 | `docs/architecture.md` | Design reviewers: runtime architecture, constraints, the ADR process, and the ADR index |
 | `docs/data-model.md` | Anyone changing a persisted format or a contract: the pairing store, the USB device identity, the HID report contracts, task channels and internal message contracts, error tags and the UI messages they map to, the UI state model, data ownership, and schema change rules |
 | `docs/hardware.md` | Builders: parts and wiring, buttons, OLED, USB, power, clocks and radio, compile-time configuration, the memory map, and porting to another nRF52840 board |
+| `docs/hardware-brief.md` | A hardware partner building prototype boards: block diagram, pin map, schematic outline, bill of materials, power, antenna, debug access, enclosure, and open questions, added 2026-11-09; it cites `hardware.md` for how the firmware uses the hardware |
 | `docs/development.md` | Contributors: toolchain, build configurations and log levels, commands, devcontainer and WSL, and how to make a change |
 | `docs/code-quality.md` | Contributors and reviewers: the quality gates every change passes, lint and unsafe-code policy, coverage policy, dependency hygiene, size budgets, and the review checklist |
 | `docs/testing.md` | Contributors and release reviewers: verification layers, how to run tests and coverage, and CI |

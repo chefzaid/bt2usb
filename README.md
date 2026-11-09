@@ -23,6 +23,7 @@ works today is in [Features](docs/features.md); every task, done and open, is in
 
 - [Features and how to use it](docs/features.md)
 - [Hardware, wiring and configuration](docs/hardware.md)
+- [Prototype hardware brief for a hardware partner](docs/hardware-brief.md)
 - [First flash: board bring-up checklist](docs/first-flash.md)
 - [Architecture overview and ADR index](docs/architecture.md)
 - [Data model reference](docs/data-model.md)

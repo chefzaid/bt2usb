@@ -780,6 +780,38 @@ unmeasured; the production USB identity is not chosen
 ([ADR 0018](adr/0018-production-usb-identity.md)); product-level EMC and USB
 compliance testing is not planned.
 
+### Where To Build It
+
+Checked on 2026-11-09 from each service's own pages; prices, minimums and
+programs change, so confirm in the quote tool before ordering.
+
+**A first test unit needs no factory.** An nRF52840-DK, an SSD1306 module, and
+jumper wires wired as in [Wiring](#wiring) run the firmware unchanged and are
+what the [first-flash checklist](first-flash.md) is written for. They are sold
+by the usual distributors (Mouser, DigiKey, Farnell) with delivery within
+Europe. Order a custom board only after that run passes.
+
+**A custom board is built from production files,** not from this section:
+the schematic, the PCB layout as Gerbers and drill files, a bill of materials
+with manufacturer part numbers, and a pick-and-place file. The fabs below
+build to those files and offer no design work. The KiCad project for this
+board is the source of those files once it exists.
+
+| Service | Where | Assembled boards | Parts sourcing | Turnaround | Notes |
+| --- | --- | --- | --- | --- | --- |
+| [AISLER](https://aisler.net/products) | Europe (AISLER B.V.; ships from Germany) | From one board | Through its Simple Supply service, from the major distributors | About 6 business days for assembly; bare boards in 1 business day, in sets of three | First choice for a single assembled prototype made in Europe |
+| [Eurocircuits PCB Proto](https://www.eurocircuits.com/pcb-assembly-proto/) | Belgium, European factories | 1 to 5 boards, no minimum order charge | All components sourced by Eurocircuits; customer may supply the rest | About 6 working days (3 build, 3 assembly) | Publishes a non-disclosure agreement |
+| [JLCPCB](https://jlcpcb.com/solutions/pcb-prototype-assembly) | China | Minimum 2 boards | Large in-stock part library, global sourcing, or consigned parts | Assembly in 1 to 3 days, plus shipping | Lowest price; parts outside its stock take 9 to 15 days |
+| [PCBWay](https://www.pcbway.com/pcb-assembly.html) | China | The quote form starts at 5 boards | Sources from DigiKey, Mouser, Arrow and Avnet | 3 to 5 days for assembly, plus shipping | Signs an NDA on request. Its [sponsorship](https://www.pcbway.com/project/sponsor/learnsponsor.aspx) gives a coupon for bare PCBs to approved non-profit projects; assembly and delivery are not covered |
+| [Seeed Fusion](https://www.seeedstudio.com/fusion_pcb.html) | China | "From one to thousands" | Its Open Parts Library and purchasing | About 7 days for assembly | Free DFM/DFA review and free functional testing |
+
+No established service builds a custom board free of charge. The only free
+offer found is PCBWay's bare-board coupon above. A free design-and-build
+offer from an unknown company is a reason for caution, not a bargain. The
+firmware and this guide are public under the GPL, so a fab receives nothing
+that is not already published; keep a custom PCB design out of the public
+repository only if it should stay private.
+
 ## Porting To Another nRF52840 Board
 
 Work through this list for any board other than the nRF52840-DK, then run the

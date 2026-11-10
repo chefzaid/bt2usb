@@ -8,6 +8,55 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-11-10, Rev A Design Review
+
+This record covers the commit that reviews the rev A board in
+`hardware/bt2usb-board` ([ADR 0029](adr/0029-rev-a-board-on-a-certified-module.md))
+and checks off the review half of "Review and build the rev A board" in
+[TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance). No firmware
+changed. The checks ran in KiCad 9.0.9 from the official `kicad/kicad:9.0`
+container image, with its own symbol and footprint libraries. The datasheets
+read were Raytac's MDBT50Q specification in two editions (Version B of
+2018-06-12, and the Version A approval sheet of 2023-12-27 filed with an FCC
+application), Diodes' AP2112 datasheet (DS39724 Rev. 2-2), and the pinouts
+of the other parts. Raytac's land-pattern, keep-out and reference-circuit
+drawings are images in those files and could not be read; raytac.com could
+not be reached from this environment.
+
+The review changed the design:
+
+| Change | Why |
+| --- | --- |
+| Board regenerated from KiCad 9's libraries, each pad's net taken from the schematic's netlist | KiCad 9 DRC on the KiCad 7 board found 18 footprints that differ from the library, a renamed switch footprint, and 47 parity findings for unconnected pads without their schematic net names |
+| C2 (1 µF) moved from the LDO input to the module's VBUS pin | The nearest VBUS capacitance was about 40 mm from pin 32 |
+| C7 (100 nF) added at the ESD array's VBUS pin | The clamp had no local capacitor |
+| J3 changed from a pin header to a 1×4 socket | Soldered on its header, the OLED module's board sat 2.5 mm above SOT-23 parts up to 1.45 mm tall, with its own parts facing down |
+| JP1 and JP2 added, three-pad solder jumpers bridged 1–2 | Four-pin SSD1306 modules come as GND, VCC, SCL, SDA and as VCC, GND, SCL, SDA; the jumpers select either |
+| USB pair rerouted with a cost that keeps D− beside D+ | D− ran within 0.6 mm of D+ for 1 % of its length; now 81 % |
+| Ground stitching vias on a 3 mm grid, kept only where both pours reach them | Ties the two ground pours together across the board |
+| `bt2usb-board.kicad_dru`: the USB-C shield tabs may meet the pour with one spoke | KiCad's default of two spokes failed on one tab, which also reaches the pour on the other layer |
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| ERC | `kicad-cli sch erc --severity-all` | 0 errors, 0 warnings. A first run showed 4 `lib_symbol_mismatch` warnings because the schematic writer dropped KiCad 9's `(hide yes)` pin flags; fixed in the writer |
+| DRC with schematic parity | `kicad-cli pcb drc --severity-all --schematic-parity` | 0 violations, 0 unconnected pads, 0 footprint and parity issues. Earlier runs in the same session found a jumper courtyard overlap, visible MPN fields on the silkscreen, a label over a switch pad and too-small silkscreen text; all fixed |
+| Netlist against the design table and firmware | Exported KiCad 9 netlist against the board's design table | 142 pin connections and 19 nets as designed; every module pin matches the [pin map](hardware.md#board-pin-map) and `src/main.rs` |
+| Module pin numbers | Raytac's pin table, both editions | GND 1, 2, 15, 33, 55; VDD 28; VDDH 30; DCCH 31; VBUS 32; D− 34; D+ 35; P0.27 16; P0.26 19; P0.06 22; P0.08 24; P0.11 27; P0.12 29; P0.18/nRESET 40; P0.24 48; SWDIO 51; SWDCLK 53: all match the symbol and the board |
+| GPIO near the radio | Raytac section 2.6 and its pin table | None of the seven GPIOs used (P0.06, P0.08, P0.11, P0.12, P0.24, P0.26, P0.27) is on Raytac's standard-drive, low-frequency-only list, which bars I2C on those pins |
+| Module footprint | KiCad 9 `RF_Module:Raytac_MDBT50Q` against the specification text | 61 pads; body 15.5 × 10.5 mm as specified; the antenna keep-out on all copper layers, extended to the board edge. Pad sizes not compared (drawing is an image) |
+| Module reference circuit | Raytac section 8 text | Rev A matches "Reg0 DC/DC and LDO mode disabled", the circuit for supplies under 3.6 V: VDD and VDDH tied, DCCH and the REG0 inductor not used, no 32.768 kHz crystal (the firmware runs the RC oscillator), no NFC parts. The 32 MHz crystal and the REG1 inductor are inside the module |
+| Module chip revision | Raytac section 4 and product page | A module without a black dot carries a revision 2 nRF52840. The firmware runs on it; [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md)'s proposed production lock needs revision 3, so this went into [Open Questions](hardware.md#open-questions) |
+| LDO | AP2112 datasheet | SOT-25 pins VIN 1, GND 2, EN 3, VOUT 5 match U3; pin 4 is left open. EN tied to VBUS is within its 6 V limit; input 4.7 µF and output 1 µF plus 10 µF meet the 1 µF minimum |
+| ESD array, Type-C, switches, SWD | USBLC6-2SC6, USB Type-C, PTS645 and ARM 10-pin pinouts | I/O1 (pins 1, 6) on D+, I/O2 (3, 4) on D−, GND 2, VBUS 5; A6/B6 D+, A7/B7 D−, CC pull-downs 5.1 kΩ; switch pads 1 and 2 across the contact; SWD 1 VTref, 2 SWDIO, 4 SWCLK, 10 nRESET, 3, 5 and 9 GND |
+| VBUS capacitance | Schematic | 5.8 µF (C1, C2, C7), under the USB 10 µF limit |
+| USB pair | Board measurement | D+ 55.6 mm with no vias; D− 58.9 mm with four vias where the Type-C rows cross; 3.3 mm of skew is about 20 ps against edges of several nanoseconds at full speed |
+| Heights and enclosure | Part heights from the BOM | See [Enclosure](hardware.md#enclosure): the socketed display clears every part by about 9 mm and sits about 9 mm above the switch tops |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed |
+
+Not done: the pad sizes against Raytac's land-pattern drawing, a review by
+anyone other than the designer, impedance or USB compliance measurements,
+any RF measurement, and any built board.
+
 ## Validation Record — 2026-10-30, Simulation On The Coordinator Loop
 
 This record covers the commit that checks off the P1 item "Run the

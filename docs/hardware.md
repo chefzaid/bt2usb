@@ -484,8 +484,9 @@ This section is the bt2usb board that runs the firmware unchanged: its
 requirements, the rev A KiCad design and production files, debug access,
 enclosure, delivery checks, the questions still open, and where to have it
 made. It builds on the sections above, which say how the firmware uses each
-part; it does not repeat them. Rev A is designed but not yet built or
-reviewed by a second person, and the [first-flash checklist](first-flash.md)
+part; it does not repeat them. Rev A is designed and has passed a design
+review ([KiCad Project](#kicad-project-rev-a)) but is not yet built or
+looked over by a second person, and the [first-flash checklist](first-flash.md)
 is its acceptance test
 ([TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance),
 [ADR 0029](adr/0029-rev-a-board-on-a-certified-module.md)).
@@ -560,7 +561,7 @@ about the module's antenna and pin breakout:
 
 | Module | Antenna | Notes |
 | --- | --- | --- |
-| Raytac MDBT50Q-1MV2 | Chip antenna | Preferred example; breaks out USB D+, D−, VBUS and most GPIOs |
+| Raytac MDBT50Q-1MV2 | Chip antenna | Rev A's module; breaks out USB D+, D−, VBUS and most GPIOs. Raytac's product page and specification describe it with a revision 2 nRF52840 |
 | Raytac MDBT50Q-P1MV2 | PCB antenna | Same family |
 | Ebyte E73-2G4M08S1C | PCB antenna | Check that USB and VBUS are broken out |
 | Minew MS88SF2 | Chip antenna | Check the GPIO breakout |
@@ -581,13 +582,14 @@ The button and display pins are in the [wiring table](#wiring). The board adds:
 
 | Signal | nRF52840 pin | Connect to | Notes |
 | --- | --- | --- | --- |
-| USB_DP | D+ | Connector D+ (A6 and B6 on Type-C) | 90 Ω differential, short, no series resistors |
+| USB_DP | D+ | Connector D+ (A6 and B6 on Type-C) | Routed beside D−, short, no series resistors |
 | USB_DM | D− | Connector D− (A7 and B7 on Type-C) | As above |
 | VBUS | VBUS | Connector VBUS after ESD | Required for USB to start |
 | SWDIO, SWDCLK | SWDIO, SWDCLK | SWD connector | — |
 | nRESET | P0.18 | SWD connector, optional reset switch to GND | Kept as the pin reset ([pin usage](#pin-and-peripheral-usage)) |
 | TP1, TP2 | P0.06, P0.08 | Test pads | Unused by the bridge; useful for a debug UART |
 | TP3, TP4, TP5 | — | Test pads | 3V3, VBUS and GND, for the [delivery checks](#acceptance-on-delivery) |
+| OLED_P1, OLED_P2 | — | J3 pins 1 and 2, through JP1 and JP2 | GND and 3V3 as delivered; swapped by cutting the jumpers' bridges and closing pads 2–3 |
 
 Leave P0.00 and P0.01 (32.768 kHz crystal), P0.09 and P0.10 (NFC) and P0.18
 free of anything that drives them. No LED is driven by the firmware; a power
@@ -595,12 +597,14 @@ LED on VDD is optional at 1 mA or less.
 
 ### KiCad Project (Rev A)
 
-The board is a KiCad project in `hardware/bt2usb-board`, drawn with KiCad
-7.0.11; KiCad 8 and 9 open it and convert it on save.
+The board is a KiCad 9 project in `hardware/bt2usb-board`; KiCad 9.0.9
+wrote the board and checked both files. The schematic file is in the
+KiCad 7 format, which KiCad 9 reads and upgrades on save.
 
 | File | Contents |
 | --- | --- |
 | `hardware/bt2usb-board/bt2usb-board.kicad_pro` | Project, with the design rules below |
+| `hardware/bt2usb-board/bt2usb-board.kicad_dru` | One custom rule: the USB-C shield tabs may meet the ground pour with one thermal spoke per layer |
 | `hardware/bt2usb-board/bt2usb-board.kicad_sch` | Schematic, one A4 sheet, with design notes |
 | `hardware/bt2usb-board/bt2usb-board.kicad_pcb` | Placed and routed two-layer board |
 | `hardware/bt2usb-board/bt2usb-board-schematic.pdf` | Schematic as PDF, for reading without KiCad |
@@ -615,27 +619,39 @@ The board is a KiCad project in `hardware/bt2usb-board`, drawn with KiCad
 | --- | --- |
 | Size | 74 × 32 mm, two layers, 1.6 mm FR-4 recommended |
 | Rules | Track 0.2 mm signals and 0.3 mm power, 0.15 mm minimum; clearance 0.15 mm; vias 0.6 mm on 0.3 mm drill; copper to edge 0.3 mm; copper to hole 0.18 mm, which the USB connector's own footprint needs |
-| Layout | USB-C on the left edge, the OLED header along the top with the module hanging over the supply parts, buttons in a column right of the display, the module on the right with its antenna at the board edge and a keep-out on both layers to the edge, SWD header below the module, two M2 holes |
-| Ground | A ground pour on both layers; the bottom is an almost unbroken plane under the USB pair |
-| Supply | Normal-voltage mode ([Supply Mode](#supply-mode)): U3 makes 3.3 V, VDDH tied to VDD |
-| OLED | Soldered to J3, which expects GND, VCC, SCL, SDA from pin 1; check the module's order |
+| Layout | USB-C on the left edge, the OLED socket along the top with the display module over the supply parts, buttons in a column right of the display, the module on the right with its antenna at the board edge and a keep-out on both layers to the edge, SWD header below the module, two M2 holes |
+| Ground | A ground pour on both layers, tied by a via at every SMD ground pad and by stitching vias on a 3 mm grid; the bottom is an almost unbroken plane under the USB pair |
+| USB pair | D+ and D− run side by side on the top layer: 55.6 and 58.9 mm long, 81 % of D− within 0.6 mm of D+, four vias on D− where the Type-C pin rows cross |
+| Supply | Normal-voltage mode ([Supply Mode](#supply-mode)): U3 makes 3.3 V, VDDH tied to VDD; C2 decouples the module's VBUS pin and C7 the ESD array's |
+| OLED | J3 is a 1×4 2.54 mm socket the module plugs into. JP1 and JP2 set its supply order: as delivered (pads 1–2 bridged) J3 is GND, VCC, SCL, SDA from pin 1; for a VCC, GND, SCL, SDA module cut both bridges and solder pads 2–3 |
 
-What has been checked: KiCad's DRC reports no violations, no unconnected
-items and no library footprint issues, and the schematic's netlist
-matches the [pin map](#board-pin-map) and the firmware's pins pin for pin.
-What has not: KiCad's electrical rules check (ERC), which KiCad 7's command
-line cannot run; a second person's review; and any built board. The traces
-were placed by an automatic grid router, so they are correct but not
-tidy. Before ordering:
+The design was reviewed on 2026-11-10
+([record](validation-records.md#validation-record--2026-11-10-rev-a-design-review)):
 
-- [ ] Open the project in KiCad 8 or 9, run ERC and DRC, and fix anything new.
-- [ ] Compare the module footprint with Raytac's current MDBT50Q-1MV2 drawing,
-      and confirm the OLED module's pin order and hole spacing against J3.
-- [ ] Tidy the USB D+/D− pair: about 55 mm long on the top layer over the
-      bottom plane, side by side but not impedance-controlled. Full-speed USB
-      tolerates this; shorter is better.
-- [ ] Check the enclosure fit: the OLED rides about 2.5 mm above the board on
-      its header and covers the supply parts, so nothing under it may be taller.
+| Check | Result |
+| --- | --- |
+| KiCad 9.0.9 ERC, all severities | 0 errors, 0 warnings |
+| KiCad 9.0.9 DRC, all severities, with schematic parity | 0 violations, 0 unconnected pads, 0 footprint or parity issues |
+| Netlist against the [pin map](#board-pin-map) and `src/main.rs` | Every module pin matches, pin for pin |
+| Module pins against Raytac's pin table | All 20 connected pins and the unused ones match the numbers and names in Raytac's MDBT50Q specification (2018 and 2023 editions) |
+| Module footprint against Raytac's drawing | Body 15.5 × 10.5 mm and pad numbering match; pad sizes could not be compared, because the drawing is only an image in the specification |
+| LDO, ESD array, switch, SWD header, Type-C pins | Match the AP2112K, USBLC6-2SC6, PTS645, ARM 10-pin and Type-C pinouts |
+| Module reference circuits | Matches Raytac's "DC/DC and LDO mode disabled" circuit for supplies under 3.6 V: VDD and VDDH tied, DCCH open, no 32.768 kHz crystal (the firmware uses the RC oscillator), no NFC parts |
+| OLED clearance and enclosure | See [Enclosure](#enclosure) |
+
+The review changed the design: C2 moved next to the module's VBUS pin, C7
+was added at the ESD array, J3 became a socket with JP1 and JP2, the USB pair
+was rerouted side by side, and ground stitching was added. Still open
+before ordering:
+
+- [ ] Compare the module's pad sizes with Raytac's land-pattern drawing
+      (section 2.2 of its specification), which no source here could serve
+      as anything but an image.
+- [ ] Have someone with board experience look over the schematic and layout.
+      The checks above are automatic or done by the designer; nobody else has
+      reviewed it.
+- [ ] Choose the module's chip revision for anything beyond prototypes
+      ([Open Questions](#open-questions), question 5).
 
 To order, upload the Gerber zip to the fab, and for assembled boards add the
 BOM and placement file. The OLED module, the cable and the probe are bought
@@ -654,11 +670,11 @@ The firmware's power behavior and the 100 mA declaration are under
 | --- | --- |
 | Input | USB VBUS, 4.4–5.25 V |
 | Regulator (normal-voltage mode) | 3.3 V, at least 300 mA, input rating at least 6 V |
-| VBUS capacitance | 10 µF or less before the regulator (USB inrush limit) |
+| VBUS capacitance | 10 µF or less in total (USB inrush limit); rev A has 5.8 µF: C1 4.7 µF at the regulator, C2 1 µF at the module's VBUS pin, C7 100 nF at the ESD array |
 | Connector | USB Type-C receptacle, USB 2.0 only, 5.1 kΩ pull-downs on CC1 and CC2 so C-to-C cables supply power |
 | Cable | One data-capable USB-C to USB-A cable per unit; a charge-only cable fails enumeration |
 | ESD | Low-capacitance TVS array on D+, D− and VBUS next to the connector |
-| Routing | D+/D− as a 90 Ω differential pair, matched length, no stubs, continuous ground under it |
+| Routing | D+/D− side by side, lengths within a few millimetres, no stubs, continuous ground under them. The nRF52840 is full speed only (12 Mbit/s); its edges are slower than the delay of a few centimetres of track, so a two-layer board needs no impedance control |
 
 ### Antenna And RF
 
@@ -693,7 +709,7 @@ per unit, and not in that file:
 
 | Item | Requirement |
 | --- | --- |
-| OLED module | 0.96" 128×64 SSD1306 I2C, 4-pin, address `0x3C`, runs from 3.3 V |
+| OLED module | 0.96" 128×64 SSD1306 I2C, 4-pin, address `0x3C`, runs from 3.3 V, with its 2.54 mm pin header fitted; it plugs into J3. Either supply order works once JP1 and JP2 are set |
 | PCB | Rev A Gerbers, 1.6 mm FR-4, two layers |
 | Enclosure set | See [Enclosure](#enclosure) |
 | Cable | USB-C to USB-A, 1 m, data-capable |
@@ -712,11 +728,34 @@ per unit, and not in that file:
 | Labels | Board revision on the silkscreen; button names on the case |
 | Environment | Indoor office use; no ingress rating |
 
+Rev A's heights, checked on 2026-11-10 against the parts in the BOM; the
+OLED module's own sizes vary between makers, so measure the one bought:
+
+| Part | Top above the board | Notes |
+| --- | --- | --- |
+| Passives, U2, U3 | 1.45 mm at most (SOT-23 package limit) | All under the display |
+| Module U1 | 2.2 mm at most (Raytac's specification) | Antenna end at the right edge |
+| Tactile switches | 4.3 mm (PTS645 "43" height code) | The case needs plungers from its top surface down to them |
+| OLED module board | About 11 mm: the 8.5 mm socket plus the 2.5 mm spacer of the module's own header | Clears every part under it by about 9 mm |
+| OLED display face | About 13 to 14 mm | Its window sets the case height |
+
+Soldering the module's header straight into J3, without the socket, leaves
+2.5 mm under the module's board: the SOT-23 parts take up to 1.45 mm and the
+module's own regulator and capacitors face down, so they can touch. Use the
+socket. The display then sits about 9 mm above the switch tops, so the case
+needs button plungers of about that length, or taller 6 × 6 mm switches
+on the same footprint. The module covers roughly x 10–37 mm and
+y 1–29 mm from the board's top-left corner (a 27 × 28 mm module centred on
+J3); the M2 holes at x 39 mm stay just outside it. Allow about 2 mm under the
+board for the socket's and the USB connector's through-hole leads; the
+inside of the case then needs about 76 × 34 mm and 18 mm of height.
+
 ### Acceptance On Delivery
 
 The partner checks every unit: VDD within 3.2–3.4 V on USB power; an SWD
-probe connects (for example `probe-rs info`); SDA, SCL, VCC and GND of the
-OLED reach P0.26, P0.27, VDD and GND; each button shorts its GPIO to GND only
+probe connects (for example `probe-rs info`); JP1 and JP2 match the OLED
+module's pin order; SDA, SCL, VCC and GND of the OLED reach P0.26, P0.27,
+VDD and GND; each button shorts its GPIO to GND only
 while pressed; and the antenna keep-out and USB solder joints pass visual
 inspection. The firmware owner then runs `mask selftest` and the
 [first-flash checklist](first-flash.md) and files a
@@ -734,7 +773,7 @@ assembled units, cables and probe; and two or three spare bare PCBs.
 | 2 | Custom PCB, or a ready-made nRF52840 board wired as in [Wiring](#wiring)? | A ready-made board first; a custom PCB on a module after the first-flash run |
 | 3 | USB Type-C receptacle, captive cable, or USB-A plug? | Type-C with a C-to-A cable, as in rev A |
 | 4 | OLED module on a header, or a bare SSD1306 panel on an FPC? | Module for the prototype; a bare panel needs its charge-pump capacitors |
-| 5 | Require nRF52840 revision 3? | Yes, so the [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md) lock policy stays available |
+| 5 | Require nRF52840 revision 3? | Not for rev A prototypes: the firmware runs on revision 2, which Raytac documents for the MDBT50Q-1MV2. Yes for production units, so the [ADR 0021](adr/0021-provisioning-debug-access-and-readout-protection.md) lock policy stays available: ask Raytac or the distributor for a revision 3 lot, or choose a module that states it |
 | 6 | Normal-voltage or high-voltage mode? | Normal-voltage for the prototype; both work ([Supply Mode](#supply-mode)) |
 | 7 | Keep rev A's Raytac MDBT50Q-1MV2? | Yes; another module needs a new footprint and a pin check against [Module Choice](#module-choice) |
 | 8 | Enclosure colour, finish, labels and mounting | Partner proposal; adhesive pad mounting |

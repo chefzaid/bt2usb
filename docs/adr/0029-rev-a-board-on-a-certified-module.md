@@ -1,7 +1,7 @@
 # ADR 0029: Build The Rev A Board On A Certified nRF52840 Module With The Firmware's Pin Map
 
 - Status: Accepted
-- Date: 2026-11-09
+- Date: 2026-11-09 (design review changes 2026-11-10)
 
 ## Context
 
@@ -30,6 +30,8 @@ Facts that constrain the design:
 - **No RF expertise or radio test budget is available** for a first board.
 - **KiCad 7.0.11 is what the project's tooling environment can install**; its
   command line has no ERC, and an external autorouter could not be run there.
+  KiCad 9.0.9 later ran from its official container image, which has both
+  ERC and DRC on the command line.
 
 ## Decision
 
@@ -40,21 +42,25 @@ Facts that constrain the design:
   unchanged. The module's inner-row pads (P0.11, P0.12, P0.18, P0.26) are
   reached by short tracks under the module, some through tented vias.
 - **Supply.** Normal-voltage mode: an AP2112K-3.3 LDO feeds VDD, with VDDH
-  tied to VDD; VBUS also goes to the module's VBUS pin. VBUS capacitance stays
-  under the USB 10 µF limit.
+  tied to VDD; VBUS also goes to the module's VBUS pin, with 1 µF next to
+  it. VBUS capacitance, 5.8 µF in all, stays under the USB 10 µF limit.
 - **USB.** A 16-pin USB 2.0 Type-C receptacle (GCT USB4105-GF-A) with 5.1 kΩ
-  CC pull-downs and a USBLC6-2SC6 ESD array next to it.
-- **User interface.** A 4-pin 2.54 mm header for a 0.96" SSD1306 I2C module,
-  4.7 kΩ I2C pull-ups, and three 6 × 6 mm SMD tactile switches.
+  CC pull-downs and a USBLC6-2SC6 ESD array next to it, with 100 nF on its
+  VBUS pin. D+ and D− run side by side over the bottom ground plane.
+- **User interface.** A 1×4 2.54 mm socket for a 0.96" SSD1306 I2C module,
+  with two three-pad solder jumpers that set which of its first two pins is
+  GND and which is VCC (GND first as delivered), 4.7 kΩ I2C pull-ups, and
+  three 6 × 6 mm SMD tactile switches.
 - **Debug.** A 2×5 1.27 mm ARM Cortex SWD header, plus test pads for P0.06,
   P0.08, 3V3, VBUS and GND.
-- **Board.** Two layers, 74 × 32 mm, ground poured on both sides, rules any
-  common prototype fab meets (0.15 mm track and clearance, 0.3 mm drill).
+- **Board.** Two layers, 74 × 32 mm, ground poured on both sides and
+  stitched with vias, rules any common prototype fab meets (0.15 mm track
+  and clearance, 0.3 mm drill).
 - **Production files in the repository.** The KiCad project, a schematic PDF,
   Gerbers and drill files, a BOM and a placement file live in
   `hardware/bt2usb-board`, and the [hardware guide](../hardware.md#kicad-project-rev-a)
-  documents them. The KiCad files are the source; the fab files are exports
-  that change with them.
+  documents them. The KiCad files, saved by KiCad 9, are the source; the fab
+  files are exports that change with them.
 
 ## Alternatives Considered
 
@@ -75,6 +81,10 @@ Facts that constrain the design:
 - **Change pins to the module's outer pads.** It would avoid the vias under
   the module but would change the firmware for a board that does not exist
   yet.
+- **Solder the OLED module straight onto a header.** Lower, but the module's
+  board would sit 2.5 mm above parts up to 1.45 mm tall with its own parts
+  facing down, and a module with the other supply order would need a
+  different board.
 
 ## Rationale
 
@@ -90,11 +100,18 @@ quote the same design.
 
 - Rev A can be ordered from any prototype fab without design work.
 - The tracks were placed by a grid router, not by hand: they pass DRC but are
-  not tidy, and the USB pair is long and not impedance-controlled.
+  not as tidy as hand routing. The USB pair runs side by side but is long
+  (about 56 mm) and not impedance-controlled, which full-speed USB tolerates.
 - Vias sit under the module; they are tented, and the module has no exposed
   copper there other than its pads.
-- The OLED module sits over the supply parts on its header, which limits part
-  height there and fixes the display's position for the enclosure.
+- The OLED module plugs into a socket over the supply parts, so its display
+  sits about 13 to 14 mm above the board and about 9 mm above the switch
+  tops; the enclosure needs button plungers
+  ([Enclosure](../hardware.md#enclosure)).
+- Raytac documents the MDBT50Q-1MV2 with a revision 2 nRF52840. The firmware
+  runs on it, but the lock policy that [ADR 0021](0021-provisioning-debug-access-and-readout-protection.md)
+  proposes for production needs revision 3, so production units need a
+  revision 3 lot or another module.
 - The production USB identity and readout protection are unchanged by this
   decision ([ADR 0018](0018-production-usb-identity.md),
   [ADR 0021](0021-provisioning-debug-access-and-readout-protection.md)).
@@ -103,10 +120,18 @@ quote the same design.
 
 `hardware/bt2usb-board` holds the project and its exports. Verification Status:
 
-- **Software-verified:** KiCad 7.0.11 DRC with no violations, no unconnected
-  items and no library footprint issues; the schematic netlist
-  compared with the pin map and the firmware pin for pin.
-- **Not verified:** KiCad ERC, a second person's review, and any built board.
+- **Software-verified:** the 2026-11-10 design review
+  ([record](../validation-records.md#validation-record--2026-11-10-rev-a-design-review)):
+  KiCad 9.0.9 ERC with no errors or warnings; KiCad 9.0.9 DRC at all
+  severities with schematic parity, with no violations, unconnected pads,
+  footprint or parity issues; the netlist compared with the pin map and the
+  firmware pin for pin; module, regulator, ESD, switch, SWD and Type-C pins
+  compared with their datasheets; the circuit compared with Raytac's
+  reference circuit for supplies under 3.6 V. The earlier KiCad 7.0.11 DRC
+  was clean too.
+- **Not verified:** the module's pad sizes against Raytac's land-pattern
+  drawing (only an image was available), a review by anyone other than the
+  designer, and any built board.
 - **Hardware-verified:** none; the first-flash record on a rev A board is the
   acceptance.
 

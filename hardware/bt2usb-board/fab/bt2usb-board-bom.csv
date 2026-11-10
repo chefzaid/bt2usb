@@ -2,15 +2,15 @@ Item,Qty,References,Value,Footprint,Manufacturer,MPN,Notes
 1,2,C1 C6,4.7u,C_0603_1608Metric,Any,Any,"Ceramic X5R or X7R, 10 V or more"
 2,2,C2 C3,1u,C_0603_1608Metric,Any,Any,"Ceramic X5R or X7R, 10 V or more"
 3,1,C4,10u,C_0603_1608Metric,Any,Any,"Ceramic X5R or X7R, 10 V or more"
-4,1,C5,100n,C_0603_1608Metric,Any,Any,"Ceramic X5R or X7R, 10 V or more"
+4,2,C5 C7,100n,C_0603_1608Metric,Any,Any,"Ceramic X5R or X7R, 10 V or more"
 5,1,J1,USB_C_Receptacle,USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal,GCT,USB4105-GF-A,
 6,1,J2,SWD,PinHeader_2x05_P1.27mm_Vertical_SMD,Samtec,FTSH-105-01-L-DV-K,ARM 10-pin 1.27 mm SWD header
-7,1,J3,OLED SSD1306 I2C,PinHeader_1x04_P2.54mm_Vertical,Any,Any,"4-pin 2.54 mm header; the 0.96"" SSD1306 I2C module (address 0x3C, GND VCC SCL SDA) solders here"
+7,1,J3,OLED SSD1306 I2C,PinSocket_1x04_P2.54mm_Vertical,Any,Any,"1x4 2.54 mm female socket, 8.5 mm tall; the 0.96"" SSD1306 I2C module (address 0x3C) plugs in. JP1/JP2 on the board set its supply pin order"
 8,2,R1 R2,5.1k,R_0603_1608Metric,Any,Any,Thick film 1%
 9,2,R3 R4,4.7k,R_0603_1608Metric,Any,Any,Thick film 1%
-10,1,SW1,UP,SW_SPST_PTS645,C&K,PTS645SM43SMTR92 LFS,
-11,1,SW2,DOWN,SW_SPST_PTS645,C&K,PTS645SM43SMTR92 LFS,
-12,1,SW3,SELECT,SW_SPST_PTS645,C&K,PTS645SM43SMTR92 LFS,
+10,1,SW1,UP,SW_SPST_PTS645Sx43SMTR92,C&K,PTS645SM43SMTR92 LFS,"6 x 6 mm tactile switch, 4.3 mm tall, 50,000 cycles or more"
+11,1,SW2,DOWN,SW_SPST_PTS645Sx43SMTR92,C&K,PTS645SM43SMTR92 LFS,"6 x 6 mm tactile switch, 4.3 mm tall, 50,000 cycles or more"
+12,1,SW3,SELECT,SW_SPST_PTS645Sx43SMTR92,C&K,PTS645SM43SMTR92 LFS,"6 x 6 mm tactile switch, 4.3 mm tall, 50,000 cycles or more"
 13,1,U1,MDBT50Q-1MV2,Raytac_MDBT50Q,Raytac,MDBT50Q-1MV2,"Pre-certified nRF52840 module, chip antenna"
 14,1,U2,USBLC6-2SC6,SOT-23-6,STMicroelectronics,USBLC6-2SC6,
 15,1,U3,AP2112K-3.3,SOT-23-5,Diodes Incorporated,AP2112K-3.3TRG1,

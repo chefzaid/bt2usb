@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 57 | 0 | 0 |
+| [FIXME](#fixme) | 63 | 0 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 16 | 4 | 2 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -33,13 +33,13 @@ probe, or USB host to close.
 | [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
-| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 4 | 6 | 3 |
+| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 6 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **165** | **64** | **20** |
+| **Total** | **172** | **64** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -206,6 +206,30 @@ two what fixed it; its commit and validation record hold the details.
   low for the OLED. The bridge and the self-test now set `reg0_voltage` to
   3.3 V before `embassy_nrf::init` (`src/main.rs`, `src/selftest.rs`;
   [hardware](docs/hardware.md#power)) *(hardware evidence pending)*.
+- [x] **P1** **The rev A OLED module could rest on the supply parts.** Soldered
+  on its header, the module's board sat 2.5 mm above SOT-23 parts up to
+  1.45 mm tall, with its own parts facing down. J3 is now a 1×4 socket that
+  lifts it about 11 mm and makes it removable
+  ([enclosure](docs/hardware.md#enclosure), [record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review)).
+- [x] **P2** **Rev A fixed the OLED module's supply order.** Four-pin SSD1306
+  modules are sold as GND, VCC, SCL, SDA and as VCC, GND, SCL, SDA, and the
+  wrong one is reverse-powered. Solder jumpers JP1 and JP2 now select the
+  order, GND first as delivered ([KiCad project](docs/hardware.md#kicad-project-rev-a)).
+- [x] **P2** **The rev A module's VBUS pin had no capacitor near it.** The
+  nearest VBUS capacitance sat at the LDO, about 40 mm away. C2 (1 µF) moved
+  next to module pin 32; VBUS stays at 5.8 µF in all, under the USB 10 µF
+  limit ([record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review)).
+- [x] **P3** **The rev A ESD array's VBUS pin had no capacitor.** C7 (100 nF)
+  now sits at U2 pin 5, so the clamp has a short path to ground ([record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review)).
+- [x] **P3** **The rev A USB pair ran apart.** D+ and D− were routed
+  separately (1 % of D− within 0.6 mm of D+); the router now keeps D− beside
+  D+ (81 %), on the top layer over the bottom plane ([record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review)).
+- [x] **P3** **KiCad 9 found library and parity differences on rev A.** The
+  KiCad 7 footprint copies differed from KiCad 9's libraries (18 findings),
+  the switch footprint had been renamed, and unconnected pads lacked their
+  schematic net names (47). The board was regenerated from KiCad 9's
+  libraries and the schematic's netlist; ERC and DRC with schematic parity
+  are clean ([record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review)).
 - [x] **P1** **USB never requested the crystal it clocks from.** Neither
   `embassy-nrf` nor the SoftDevice keeps the HFXO running for USB; the bridge
   and the self-test now request it through the SoftDevice at boot
@@ -912,15 +936,21 @@ Getting firmware onto real boards and recording what works. Context:
   matches the pin map (`hardware/bt2usb-board`,
   [hardware: KiCad project](docs/hardware.md#kicad-project-rev-a),
   [ADR 0029](docs/adr/0029-rev-a-board-on-a-certified-module.md); 2026-11-09).
-- [ ] **P1** **Review and build the rev A board.** *(hardware)* Run ERC and
-  DRC in KiCad 8 or 9, compare the module footprint with Raytac's drawing,
-  confirm the OLED module's pin order, tidy the USB pair, then order a few
-  assembled boards ([where to build it](docs/hardware.md#where-to-build-it)).
-  Accept when the review findings are fixed and one rev A board has a
-  first-flash record; that record also serves "Production hardware
-  definition" if rev A is the chosen board. The
-  board it describes feeds the open "Production hardware definition" item
-  below.
+- [x] Rev A design review: KiCad 9.0.9 ERC and DRC with schematic parity
+  clean at all severities, pins checked against the module, regulator, ESD,
+  switch, SWD and Type-C datasheets, the circuit checked against Raytac's
+  reference circuit, the USB pair rerouted side by side, the OLED on a socket
+  with supply-order jumpers, and heights checked for the enclosure. Six
+  findings are fixed in the [FIXME](#fixme) list
+  ([hardware: KiCad project](docs/hardware.md#kicad-project-rev-a), [record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review);
+  2026-11-10).
+- [ ] **P1** **Build the rev A board.** *(hardware)* Compare the module's pad
+  sizes with Raytac's land-pattern drawing, have someone with board
+  experience look over the design, then order a few assembled boards
+  ([where to build it](docs/hardware.md#where-to-build-it)). Accept when one
+  rev A board has a first-flash record; that record also serves "Production
+  hardware definition" if rev A is the chosen board. The board it describes
+  feeds the open "Production hardware definition" item below.
 - [ ] **P0** **First board bring-up.** *(hardware)* Install S140 v7.3.0, run
   `mask selftest`, then run the bridge on an nRF52840-DK with the documented
   wiring, one BLE keyboard, one BLE mouse, a direct host connection, and then a

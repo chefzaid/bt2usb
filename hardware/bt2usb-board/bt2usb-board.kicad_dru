@@ -1,0 +1,6 @@
+(version 1)
+# The USB-C shield tabs (J1 pads S1) are plated through and reach the ground
+# pour on both layers; one thermal spoke per layer is enough for them.
+(rule "USB-C shield tabs"
+	(condition "A.Type == 'Pad' && A.Pad_Number == 'S1' && A.memberOfFootprint('J1')")
+	(constraint min_resolved_spokes 1))

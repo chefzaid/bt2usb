@@ -33,13 +33,13 @@ probe, or USB host to close.
 | [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
-| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 6 | 3 |
+| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 9 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **172** | **64** | **20** |
+| **Total** | **172** | **67** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -944,13 +944,39 @@ Getting firmware onto real boards and recording what works. Context:
   findings are fixed in the [FIXME](#fixme) list
   ([hardware: KiCad project](docs/hardware.md#kicad-project-rev-a), [record](docs/validation-records.md#validation-record--2026-11-10-rev-a-design-review);
   2026-11-10).
-- [ ] **P1** **Build the rev A board.** *(hardware)* Compare the module's pad
-  sizes with Raytac's land-pattern drawing, have someone with board
-  experience look over the design, then order a few assembled boards
-  ([where to build it](docs/hardware.md#where-to-build-it)). Accept when one
-  rev A board has a first-flash record; that record also serves "Production
-  hardware definition" if rev A is the chosen board. The board it describes
-  feeds the open "Production hardware definition" item below.
+- [ ] **P1** **Check the rev A module footprint against Raytac's drawing.**
+  *(hardware)* The design review matched the MDBT50Q-1MV2 footprint's body
+  size and pad numbering to Raytac's specification, but its pad sizes and
+  positions only to KiCad's library: the land-pattern drawing (section 2.2
+  of the specification) is an image that could not be read here. Accept when
+  the footprint's pads (0.6 × 0.4 mm, 0.8 mm pitch, rows as in
+  `RF_Module:Raytac_MDBT50Q`) and the antenna keep-out are compared with
+  Raytac's current drawing, and any difference is fixed in
+  `hardware/bt2usb-board` and recorded
+  ([KiCad project](docs/hardware.md#kicad-project-rev-a)).
+- [ ] **P1** **Independent review of the rev A board.** *(hardware)* Every
+  rev A check so far was automatic or done by the designer. Have someone with
+  board experience review the schematic and layout: supply and decoupling,
+  USB routing and ESD, the module's ground and antenna area, the OLED socket
+  and jumpers, and manufacturability. Accept when their findings are fixed or
+  answered and recorded in the [FIXME](#fixme) list or a validation record.
+- [ ] **P1** **Choose the module's chip revision for production.**
+  *(hardware)* Raytac documents the MDBT50Q-1MV2 with a revision 2
+  nRF52840, which the firmware runs on, but the production lock that
+  [ADR 0021](docs/adr/0021-provisioning-debug-access-and-readout-protection.md)
+  proposes needs revision 3 (build code F or later). Accept when the
+  [hardware guide](docs/hardware.md#open-questions) names a module and lot
+  that state revision 3, or records the decision to accept revision 2, and
+  the first-flash record shows the chip's build code.
+- [ ] **P1** **Build the rev A board.** *(hardware)* After the footprint check
+  and the independent review, order a few assembled boards
+  ([where to build it](docs/hardware.md#where-to-build-it)) with the OLED
+  module on its socket and JP1/JP2 set for its pin order, and check the
+  bought module against the [enclosure heights](docs/hardware.md#enclosure).
+  Accept when one rev A board has a first-flash record; that record also
+  serves "Production hardware definition" if rev A is the chosen board. The
+  board it describes feeds the open "Production hardware definition" item
+  below.
 - [ ] **P0** **First board bring-up.** *(hardware)* Install S140 v7.3.0, run
   `mask selftest`, then run the bridge on an nRF52840-DK with the documented
   wiring, one BLE keyboard, one BLE mouse, a direct host connection, and then a

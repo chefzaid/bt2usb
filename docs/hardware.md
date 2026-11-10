@@ -642,7 +642,8 @@ The design was reviewed on 2026-11-10
 The review changed the design: C2 moved next to the module's VBUS pin, C7
 was added at the ESD array, J3 became a socket with JP1 and JP2, the USB pair
 was rerouted side by side, and ground stitching was added. Still open
-before ordering:
+before ordering, each an item in
+[TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance):
 
 - [ ] Compare the module's pad sizes with Raytac's land-pattern drawing
       (section 2.2 of its specification), which no source here could serve

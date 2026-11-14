@@ -8,6 +8,36 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-11-14, In-Tree SSD1306 Driver
+
+This record covers the commit that checks off the P1 item "Replace
+unmaintained transitive dependencies" in
+[TODO.md](../TODO.md#release-provenance-and-supply-chain), on top of
+`4d846c3`. The `ssd1306` 0.10.0 crate, the only route to `proc-macro-error`
+(`RUSTSEC-2024-0370`), is replaced by the in-tree async driver in
+`src/ui/ssd1306.rs` ([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)), and its
+advisory ignore leaves `deny.toml`. `bare-metal` (`RUSTSEC-2026-0110`) stays
+ignored by ID. The checks ran on Linux x86_64 with Rust 1.95.0, Renode 1.16.1
+from `scripts/install-renode.sh`, and cargo-deny 0.20.2 and cargo-llvm-cov
+0.9.1 from their release archives (cargo-deny's SHA-256 checked as in CI).
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Previous driver's bytes | A scratch crate outside the repository with `ssd1306 =0.10.0` (`async`) over a logging I2C bus, running the old `display::initialize` sequence, a flush, and display on | 152 writes: `20 00`, the window, 64 data writes of 16 bytes, then `AE`, `D5 80`, `A8 3F`, `D3 00`, `40`, `8D 14`, `20 00`, `DA 12`, `A1`, `C8`, `D9 21`, `81 5F`, `DB 40`, `A4`, `A6`, `2E`, `AF`, each its own `0x00` write, then `AE`. Pixels (5, 9) and (127, 63) landed in byte 133 as `0x02` and byte 1023 as `0x80`. The new `INIT` and the pixel test hold these values |
+| Lockfile | `cargo update -w` after removing `ssd1306` from `Cargo.toml` | Removed 11 crates: `ssd1306`, `display-interface`, `display-interface-i2c`, `display-interface-spi`, `byte-slice-cast`, `maybe-async-cfg`, `proc-macro-error`, `proc-macro-error-attr`, `pulldown-cmark`, `unicase`, `version_check`. No crate added or upgraded; `embedded-hal-async`, now also a dev-dependency, was already locked. `syn` 1.0.109 stays, through `darling` 0.13 in `nrf-softdevice-macro` |
+| `cortex-m` upstream | crates.io sparse index for `cortex-m`, `bare-metal`, and `ssd1306`; `cortex-m/Cargo.toml` on `rust-embedded/cortex-m` `master` | Latest `cortex-m` 0.7.10, which depends on `bare-metal`, as every 0.7 release does; no 0.8. `master` is version 0.7.10 with `bare-metal = "0.2.4"`. Latest `ssd1306` 0.10.0 with `maybe-async-cfg =0.2.4` |
+| Dependency audit | `cargo deny --locked check` | Passed: advisories, bans, licenses, and sources ok. With the `RUSTSEC-2026-0110` ignore removed, `advisories FAILED` with only `bare-metal is deprecated` |
+| Host tests | `cargo test --locked --lib --tests` | Passed: 498 library tests (10 new in `ui/ssd1306_tests.rs`) and 13 integration tests |
+| Mutation, host | `0xA1` (segment remap) changed to `0xA0` in `INIT`; separately, the RAM clear removed from `Ssd1306::init`; each restored | Both failed: the remap change in the configuration test and the panel-model test ("picture would be mirrored"); the missing clear in the init test and the failed-write test |
+| Coverage | `cargo llvm-cov --locked --lib --tests`, then `--fail-under-lines 98` | Passed: 98.65% of lines in total; `ui/ssd1306.rs` 98.82% of lines and 100% of functions |
+| Formatting and lints | `cargo fmt --check`; Clippy `-D warnings` for the host library and tests, the firmware, the firmware with `log-sensitive-data`, and the simulation | Passed |
+| rustdoc | `RUSTDOCFLAGS=-D warnings` for the host library, the firmware library and both firmware binaries, and the simulation binary | Passed |
+| Release build | `python3 scripts/release.py build`, then `llvm-size`, against the same build of `4d846c3` | `bt2usb` text+rodata 137,692 bytes (was 143,228) and `.bss` 25,796 (was 26,092); `bt2usb-selftest` 64,352 (was 68,584) and RAM 11,864 (was 12,184). Both stay within the 384 KiB flash and 64 KiB RAM budgets. `release.py stage` was not run: it refuses an uncommitted tree |
+| Renode | `renode-test renode/bt2usb-sim.robot`, with the installed platform's `ApplySVD` pointed at a local copy of Nordic's `nrf52840.svd` (nrfx v3.0.0), because this environment cannot reach `dl.antmicro.com` | 3 of 3 passed, as on `4d846c3` with the same setup: every screen read back from the modelled panel, no noisy bytes at boot or after the panel is unplugged and reset, recovery after the address NACK, and the model checks |
+| Mutation, Renode | The RAM clear removed from `Ssd1306::init`, then restored | 3 of 3 still passed: in `render` the first frame rewrites all of RAM before the panel is lit, so the simulation cannot see the clear; the host init test is the check that keeps it (ADR 0030) |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed |
+| Hardware | None | Not run: no board. The self-test's `oled i2c` and `oled render` stages and the first-flash display checks remain the hardware evidence |
+
 ## Validation Record — 2026-11-10, Rev A Design Review
 
 This record covers the commit that reviews the rev A board in

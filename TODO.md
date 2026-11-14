@@ -35,11 +35,11 @@ probe, or USB host to close.
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
 | [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 9 | 3 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
-| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 12 | 6 | 2 |
+| [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 13 | 5 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **172** | **67** | **20** |
+| **Total** | **173** | **66** | **20** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -251,7 +251,6 @@ it becomes workable again.
 | Item | What is needed | Options (recommendation first) |
 | --- | --- | --- |
 | [Security maintenance ownership](#release-provenance-and-supply-chain) (P0) | A private reporting channel, which versions get fixes, who triages, and how fast reporters hear back. SECURITY.md cannot name a channel until one exists | 1. Enable GitHub private vulnerability reporting as the only channel; fix only the latest release tag and `main`; you triage; acknowledge within 7 days and give a fix or plan within 30 days. 2. Publish a security email address instead, with the same policy |
-| [Replace unmaintained transitive dependencies](#release-provenance-and-supply-chain) (P1) | How to drop `proc-macro-error` (via `ssd1306`), and whether documented audit ignores may close the item while no released `cortex-m` drops `bare-metal`. The audit already fails on any other unmaintained crate | 1. Keep both ignores until upstream releases remove the crates, and accept "dropped, or ignored by ID with its chain and removal trigger" as the closing criterion; both are low risk (compile-time only, or stable core types). 2. Replace `ssd1306` with a small in-tree async driver for the 128x64 panel, under a new ADR, with host tests for the command bytes and a Renode and board display check; drops `proc-macro-error`, `maybe-async-cfg`, and their `syn` 1 tree. 3. Port `ssd1306` to `maybe-async-cfg` 0.2.5 and offer it upstream from your GitHub account, keeping the ignore until a release carries it |
 | [Hardware-evidence label and private reporting](#release-provenance-and-supply-chain) (P2) | Two repository settings no tool here can change: create the `hardware-evidence` label (Issues, Labels, New label) that the hardware-result template applies, and turn on private vulnerability reporting (Settings, Code security) | 1. Do both; the loop then updates SECURITY.md and checks a new hardware-result issue. 2. Create only the label and choose an email channel in the row above |
 | [Supply-chain and tooling maintenance](#release-provenance-and-supply-chain) (P1) | The SHA-256 of Nordic's `s140_nrf52_7.3.0.zip`. This environment's network policy refuses Nordic's download host, so the digest cannot be taken here, and a value copied from anywhere but the archive itself would be a guess | 1. Run `sha256sum s140_nrf52_7.3.0.zip` on a copy downloaded from nordicsemi.com and paste the digest; the loop then pins it in `mask softdevice`, which will refuse a mismatching archive. 2. Allow `nsscprodmedia.blob.core.windows.net` in the environment's network settings so the loop can take it |
 | [Nordic license of the SoftDevice bindings](docs/deployment.md#third-party-components-and-licenses) (P1) | `nrf-softdevice-s140`, compiled into the firmware, is under Nordic's 5-clause license, which allows use only with a Nordic chip and forbids reverse engineering binaries. GPL-3.0 does not let a combined work add such restrictions, so whether the `GPL-3.0-only` firmware may be distributed with those bindings linked in needs a legal call. The CI license check allows that one crate until then | 1. Add a GPL section 7 additional permission to `LICENSE` that allows linking Nordic's SoftDevice bindings and interface (the usual route for GPL firmware on vendor stacks). 2. Relicense bt2usb under a permissive license such as `MIT OR Apache-2.0`, as Embassy and nrf-softdevice are. 3. Keep things as they are and accept the risk while the firmware is not distributed |
@@ -1372,31 +1371,34 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   digest mismatch fails the recipe with an actionable message and dependency
   alerts have an assigned review process
   ([security](docs/security.md#supply-chain)). The SoftDevice digest and the
-  review owner wait on [Needs Your Input](#needs-your-input).
-- [ ] **P1** **Replace unmaintained transitive dependencies.** The 2026-09-28
+  review owner wait on [Needs Your Input](#needs-your-input). Also watched
+  here: when a `cortex-m` release without `bare-metal` is out and Embassy and
+  `nrf-softdevice` accept it, adopt it and delete the last advisory ignore,
+  `RUSTSEC-2026-0110`, from `deny.toml` (none as of 2026-11-14;
+  [auditing](docs/code-quality.md#auditing)).
+- [x] **P1** **Replace unmaintained transitive dependencies.** The 2026-09-28
   audit reported `bare-metal 0.2.5` (`RUSTSEC-2026-0110`) and
-  `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained; both are still
-  in `Cargo.lock`. Trace their dependency chains, track the upstream migration,
-  and adopt maintained replacements through dependency upgrades; CI ran
-  `cargo audit` without a deny option until 2026-10-10, so these warnings did
-  not fail the job. Accept when the lockfile no longer selects these affected versions,
-  the audit is clean without advisory suppression, the CI audit fails on
-  unmaintained-crate warnings, and host/firmware/simulation regression checks
-  pass ([testing](docs/validation-records.md#validation-record--2026-09-28)).
-  Progress (2026-10-10): the audit (`deny.toml` since 2026-10-30) fails on
-  unmaintained, unsound, and yanked crates, and ignores only these two
-  advisories by ID, each with its chain and removal trigger, so any new
-  advisory fails CI. Neither crate can be dropped by an upgrade today:
-  `bare-metal` has no patched version and comes from `cortex-m` 0.7.9; the
-  newer 0.7.10 (Dependabot pull request #17, 2026-10-26) and cortex-m's main
-  branch still use it; `ssd1306` 0.10.0 and its
-  main branch pin `maybe-async-cfg =0.2.4`, and with 0.2.5 (which drops
-  `proc-macro-error`) `ssd1306` fails to compile, so it needs porting or
-  replacing. Both run no code that a peer can reach: `proc-macro-error` runs
-  only at compile time, and `bare-metal` supplies the `Mutex` and
-  `CriticalSection` types of `cortex-m` 0.7
-  ([auditing](docs/code-quality.md#auditing)). The route for
-  `proc-macro-error` waits on [Needs Your Input](#needs-your-input).
+  `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained. Since
+  2026-10-10 the audit (`deny.toml` since 2026-10-30) fails on unmaintained,
+  unsound, and yanked crates, so any new advisory fails CI. Done 2026-11-14:
+  `proc-macro-error` is gone. `ssd1306` 0.10.0, still the latest release,
+  pins `maybe-async-cfg =0.2.4`, its only route to the crate, and does not
+  compile against 0.2.5, so a small async driver in `src/ui/ssd1306.rs`
+  replaces it ([ADR 0030](docs/adr/0030-in-tree-ssd1306-driver.md)): the same
+  configuration bytes the crate sent (recorded from it), sent as one command
+  stream that leaves the panel dark, and the frame as one 1,025-byte data
+  write, with ten host tests for the command bytes, the framing, the pixel
+  layout, and a controller RAM model. `Cargo.lock` loses 11 crates, the
+  firmware 5,536 bytes of flash, and the Renode scenario reads every screen
+  back from the modelled panel as before. `bare-metal` stays: `cortex-m`
+  0.7.10, the latest release, and cortex-m's main branch still depend on it,
+  no 0.8 is published, and every Embassy crate and `nrf-softdevice` use
+  `cortex-m` 0.7, so its advisory is the one ignore left in `deny.toml`, with
+  its chain and its removal trigger, a `cortex-m` release without it
+  ([auditing](docs/code-quality.md#auditing),
+  [2026-11-14 record](docs/validation-records.md#validation-record--2026-11-14-in-tree-ssd1306-driver)).
+  The new driver's hardware evidence is the board's OLED checks in
+  [First board bring-up](#board-bring-up-and-hardware-acceptance).
 - [ ] **P1** **Major dependency upgrades.** *(hardware)* Dependabot proposed
   embassy-nrf 0.11, embassy-sync 0.8, and sequential-storage 8. Pull requests
   #7 and #8 (the first two) were closed unmerged, and the open sequential-storage

@@ -449,7 +449,7 @@ the rows below print values; every other dependency line is a fixed string.
 | `embassy-nrf` 0.7.0 | warn | UICR already holds a different reset-pin or NFC-pin setting ([Physical Access And Debug Port](#physical-access-and-debug-port)) | None |
 | `embassy-nrf` 0.7.0 | debug, trace | USB endpoint enable state, aborted control transfers, and DMA buffer copies | None |
 | `embassy-sync`, `embassy-hal-internal` | trace | Ring-buffer indices, not contents | None |
-| `sequential-storage` 7.2.0, `embassy-executor`, `embassy-time`, `ssd1306` | None | No log statements; `sequential-storage` is also built without its `defmt` feature | None |
+| `sequential-storage` 7.2.0, `embassy-executor`, `embassy-time`, the in-tree `ui::ssd1306` driver | None | No log statements; `sequential-storage` is also built without its `defmt` feature | None |
 
 Three lines of the vendored `nrf-softdevice` print a peer address, a passkey,
 or input bytes. bt2usb patches them so that only its `log-sensitive-data`
@@ -543,8 +543,8 @@ The device itself accepts any image written through SWD. See
 - CI actions are pinned to commit SHAs with the upstream tag in a comment, and
   the default workflow permission is read-only.
 - `cargo deny` runs in CI and weekly and fails on unmaintained, unsound, and
-  yanked crates as well as vulnerabilities, apart from two advisories ignored
-  by ID in [deny.toml](../deny.toml), and on any license outside its allow
+  yanked crates as well as vulnerabilities, apart from one advisory ignored
+  by ID in [deny.toml](../deny.toml) (`bare-metal`, through `cortex-m` 0.7), and on any license outside its allow
   list or crate source outside crates.io and the pinned `nrf-softdevice`
   repository; Dependabot proposes Cargo and Actions updates weekly.
 - SoftDevice is obtained from Nordic separately; record its archive hash with
@@ -564,8 +564,8 @@ The device itself accepts any image written through SWD. See
 | Devcontainer | `mcr.microsoft.com/devcontainers/rust:1-bookworm`; `cargo install --locked` without versions | None | Tag not digest; `--privileged` container |
 
 Digest verification for the SoftDevice download and an owner for dependency
-alerts are open in [TODO.md](../TODO.md). The two ignored unmaintained-crate advisories,
-their dependency chains, and what would remove them are in
+alerts are open in [TODO.md](../TODO.md). The one ignored unmaintained-crate advisory,
+its dependency chain, and what would remove it are in
 [code quality](code-quality.md#auditing). Toolchain and task
 pinning is recorded in
 [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md).

@@ -60,6 +60,7 @@ pub mod ui {
     pub mod display_logic;
     pub mod input_logic;
     pub mod layout;
+    pub mod ssd1306;
     pub mod ui_logic;
 
     pub use ui_logic::{ButtonEvent, Screen};

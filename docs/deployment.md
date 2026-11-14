@@ -673,7 +673,7 @@ components under other licenses:
 
 The direct firmware dependencies from crates.io (`embassy-executor`,
 `embassy-nrf`, `embassy-time`, `embassy-usb`, `embassy-sync`,
-`embassy-futures`, `ssd1306`, `embedded-graphics`, `cortex-m`, `cortex-m-rt`,
+`embassy-futures`, `embedded-graphics`, `cortex-m`, `cortex-m-rt`,
 `embedded-hal`, `embedded-hal-async`, `sequential-storage`,
 `embedded-storage-async`, `defmt`, `defmt-rtt`, `panic-probe`, `static_cell`,
 and `heapless`) are each published as `MIT OR Apache-2.0` for every version of

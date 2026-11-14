@@ -44,7 +44,7 @@ default = []
 embedded = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time", 
             "dep:embassy-usb", "dep:embassy-sync",
             "dep:nrf-softdevice", "dep:nrf-softdevice-s140",
-            "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
+            "dep:embedded-graphics",
             "dep:cortex-m", "dep:cortex-m-rt", "cortex-m-rt/paint-stack",
             "dep:embedded-hal", "dep:embedded-hal-async",
             "dep:sequential-storage", "dep:embedded-storage-async",
@@ -63,7 +63,7 @@ log-sensitive-data = ["nrf-softdevice?/log-sensitive-data"]
 # SoftDevice usually provides it.
 sim = ["dep:embassy-executor", "dep:embassy-nrf", "dep:embassy-time",
        "dep:embassy-sync",
-       "dep:ssd1306", "ssd1306/async", "dep:embedded-graphics",
+       "dep:embedded-graphics",
        "dep:cortex-m", "dep:cortex-m-rt", "dep:embedded-hal", "dep:embedded-hal-async",
        "dep:defmt", "dep:defmt-rtt", "dep:panic-probe",
        "dep:static_cell", "heapless/defmt-03", "defmt",
@@ -86,7 +86,8 @@ nrf-softdevice    = { git = "https://github.com/embassy-rs/nrf-softdevice", rev 
 nrf-softdevice-s140 = { git = "https://github.com/embassy-rs/nrf-softdevice", rev = "47d6121c6e823120e8b883a7ac75f44ce7daa3aa", optional = true }
 
 # - Display (SSD1306 OLED) (embedded only) ------------------
-ssd1306           = { version = "0.10", optional = true }
+# The panel driver is in-tree (src/ui/ssd1306.rs, ADR 0030); embedded-graphics
+# draws the text into its framebuffer.
 embedded-graphics = { version = "0.8", optional = true }
 
 # - Embedded core (embedded only) ----------------------
@@ -112,6 +113,9 @@ heapless          = { version = "0.8" }
 # The firmware's OLED font, for tests/oled_font.rs, which keeps the Renode
 # panel model's glyph table (renode/oled-font-6x10.txt) equal to it.
 embedded-graphics = "0.8"
+# The I2C trait the in-tree SSD1306 driver is generic over, for its host tests
+# against a recording bus (src/ui/ssd1306_tests.rs, ADR 0030).
+embedded-hal-async = "1.0"
 # The vendored nrf-softdevice's event portal, for tests/vendor_portal.rs, which
 # compiles that source on the host: the embassy-sync version the vendored
 # crate uses (renamed, since the firmware's own is older), with its host

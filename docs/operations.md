@@ -821,9 +821,10 @@ radio idle point to a flash problem; run the self-test's `flash` stage.
   activity and while the host has USB suspended. The first button press only
   wakes it.
 - No display response: wiring (SDA P0.26, SCL P0.27, VDD (not 5 V), common
-  ground) or a module strapped to I2C address `0x3D`. The firmware uses the
-  `ssd1306` crate's default interface at `0x3C`, the address the self-test
-  probes; a `0x3D` module needs a code change.
+  ground) or a module strapped to I2C address `0x3D`. The firmware's driver
+  addresses `0x3C` (`ssd1306::ADDRESS`), the address the self-test probes; a
+  `0x3D` module needs a code change
+  ([hardware](hardware.md#oled-display)).
 - A stuck bus: SDA or SCL held low. The display task logs that it requested
   STOP and then waits for the hardware; it can stay degraded while the rest of
   the bridge runs ([ADR 0009](adr/0009-isolated-display-task.md)).

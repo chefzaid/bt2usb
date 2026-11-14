@@ -892,11 +892,11 @@ interrupted write must leave a documented state ([TODO.md](../TODO.md)).
   I2C. A separate display task owns the TWIM0 bus and the SSD1306, and renders
   only the newest snapshot it has not yet drawn
   ([ADR 0009](adr/0009-isolated-display-task.md)).
-- **Clean first frame.** Initialization clears the panel's memory before
-  the display driver turns the panel on, and the display task turns it on
-  for good only after the first frame is in, so the random contents the
-  SSD1306 powers up with never show
-  ([ADR 0024](adr/0024-renode-oled-models.md)).
+- **Clean first frame.** Initialization configures the panel and clears its
+  memory while it stays dark, and the display task turns it on only after
+  the first frame is in, so the random contents the SSD1306 powers up with
+  never show ([ADR 0024](adr/0024-renode-oled-models.md),
+  [ADR 0030](adr/0030-in-tree-ssd1306-driver.md)).
 - **Fault recovery.** A failed display operation re-initializes the panel after
   a backoff of 1, 2, 4, 8, and 16 seconds, then every 30 seconds, logging
   `OLED operation failed; retry in {} ms (bridge remains active)` and, on

@@ -3,6 +3,13 @@
 - Status: Accepted
 - Date: 2026-10-10
 
+Since 2026-11-14 the firmware drives the panel with the in-tree driver of
+[ADR 0030](0030-in-tree-ssd1306-driver.md) instead of the `ssd1306` crate
+this record describes. The models are unchanged and decode its traffic: one
+command stream for the configuration, one for the window, and the frame as
+one 1,025-byte data write, with the RAM cleared before the panel is first
+lit.
+
 ## Context
 
 The Renode simulation ([ADR 0014](0014-renode-gpio-models.md)) is the only

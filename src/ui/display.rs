@@ -23,17 +23,19 @@ use embedded_graphics::mono_font::MonoTextStyle;
 use embedded_graphics::pixelcolor::BinaryColor;
 use embedded_graphics::prelude::*;
 use embedded_graphics::text::Text;
-use ssd1306::command::AddrMode;
-use ssd1306::mode::BufferedGraphicsModeAsync;
-use ssd1306::prelude::*;
-use ssd1306::{I2CDisplayInterface, Ssd1306Async};
 use static_cell::StaticCell;
 
-pub type Display<I2C> = Ssd1306Async<
-    I2CInterface<I2C>,
-    DisplaySize128x64,
-    BufferedGraphicsModeAsync<DisplaySize128x64>,
->;
+use super::ssd1306;
+
+/// The panel on its bus: the in-tree driver (ADR 0030).
+pub type Display<I2C> = ssd1306::Ssd1306<I2C>;
+
+/// Size of the TWIM driver's RAM copy buffer for writes whose source is in
+/// flash, which the driver's constant command streams are.
+const TWIM_COPY_BUFFER: usize = 64;
+const _: () = assert!(
+    ssd1306::INIT.len() <= TWIM_COPY_BUFFER && ssd1306::FULL_WINDOW.len() <= TWIM_COPY_BUFFER
+);
 
 #[derive(Clone, Copy, Debug)]
 pub struct DisplayFault;
@@ -52,15 +54,6 @@ pub fn publish(state: &UiState, powered_on: bool) {
         state: state.clone(),
         powered_on,
     });
-}
-
-fn new<I2C: embedded_hal_async::i2c::I2c>(i2c: I2C) -> Display<I2C> {
-    Ssd1306Async::new(
-        I2CDisplayInterface::new(i2c),
-        DisplaySize128x64,
-        DisplayRotation::Rotate0,
-    )
-    .into_buffered_graphics_mode()
 }
 
 /// Request that the exclusively owned display TWIM peripheral stop its DMA.
@@ -91,10 +84,18 @@ pub fn new_twim(
     config.sda_pullup = true;
     config.scl_pullup = true;
     // embassy-nrf 0.7's Twim requires a RAM scratch buffer for writes whose
-    // source isn't in RAM (e.g. flash-resident SSD1306 command sequences); the
-    // framebuffer flush is already RAM-backed. This lives for the program.
-    static TX_BUF: StaticCell<[u8; 64]> = StaticCell::new();
-    twim::Twim::new(twim, irq, sda, scl, config, TX_BUF.init([0; 64]))
+    // source isn't in RAM (the driver's constant command streams, checked
+    // against its size above); the framebuffer flush is already RAM-backed
+    // and goes out in place. This lives for the program.
+    static TX_BUF: StaticCell<[u8; TWIM_COPY_BUFFER]> = StaticCell::new();
+    twim::Twim::new(
+        twim,
+        irq,
+        sda,
+        scl,
+        config,
+        TX_BUF.init([0; TWIM_COPY_BUFFER]),
+    )
 }
 
 /// The display task: the sole owner of TWIM0 and the OLED, rendering the
@@ -107,9 +108,11 @@ pub async fn task(twim: twim::Twim<'static, TWISPI0>) -> ! {
 /// TWIM0 wrapper whose error returns follow the end of DMA.
 ///
 /// On NACK/overrun the pinned driver triggers STOP and returns before STOPPED.
-/// display-interface sends from a buffer inside its own future, so an early
-/// error would release that buffer during the stop sequence, and the next
-/// transfer would clear the pending STOPPED event and could finish early.
+/// The SSD1306 driver's command streams go out through the TWIM copy buffer
+/// and its frame in place from the framebuffer, so an early error would let
+/// the retry rewrite a buffer EasyDMA may still be reading during the stop
+/// sequence, and the next transfer would clear the pending STOPPED event and
+/// could finish early.
 pub struct StopSafeI2c<'d>(twim::Twim<'d, TWISPI0>);
 
 impl<'d> StopSafeI2c<'d> {
@@ -177,8 +180,8 @@ pub async fn finish_or_stop<F: core::future::Future>(operation: F) -> F::Output 
 pub async fn init<I2C: embedded_hal_async::i2c::I2c>(
     i2c: I2C,
 ) -> Result<Display<I2C>, DisplayFault> {
-    let mut display = new(i2c);
-    initialize(&mut display).await?;
+    let mut display = Display::new(i2c);
+    display.init().await.map_err(|_| DisplayFault)?;
     display
         .set_display_on(true)
         .await
@@ -186,42 +189,20 @@ pub async fn init<I2C: embedded_hal_async::i2c::I2c>(
     Ok(display)
 }
 
-/// Configure the panel and leave it dark with its RAM cleared. The driver's
-/// `init` ends by turning the panel on, and a panel powers up with random RAM,
-/// so the RAM is cleared first, while power-up still holds the panel off;
-/// `init` then lights a blank panel, and turning it off again lets the caller
-/// show its first frame whole. The clear costs one full frame, ~0.1 s at
-/// 100 kHz, on every initialization.
-async fn initialize<I2C: embedded_hal_async::i2c::I2c>(
-    display: &mut Display<I2C>,
-) -> Result<(), DisplayFault> {
-    // Power-up selects page addressing, which ignores the draw area a flush
-    // sets; `init` selects horizontal addressing again.
-    display
-        .set_addr_mode(AddrMode::Horizontal)
-        .await
-        .map_err(|_| DisplayFault)?;
-    display.clear_buffer();
-    display.flush().await.map_err(|_| DisplayFault)?;
-    display.init().await.map_err(|_| DisplayFault)?;
-    display
-        .set_display_on(false)
-        .await
-        .map_err(|_| DisplayFault)
-}
-
 /// Draw `state`'s screen into the framebuffer: every line [`layout::lines`]
 /// gives it, in the 6×10 font. Drawing cannot fail; I2C failures surface at
 /// flush.
 fn draw_view<I2C: embedded_hal_async::i2c::I2c>(display: &mut Display<I2C>, state: &UiState) {
-    display.clear_buffer();
+    let frame = display.frame();
+    frame.clear();
     for line in layout::lines(state) {
+        // The framebuffer's draw error is `Infallible`.
         let _ = Text::new(
             &line.text,
             Point::new(0, line.y),
             MonoTextStyle::new(&FONT_6X10, BinaryColor::On),
         )
-        .draw(display);
+        .draw(frame);
     }
 }
 
@@ -240,7 +221,9 @@ async fn render<I2C: embedded_hal_async::i2c::I2c>(
     initialize: bool,
 ) -> Result<(), DisplayFault> {
     if initialize {
-        self::initialize(display).await?;
+        // Configures the panel and clears its RAM while it is dark, so the
+        // first frame below appears whole (power-up RAM is noise).
+        display.init().await.map_err(|_| DisplayFault)?;
     }
     if frame.powered_on {
         draw_view(display, &frame.state);
@@ -254,7 +237,7 @@ async fn render<I2C: embedded_hal_async::i2c::I2c>(
 
 /// Sole owner of TWIM0 and the OLED; main only publishes snapshots.
 pub async fn run<I2C: embedded_hal_async::i2c::I2c>(i2c: I2C) -> ! {
-    let mut display = new(i2c);
+    let mut display = Display::new(i2c);
     let mut frame = FRAMES.wait().await;
     let mut applied: Option<Frame> = None;
     let mut initialized = false;

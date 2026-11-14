@@ -756,7 +756,7 @@ was 98.66% of lines with them and 99.01% without.
 Everything that depends on the SoftDevice, Embassy, or peripheral types is
 not compiled for the host and is therefore not in the report: the connection
 workers, security handler, GATT HID and Device Information clients, scanner, storage shell,
-USB device, display driver, buttons, power shell, stack monitor and MPU guard (`stack.rs`), SoftDevice setup, and the
+USB device, display task, buttons, power shell, stack monitor and MPU guard (`stack.rs`), SoftDevice setup, and the
 three entry points. `config.rs` is compiled into the host library but holds
 only constants, so it adds no lines to the report. The
 [host library composition](testing.md#host-library-composition) table lists
@@ -884,8 +884,8 @@ host library's:
 
 - **Advisories.** It fails on unmaintained, unsound, and yanked crates as well
   as on vulnerability advisories, so a new advisory against any crate in
-  `Cargo.lock` fails the next push or weekly run. Two advisories are ignored by
-  ID, each with a comment naming the chain and what would remove it; an ignore
+  `Cargo.lock` fails the next push or weekly run. One advisory is ignored by
+  ID, with a comment naming the chain and what would remove it; an ignore
   covers that advisory only, so a different advisory against the same crate
   still fails.
 - **Licenses.** Every crate must declare a license on the allow list
@@ -900,18 +900,21 @@ host library's:
 - **Sources.** Crates come from crates.io, or from the pinned
   `nrf-softdevice` Git repository; any other registry or Git source fails.
 
-The job replaced `cargo audit` with the same two ignores on 2026-10-30.
+The job replaced `cargo audit` with the same two ignores on 2026-10-30. The
+`proc-macro-error` ignore (`RUSTSEC-2024-0370`) went on 2026-11-14, when an
+in-tree driver replaced `ssd1306` and its `maybe-async-cfg 0.2.4` chain
+([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)).
 
 | Crate | Advisory (ignored) | Pulled in by | What removes it |
 | --- | --- | --- | --- |
-| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. The newer 0.7.10 still depends on `bare-metal` 0.2.5 (its lockfile in Dependabot pull request #17, checked 2026-10-30), and so does cortex-m's main branch (checked 2026-10-10, commit `f259e37`) |
-| `proc-macro-error 1.0.4` | `RUSTSEC-2024-0370` (unmaintained) | `maybe-async-cfg 0.2.4`, which `ssd1306 0.10.0` pins with `=0.2.4` | `maybe-async-cfg 0.2.5` replaced it with `manyhow`, but neither the `ssd1306` 0.10.0 release nor its main branch (commit `79cb629`, checked 2026-10-10) accepts 0.2.5. Raising the pin alone does not work: `ssd1306` then fails to compile with 19 errors, because 0.2.5 generates the async variants differently (tried on 2026-10-10 with a patched copy), so `ssd1306` itself needs porting or replacing |
+| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. On 2026-11-14 the latest release, 0.7.10, still depended on `bare-metal` 0.2 (crates.io index), so did cortex-m's main branch (its manifest, still 0.7.10), and no 0.8 was published. `cortex-m` sets `links = "cortex-m"`, so an image holds one version, and every Embassy crate uses 0.7 |
 
-On 2026-10-30 cargo-deny 0.20.2 found no vulnerabilities and only these two
-warnings; with the configuration it exits 0, and with either ignore or the
-`BSD-2-Clause` allowance removed it exits 1. Removing them means upgrading or replacing other crates,
-not changing bt2usb code; the options are in
-[TODO.md](../TODO.md#release-provenance-and-supply-chain).
+On 2026-11-14 cargo-deny 0.20.2 found no vulnerabilities and only this
+warning; with the configuration it exits 0, and with the ignore removed it
+exits 1 and names `RUSTSEC-2026-0110`. Removing it means a `cortex-m` upgrade
+that Embassy and `nrf-softdevice` accept, not a bt2usb code change; Dependabot's
+weekly Cargo check proposes one when it is released
+([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)).
 
 ### Updates
 
@@ -920,7 +923,7 @@ its pull requests open for each (`open-pull-requests-limit: 5` in
 [dependabot.yml](../.github/dependabot.yml)). Treat each one as a
 code change:
 
-1. Read the upstream changelog. For Embassy, `nrf-softdevice`, `ssd1306`, and
+1. Read the upstream changelog. For Embassy, `nrf-softdevice`, and
    `sequential-storage`, look for changes to cancellation, I2C, USB, or flash
    behavior that bt2usb relies on.
 2. Check that CI passes. Dependabot pull requests get the same jobs.
@@ -1087,10 +1090,10 @@ gap and its priority; this list does not repeat the acceptance criteria.
 
 | Gap | Where it is tracked |
 | --- | --- |
-| The connection workers, security handler, GATT HID and Device Information clients, storage shell, USB device, and display driver have no host tests | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
+| The connection workers, security handler, GATT HID and Device Information clients, storage shell, USB device, and display task have no host tests (the SSD1306 driver itself has since 2026-11-14) | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
 | The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | The [parser fuzz targets](testing.md#parser-fuzzing) exercise the pure parsers' paths ([ADR 0027](adr/0027-seeded-parser-fuzzing.md)); the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
 | No stack or SoftDevice RAM budget is measured or enforced; the [release size budgets](#release-size-budgets) cover only flash and statics | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0). Since 2026-10-11 an overflow faults in the MPU guard instead of corrupting statics ([ADR 0026](adr/0026-mpu-stack-guard.md)); the guard's hardware evidence is the self-test's `stack guard` stage and optional deliberate overflow |
-| Two unmaintained crates stay in the graph, and the audit ignores their advisories by ID | [Replace unmaintained transitive dependencies](../TODO.md#release-provenance-and-supply-chain) (P1) |
+| One unmaintained crate (`bare-metal`, through `cortex-m` 0.7) stays in the graph, and the audit ignores its advisory by ID until a `cortex-m` release drops it | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1), which watches for that release |
 | No digest check for the SoftDevice download, and no owner for dependency alerts | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 

@@ -22,6 +22,7 @@ The display path changed three times:
 | Until 2026-06-24 | Blocking I2C flushes called from the UI loop in `main` | The README at `e3bc620` listed "Blocking display I/O" as a limitation: `ssd1306` 0.9's async mode did not compile in that configuration, so a redraw stalled the cooperative executor |
 | 2026-06-24 (`648f99f`) to 2026-09-28 | `Ssd1306Async` over Embassy's async TWIM, still awaited inside the UI loop | The executor kept running, but the UI loop itself waited for every redraw and had no error handling: `init` and `draw_*` discarded I2C results |
 | Since 2026-09-28 (`2479c79`) | A dedicated `display_task` that owns TWIM0; the UI loop only publishes snapshots | This record |
+| Since 2026-11-14 | The same task, with the in-tree `ui::ssd1306` driver in place of the `ssd1306` crate | [ADR 0030](0030-in-tree-ssd1306-driver.md); the stop-safe reasoning below still holds: the driver's command streams go out through the TWIM copy buffer and its frame from the framebuffer, both of which a retry would reuse |
 
 Awaiting I2C in the UI loop couples the display to work that matters more. The
 UI loop in [main.rs](../../src/main.rs) drains `BLE_EVENT_CHANNEL` (capacity 8),
@@ -217,12 +218,12 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
 | Task, pins, pull-ups, transmit buffer | `task` and `new_twim` in [display.rs](../../src/ui/display.rs), spawned from [main.rs](../../src/main.rs), which logs `UI and isolated OLED tasks started` after spawning; the simulation spawns the same task ([ADR 0024](0024-renode-oled-models.md)) |
 | Interrupt priority | `interrupt::TWISPI0.set_priority(Priority::P2)` in `main.rs` and [selftest.rs](../../src/selftest.rs) |
 | Latest-state hand-off | `FRAMES`, `Frame`, and `publish` in [display.rs](../../src/ui/display.rs); called at the end of every UI loop iteration in `main.rs` |
-| Render loop | `run`, `render`, and `initialize` in `display.rs`; each screen's lines come from `ui::layout::lines` in [layout.rs](../../src/ui/layout.rs) |
+| Render loop | `run` and `render` in `display.rs` (`initialize` until 2026-11-14, now `Ssd1306::init`); each screen's lines come from `ui::layout::lines` in [layout.rs](../../src/ui/layout.rs) |
 | Backoff policy | `Recovery` in [display_logic.rs](../../src/ui/display_logic.rs) |
 | Deadline and STOP request | `finish_or_stop` and `request_bus_stop` in `display.rs` |
 | Error hold until STOPPED | `StopSafeI2c` and `wait_stopped` in `display.rs` |
 | Self-test use | OLED stage in `selftest.rs`: TWIM0 from `new_twim` wrapped in `StopSafeI2c`, address probe `[0x00, 0xAE]` at `0x3C`, then `init` and `draw_home` through `finish_or_stop` |
-| Async driver feature | `ssd1306/async` in the `embedded` and `sim` features of [Cargo.toml](../../Cargo.toml) |
+| Panel driver | The in-tree async driver in [ssd1306.rs](../../src/ui/ssd1306.rs) since 2026-11-14 ([ADR 0030](0030-in-tree-ssd1306-driver.md)); before that, `ssd1306/async` in the `embedded` and `sim` features of [Cargo.toml](../../Cargo.toml) |
 
 ### Verification Status
 

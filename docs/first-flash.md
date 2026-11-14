@@ -198,8 +198,9 @@ The storage load reports `No paired devices in flash` or
       (keyboard, mouse and consumer-control interfaces).
 - [ ] The OLED shows the Home screen, and at power-up it goes from dark to
       Home without a flash of random pixels. The firmware clears the panel's
-      memory before the display driver turns it on
-      ([ADR 0024](adr/0024-renode-oled-models.md)); watch a few cold power-ups.
+      memory while the panel is dark and turns it on with the first frame
+      ([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)); watch a few cold
+      power-ups.
 - [ ] `stack guard: 4096 bytes at 0x<base>..0x<top>` follows the boot line, not
       `stack guard off: …`.
 - [ ] `stack high-water: X of Y bytes` lines appear; the firmware logs a new one

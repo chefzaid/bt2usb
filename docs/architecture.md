@@ -109,7 +109,8 @@ and TWIM and SSD1306 models ([ADR 0024](adr/0024-renode-oled-models.md)).
 | [ui/input_logic.rs](../src/ui/input_logic.rs) | Pure core | Device-list window and scan spinner |
 | [ui/display_logic.rs](../src/ui/display_logic.rs) | Pure core | OLED retry backoff policy |
 | [ui/layout.rs](../src/ui/layout.rs) | Pure core | Each screen's text lines and their baselines on the 128×64 panel |
-| [ui/display.rs](../src/ui/display.rs) | Board shell | OLED task, TWIM0 setup, panel initialization, drawing the layout's lines, STOP-safe I2C wrapper |
+| [ui/ssd1306.rs](../src/ui/ssd1306.rs) | Pure core | SSD1306 driver: the configuration and window command bytes, the framebuffer and its pixel layout, and the async init, flush, and on/off writes over any `embedded-hal-async` I2C bus ([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)) |
+| [ui/display.rs](../src/ui/display.rs) | Board shell | OLED task, TWIM0 setup, drawing the layout's lines into the driver's framebuffer, STOP-safe I2C wrapper |
 | [ui/buttons.rs](../src/ui/buttons.rs) | Board shell | Debounced GPIO button task |
 
 ## Module Layers And Dependency Rules
@@ -1061,12 +1062,12 @@ flowchart LR
    frame differs from the last one applied and the retry backoff allows it.
 3. `render` initializes the panel on first use and after any failure, draws
    and flushes the 128×64 framebuffer when the panel should be on, and then
-   switches the panel on or off. Initialization (`initialize`) first clears
-   the panel's RAM while power-up still holds the panel off, then runs the
-   `ssd1306` crate's `init`, which ends by turning the panel on, and turns it
-   off again until the frame is in, so the panel never shows the random RAM
-   content it powers up with. A render that initializes sends two full
-   frames, about 0.22 s at 100 kHz, well inside the 500 ms deadline. The
+   switches the panel on or off. Initialization (`Ssd1306::init` in the
+   in-tree driver, [ADR 0030](adr/0030-in-tree-ssd1306-driver.md)) sends the
+   configuration as one command stream that starts with display off and never
+   turns it on, then clears the panel's RAM, so the panel never shows the
+   random RAM content it powers up with. A render that initializes sends two
+   full frames, about 0.19 s at 100 kHz, well inside the 500 ms deadline. The
    drawing is the lines
    `ui::layout::lines` gives the screen, in `FONT_6X10`, so the layout is
    host-tested and the Renode panel model reads the same lines back.
@@ -1557,6 +1558,7 @@ change.
 - [ADR 0027: Fuzz The Parsers With A Seeded In-Tree Harness On The Stable Toolchain](adr/0027-seeded-parser-fuzzing.md)
 - [ADR 0028: Build Release Images Reproducibly And Hold Them To Size Budgets](adr/0028-reproducible-budgeted-release-images.md)
 - [ADR 0029: Build The Rev A Board On A Certified nRF52840 Module With The Firmware's Pin Map](adr/0029-rev-a-board-on-a-certified-module.md)
+- [ADR 0030: Drive The SSD1306 With A Small In-Tree Async Driver](adr/0030-in-tree-ssd1306-driver.md)
 
 ## Proposed ADRs
 

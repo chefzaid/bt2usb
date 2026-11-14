@@ -9,8 +9,8 @@ boundaries, threat model, implemented controls, and known limitations.
 In scope:
 
 - the firmware in this repository: the bridge, the self-test image, and the
-  shared code under `src/`, including the vendored `nrf-softdevice` patch in
-  `vendor/`
+  shared code under `src/`, including the vendored `nrf-softdevice` patch
+  and the copy of `bare-metal` in `vendor/`
 - the build and release path: `.github/workflows/ci.yml`, `scripts/`, the
   tasks in `maskfile.md`, and the attested release packages it is configured
   to produce

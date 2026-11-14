@@ -884,10 +884,13 @@ host library's:
 
 - **Advisories.** It fails on unmaintained, unsound, and yanked crates as well
   as on vulnerability advisories, so a new advisory against any crate in
-  `Cargo.lock` fails the next push or weekly run. One advisory is ignored by
-  ID, with a comment naming the chain and what would remove it; an ignore
-  covers that advisory only, so a different advisory against the same crate
-  still fails.
+  `Cargo.lock` that comes from crates.io fails the next push or weekly run.
+  No advisory is ignored. If one ever must be, it is ignored by ID with a
+  comment naming the chain and what would remove it; an ignore covers that
+  advisory only, so a different advisory against the same crate still fails.
+  The check matches crates.io packages, so it does not cover the two crates
+  built from `vendor/`: the patched `nrf-softdevice` and the copy of
+  `bare-metal` described below.
 - **Licenses.** Every crate must declare a license on the allow list
   (`Apache-2.0`, `BSD-2-Clause`, `BSD-3-Clause`, `GPL-3.0-only`, `MIT`,
   `Unicode-3.0`), each of which GPL-3.0 can incorporate. A new crate under any
@@ -900,21 +903,22 @@ host library's:
 - **Sources.** Crates come from crates.io, or from the pinned
   `nrf-softdevice` Git repository; any other registry or Git source fails.
 
-The job replaced `cargo audit` with the same two ignores on 2026-10-30. The
-`proc-macro-error` ignore (`RUSTSEC-2024-0370`) went on 2026-11-14, when an
-in-tree driver replaced `ssd1306` and its `maybe-async-cfg 0.2.4` chain
-([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)).
+The job replaced `cargo audit` on 2026-10-30, with two ignores for
+unmaintained crates. Both are gone since 2026-11-14:
 
-| Crate | Advisory (ignored) | Pulled in by | What removes it |
+| Crate | Advisory | Pulled in by | How it was resolved |
 | --- | --- | --- | --- |
-| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | A cortex-m release without `bare-metal`, adopted by Embassy and nrf-softdevice. On 2026-11-14 the latest release, 0.7.10, still depended on `bare-metal` 0.2 (crates.io index), so did cortex-m's main branch (its manifest, still 0.7.10), and no 0.8 was published. `cortex-m` sets `links = "cortex-m"`, so an image holds one version, and every Embassy crate uses 0.7 |
+| `proc-macro-error 1.0.4` | `RUSTSEC-2024-0370` (unmaintained) | `maybe-async-cfg 0.2.4`, which `ssd1306 0.10.0` pins with `=0.2.4` | Removed from the graph: an in-tree driver replaced `ssd1306` ([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)) |
+| `bare-metal 0.2.5` | `RUSTSEC-2026-0110` (deprecated and archived, no patched version) | `cortex-m 0.7.9`, which bt2usb, `embassy-executor`, `embassy-nrf`, `embassy-hal-internal`, `nrf-pac`, `nrf-softdevice`, and `panic-probe` depend on | Still required: `cortex-m` re-exports three of its items, and removing them is a breaking change upstream plans for 0.8 (draft pull request 656). Its 101-line source is now an in-tree copy, [vendor/bare-metal](../vendor/bare-metal/README.bt2usb.md), without the release's build script, so no build downloads the archived crate ([ADR 0031](adr/0031-vendored-bare-metal.md)). Delete the copy when a `cortex-m` release without `bare-metal` is adopted |
 
-On 2026-11-14 cargo-deny 0.20.2 found no vulnerabilities and only this
-warning; with the configuration it exits 0, and with the ignore removed it
-exits 1 and names `RUSTSEC-2026-0110`. Removing it means a `cortex-m` upgrade
-that Embassy and `nrf-softdevice` accept, not a bt2usb code change; Dependabot's
-weekly Cargo check proposes one when it is released
-([ADR 0030](adr/0030-in-tree-ssd1306-driver.md)).
+On 2026-11-14 cargo-deny 0.20.2 found no vulnerabilities and no warnings
+about crates.io packages, and exits 0 with no ignore. With the
+`[patch.crates-io]` entry for `bare-metal` removed and the lockfile
+regenerated it exits 1 and names `RUSTSEC-2026-0110`; with the
+`BSD-2-Clause` allowance removed it exits 1 as well. Because the copy is not
+a crates.io package, a later advisory against `bare-metal` would not fail
+the job; the crate is archived, 101 lines long, and covered by
+[vendor_bare_metal.rs](../tests/vendor_bare_metal.rs).
 
 ### Updates
 
@@ -1093,7 +1097,7 @@ gap and its priority; this list does not repeat the acceptance criteria.
 | The connection workers, security handler, GATT HID and Device Information clients, storage shell, USB device, and display task have no host tests (the SSD1306 driver itself has since 2026-11-14) | [Host tests for the I/O shells](../TODO.md#verification-and-code-quality) (P1) |
 | The list of panic paths no lint flags is maintained by hand, and no test exercises the vendored crate's peer-facing paths | The [parser fuzz targets](testing.md#parser-fuzzing) exercise the pure parsers' paths ([ADR 0027](adr/0027-seeded-parser-fuzzing.md)); the vendored paths need a deliberately misbehaving peer ([Hardware compatibility baseline](../TODO.md#board-bring-up-and-hardware-acceptance), P0) |
 | No stack or SoftDevice RAM budget is measured or enforced; the [release size budgets](#release-size-budgets) cover only flash and statics | [Memory and endurance budget](../TODO.md#platform-memory-and-recovery) (P0). Since 2026-10-11 an overflow faults in the MPU guard instead of corrupting statics ([ADR 0026](adr/0026-mpu-stack-guard.md)); the guard's hardware evidence is the self-test's `stack guard` stage and optional deliberate overflow |
-| One unmaintained crate (`bare-metal`, through `cortex-m` 0.7) stays in the graph, and the audit ignores its advisory by ID until a `cortex-m` release drops it | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1), which watches for that release |
+| The archived `bare-metal` crate stays in the graph as an in-tree copy until a `cortex-m` release drops it, and the advisory check does not cover vendored crates ([ADR 0031](adr/0031-vendored-bare-metal.md)) | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1), which watches for that release |
 | No digest check for the SoftDevice download, and no owner for dependency alerts | [Supply-chain and tooling maintenance](../TODO.md#release-provenance-and-supply-chain) (P1) |
 | The devcontainer base image is a moving tag (`1-bookworm`), and the container runs `--privileged` | [Development environment hardening](../TODO.md#developer-experience) (P1) |
 

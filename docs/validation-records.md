@@ -8,6 +8,31 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-11-14, In-Tree bare-metal Copy
+
+This record covers the commit that replaces the last advisory ignore, on top
+of `b0c5729`: the archived `bare-metal` 0.2.5 (`RUSTSEC-2026-0110`), which
+`cortex-m` 0.7 still depends on, now comes from `vendor/bare-metal` through
+`[patch.crates-io]` ([ADR 0031](adr/0031-vendored-bare-metal.md)), and
+`deny.toml` ignores nothing. The environment is that of the record below.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Upstream | crates.io index; `rust-embedded/cortex-m` branches by `git ls-remote`, its `interrupt.rs` and changelog on the default branch, and its issues and pull requests through GitHub's search API | `cortex-m` 0.7.10 (2026-10-21) is the latest release and still has `pub use bare_metal::{CriticalSection, Mutex, Nr}`. Issue 651 "Deprecation of `bare-metal`" is open; pull request 656 "Remove bare-metal dependency" is an open draft (updated 2026-11-12) that includes 654, which with 704 changes the interrupt number traits and is described as breaking |
+| The copy | `sha256sum` of `vendor/bare-metal` against the crates.io 0.2.5 archive in the Cargo registry (lockfile checksum `5deb64ef…bac5b3`) | `src/lib.rs`, `LICENSE-APACHE`, and `LICENSE-MIT` identical. `build.rs` not copied: the cfg it sets, `unstable_const_fn`, does not occur in `src/lib.rs` |
+| Lockfile | `cargo update -p bare-metal` | `bare-metal` 0.2.5 loses its registry source and checksum; `rustc_version` 0.2.3, `semver` 0.9.0, and `semver-parser` 0.7.0 removed. Nothing else changed |
+| Dependency audit | `cargo deny --locked check` with no `ignore` | Passed: advisories, bans, licenses, and sources ok, with no warning |
+| Audit, patch removed | The `[patch.crates-io]` entry deleted, then restored | `cargo deny --locked` refused the stale lockfile; with the lockfile regenerated, `advisories FAILED` on `RUSTSEC-2026-0110` |
+| Same firmware | `python3 scripts/release.py build` with the copy and on `b0c5729` (both trees dirty, so the build identity has the same length), then `llvm-nm --print-size` on both ELF files with hash suffixes removed | `bt2usb` and `bt2usb-selftest`: identical symbol tables (1,237 and 788 symbols; same names, kinds, and sizes). `.text` is 125,116 bytes against 125,112 for `bt2usb` (link order moved padding) and 55,124 for both self-tests; `.rodata` sizes equal. The bytes are not identical: Cargo derives symbol hashes from a crate's source, so the link order differs |
+| Host tests | `cargo test --locked --lib --tests` | Passed: 498 library tests and 17 integration tests, 4 of them new in `tests/vendor_bare_metal.rs` |
+| Formatting and lints | `cargo fmt --check`; Clippy `-D warnings` for the host library and tests, the firmware, the firmware with `log-sensitive-data`, and the simulation | Passed |
+| rustdoc | As in CI, for the host library, the firmware, and the simulation | Passed |
+| Script tests | `python3 -m unittest discover -s scripts` for the release, SBOM, and documentation-check helpers | Passed |
+| Renode | `renode-test renode/bt2usb-sim.robot`, set up as in the record below | 3 of 3 passed |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed |
+| SBOM | `release.py stage` on this change committed locally, before this row was written (it refuses an uncommitted tree) | Staged both images within their budgets. `bt2usb.cdx.json` has 119 components and lists `bare-metal` 0.2.5 as `Vendored source at vendor/bare-metal in this repository`, `MIT OR Apache-2.0`, scope `required`, with no package URL, like `nrf-softdevice`; `rustc_version`, `semver`, `ssd1306`, and `proc-macro-error` are absent |
+| Hardware | None | Not run: no board. The firmware's functions are unchanged |
+
 ## Validation Record — 2026-11-14, In-Tree SSD1306 Driver
 
 This record covers the commit that checks off the P1 item "Replace
@@ -25,7 +50,7 @@ from `scripts/install-renode.sh`, and cargo-deny 0.20.2 and cargo-llvm-cov
 | --- | --- | --- |
 | Previous driver's bytes | A scratch crate outside the repository with `ssd1306 =0.10.0` (`async`) over a logging I2C bus, running the old `display::initialize` sequence, a flush, and display on | 152 writes: `20 00`, the window, 64 data writes of 16 bytes, then `AE`, `D5 80`, `A8 3F`, `D3 00`, `40`, `8D 14`, `20 00`, `DA 12`, `A1`, `C8`, `D9 21`, `81 5F`, `DB 40`, `A4`, `A6`, `2E`, `AF`, each its own `0x00` write, then `AE`. Pixels (5, 9) and (127, 63) landed in byte 133 as `0x02` and byte 1023 as `0x80`. The new `INIT` and the pixel test hold these values |
 | Lockfile | `cargo update -w` after removing `ssd1306` from `Cargo.toml` | Removed 11 crates: `ssd1306`, `display-interface`, `display-interface-i2c`, `display-interface-spi`, `byte-slice-cast`, `maybe-async-cfg`, `proc-macro-error`, `proc-macro-error-attr`, `pulldown-cmark`, `unicase`, `version_check`. No crate added or upgraded; `embedded-hal-async`, now also a dev-dependency, was already locked. `syn` 1.0.109 stays, through `darling` 0.13 in `nrf-softdevice-macro` |
-| `cortex-m` upstream | crates.io sparse index for `cortex-m`, `bare-metal`, and `ssd1306`; `cortex-m/Cargo.toml` on `rust-embedded/cortex-m` `master` | Latest `cortex-m` 0.7.10, which depends on `bare-metal`, as every 0.7 release does; no 0.8. `master` is version 0.7.10 with `bare-metal = "0.2.4"`. Latest `ssd1306` 0.10.0 with `maybe-async-cfg =0.2.4` |
+| `cortex-m` upstream | crates.io sparse index for `cortex-m`, `bare-metal`, and `ssd1306`; `cortex-m/Cargo.toml` on `rust-embedded/cortex-m`'s default branch | Latest `cortex-m` 0.7.10, which depends on `bare-metal`, as every 0.7 release does; no 0.8. The default branch is version 0.7.10 with `bare-metal = "0.2.4"`. Latest `ssd1306` 0.10.0 with `maybe-async-cfg =0.2.4` |
 | Dependency audit | `cargo deny --locked check` | Passed: advisories, bans, licenses, and sources ok. With the `RUSTSEC-2026-0110` ignore removed, `advisories FAILED` with only `bare-metal is deprecated` |
 | Host tests | `cargo test --locked --lib --tests` | Passed: 498 library tests (10 new in `ui/ssd1306_tests.rs`) and 13 integration tests |
 | Mutation, host | `0xA1` (segment remap) changed to `0xA0` in `INIT`; separately, the RAM clear removed from `Ssd1306::init`; each restored | Both failed: the remap change in the configuration test and the panel-model test ("picture would be mirrored"); the missing clear in the init test and the failed-write test |

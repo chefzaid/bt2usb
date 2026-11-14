@@ -1373,9 +1373,10 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   ([security](docs/security.md#supply-chain)). The SoftDevice digest and the
   review owner wait on [Needs Your Input](#needs-your-input). Also watched
   here: when a `cortex-m` release without `bare-metal` is out and Embassy and
-  `nrf-softdevice` accept it, adopt it and delete the last advisory ignore,
-  `RUSTSEC-2026-0110`, from `deny.toml` (none as of 2026-11-14;
-  [auditing](docs/code-quality.md#auditing)).
+  `nrf-softdevice` accept it, adopt it and delete the in-tree copy,
+  `vendor/bare-metal`, with its patch entry and test (none as of 2026-11-14;
+  upstream's removal is a draft for 0.8;
+  [ADR 0031](docs/adr/0031-vendored-bare-metal.md)).
 - [x] **P1** **Replace unmaintained transitive dependencies.** The 2026-09-28
   audit reported `bare-metal 0.2.5` (`RUSTSEC-2026-0110`) and
   `proc-macro-error 1.0.4` (`RUSTSEC-2024-0370`) as unmaintained. Since
@@ -1390,13 +1391,20 @@ CI, tagged releases, provenance, and dependency maintenance. Context:
   write, with ten host tests for the command bytes, the framing, the pixel
   layout, and a controller RAM model. `Cargo.lock` loses 11 crates, the
   firmware 5,536 bytes of flash, and the Renode scenario reads every screen
-  back from the modelled panel as before. `bare-metal` stays: `cortex-m`
-  0.7.10, the latest release, and cortex-m's main branch still depend on it,
-  no 0.8 is published, and every Embassy crate and `nrf-softdevice` use
-  `cortex-m` 0.7, so its advisory is the one ignore left in `deny.toml`, with
-  its chain and its removal trigger, a `cortex-m` release without it
-  ([auditing](docs/code-quality.md#auditing),
-  [2026-11-14 record](docs/validation-records.md#validation-record--2026-11-14-in-tree-ssd1306-driver)).
+  back from the modelled panel as before. `bare-metal` cannot leave the graph
+  yet: `cortex-m` 0.7.10, the latest release, re-exports three of its items,
+  removing them is a breaking change upstream plans for 0.8 (draft pull
+  request 656), and every Embassy crate and `nrf-softdevice` use `cortex-m`
+  0.7. Its 101-line source is now an in-tree copy, `vendor/bare-metal`,
+  byte for byte the release's and without its build script
+  ([ADR 0031](docs/adr/0031-vendored-bare-metal.md)): no build downloads the
+  archived crate, three more old build-time crates leave `Cargo.lock`, the
+  firmware's functions are unchanged, four host tests cover the copy, and
+  `deny.toml` ignores no advisory. The advisory check matches crates.io
+  packages, so it does not watch the copy
+  ([auditing](docs/code-quality.md#auditing); records of
+  [the driver](docs/validation-records.md#validation-record--2026-11-14-in-tree-ssd1306-driver)
+  and [the copy](docs/validation-records.md#validation-record--2026-11-14-in-tree-bare-metal-copy)).
   The new driver's hardware evidence is the board's OLED checks in
   [First board bring-up](#board-bring-up-and-hardware-acceptance).
 - [ ] **P1** **Major dependency upgrades.** *(hardware)* Dependabot proposed

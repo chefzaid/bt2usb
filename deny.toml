@@ -7,21 +7,15 @@ all-features = true
 
 [advisories]
 # Fail on unmaintained, unsound, and yanked crates, not only on
-# vulnerabilities. Unmaintained crates that no released dependency lets bt2usb
-# drop yet are ignored by ID; each entry names the chain and what removes it.
-# Delete an entry as soon as `Cargo.lock` stops selecting the crate
-# (docs/code-quality.md#auditing, ADR 0030).
+# vulnerabilities. No advisory is ignored. If one must be, ignore it by ID
+# with a comment naming the dependency chain and what removes it
+# (docs/code-quality.md#auditing).
+#
+# The archived bare-metal 0.2.5 (RUSTSEC-2026-0110), which cortex-m 0.7 still
+# needs, is an in-tree copy (vendor/bare-metal, ADR 0031). Advisories match
+# crates.io packages only, so this check does not cover that copy.
 unmaintained = "all"
 yanked = "deny"
-ignore = [
-    # bare-metal 0.2.5, deprecated: cortex-m 0.7.9, which Cargo.lock selects,
-    # the newer 0.7.10 (the latest release, checked 2026-11-14), and cortex-m's
-    # main branch depend on it, and every Embassy crate and nrf-softdevice use
-    # cortex-m 0.7 (`links = "cortex-m"` allows one version per image). No
-    # patched version exists. Remove when a cortex-m release without it is
-    # adopted (ADR 0030).
-    "RUSTSEC-2026-0110",
-]
 
 [licenses]
 # bt2usb is GPL-3.0-only, so every dependency must be under a license that

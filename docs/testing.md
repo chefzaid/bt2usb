@@ -93,9 +93,9 @@ the coverage percentage measures only the instrumented selection. Report the
 commit, toolchain, command, and excluded modules with coverage results. Avoid
 putting an undated coverage percentage or test count in the README.
 
-`--lib --tests` selects the library's unit tests and the four files in
-`tests/`: `integration.rs`, `oled_font.rs`, `vendor_pairing_gate.rs`, and
-`vendor_portal.rs`. The three binaries are skipped because their `embedded` or `sim` feature is not
+`--lib --tests` selects the library's unit tests and the five files in
+`tests/`: `integration.rs`, `oled_font.rs`, `vendor_bare_metal.rs`,
+`vendor_pairing_gate.rs`, and `vendor_portal.rs`. The three binaries are skipped because their `embedded` or `sim` feature is not
 enabled. Doctests are not selected; the library's fenced doc blocks are all
 `text` blocks, which rustdoc would not run anyway. Host tests build for the native
 platform because [.cargo/config.toml](../.cargo/config.toml) deliberately sets
@@ -152,10 +152,10 @@ recorded in the
 Counts below are what `grep -c '#\[test\]' <file>` gives for each file. The
 [documentation checker](code-quality.md#markdown-checks) fails when a row's
 count, a file with tests but no row, or a total in this paragraph disagrees
-with the tree. The tree holds 511 `#[test]` functions: 498 in
+with the tree. The tree holds 515 `#[test]` functions: 498 in
 files compiled into the host library, 3 in `tests/integration.rs`, 3 in
-`tests/oled_font.rs`, 2 in `tests/vendor_pairing_gate.rs`, and 5 in
-`tests/vendor_portal.rs`, and every one of
+`tests/oled_font.rs`, 4 in `tests/vendor_bare_metal.rs`, 2 in
+`tests/vendor_pairing_gate.rs`, and 5 in `tests/vendor_portal.rs`, and every one of
 them runs under
 `cargo test --locked --lib --tests` (see
 [Tests That Do Not Run](#tests-that-do-not-run)). The
@@ -248,6 +248,7 @@ protect.
 | --- | --- | --- |
 | [tests/integration.rs](../tests/integration.rs) | 3 | Keyboard (report ID 1), mouse (ID 2), and consumer (ID 3) notifications classified and serialized through the crate's public `bt2usb::hid` API, as an external crate sees it. |
 | [tests/vendor_portal.rs](../tests/vendor_portal.rs) | 5 | The vendored nrf-softdevice event portal, compiled from `vendor/nrf-softdevice/src/util/portal.rs` and `util/on_drop.rs` on a thread named `main` (the firmware's thread-mode mutex accepts no other on the host): a wait that a disconnect completed, or that is dropped afterwards, leaves a wait registered after it in place for both `wait_many` and `wait_once`, so the next link on a reused connection handle still gets its response; a cancelled wait clears its own registration; and a `wait_many` closure that skips an event stays registered. Three of the five fail on the unpatched upstream portal ([ADR 0007](adr/0007-vendored-softdevice-patch.md)). It uses `embassy-sync` 0.8, renamed `portal-embassy-sync`, and a std `critical-section` as dev-dependencies. |
+| [tests/vendor_bare_metal.rs](../tests/vendor_bare_metal.rs) | 4 | The in-tree copy of the archived `bare-metal` 0.2.5 ([ADR 0031](adr/0031-vendored-bare-metal.md)), which `cortex-m` re-exports as `interrupt::{CriticalSection, Mutex, Nr}`: the token and the mutex add no data, a mutex of a `Send` value is `Sync` and lends its value only with a token, the interrupt number trait returns its number, and the peripheral wrapper points at its address. It uses `bare-metal` as a dev-dependency, which `[patch.crates-io]` resolves to `vendor/bare-metal`. |
 | [tests/vendor_pairing_gate.rs](../tests/vendor_pairing_gate.rs) | 2 | The vendored nrf-softdevice pairing permission, compiled from `vendor/nrf-softdevice/src/ble/pairing_gate.rs`: a new link ignores a peer's Security Request for keys the bridge does not hold, and a link the application allowed to pair answers it by pairing ([ADR 0007](adr/0007-vendored-softdevice-patch.md), [ADR 0011](adr/0011-interim-just-works-pairing.md)). The `SEC_REQUEST` arm that applies the answer runs only on the board. |
 | [tests/oled_font.rs](../tests/oled_font.rs) | 3 | The glyph table the Renode panel model reads text with, [oled-font-6x10.txt](../renode/oled-font-6x10.txt), equals `FONT_6X10` as embedded-graphics draws it (rewrite it with `UPDATE_OLED_FONT=1 cargo test --locked --test oled_font`); every printable ASCII glyph is distinct, so text reads back unambiguously; and the font's 6×10 cell, zero spacing, and baseline 7 are what `ui::layout` and the text reader assume, and `display.rs` draws in no other font. It uses `embedded-graphics` as a dev-dependency. |
 
@@ -947,9 +948,10 @@ Specific to the current workflow and test tree:
   that job installs them; no mask recipe installs them locally.
 - rustdoc is checked with `--no-deps`, so the vendored `nrf-softdevice` crates'
   documentation is not built or checked.
-- `cargo deny` ignores one unmaintained-crate advisory by ID (`bare-metal`,
-  via `cortex-m` 0.7), because no released dependency lets the graph drop it; any other warning fails the
-  job ([auditing](code-quality.md#auditing)).
+- `cargo deny` ignores no advisory, but it matches crates.io packages only,
+  so it does not cover the vendored `nrf-softdevice` or the in-tree copy of
+  the archived `bare-metal` ([ADR 0031](adr/0031-vendored-bare-metal.md))
+  ([auditing](code-quality.md#auditing)).
 - The shells' own code, the SoftDevice, `embassy-usb`, and `embassy-nrf`
   calls of the connection workers, security handler, GATT clients, storage
   shell, USB device, and display task, has no host tests; their decisions

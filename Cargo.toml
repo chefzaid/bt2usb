@@ -116,9 +116,6 @@ embedded-graphics = "0.8"
 # The I2C trait the in-tree SSD1306 driver is generic over, for its host tests
 # against a recording bus (src/ui/ssd1306_tests.rs, ADR 0030).
 embedded-hal-async = "1.0"
-# The in-tree copy of bare-metal, for tests/vendor_bare_metal.rs
-# ([patch.crates-io] below resolves it to vendor/bare-metal, ADR 0031).
-bare-metal = "0.2.5"
 # The vendored nrf-softdevice's event portal, for tests/vendor_portal.rs, which
 # compiles that source on the host: the embassy-sync version the vendored
 # crate uses (renamed, since the firmware's own is older), with its host
@@ -146,12 +143,6 @@ unimplemented = "warn"
 [patch.'https://github.com/embassy-rs/nrf-softdevice']
 # Minimal audited extension for bounded offset reads of long GATT values.
 nrf-softdevice = { path = "vendor/nrf-softdevice" }
-
-[patch.crates-io]
-# The archived bare-metal 0.2.5 (RUSTSEC-2026-0110), which cortex-m 0.7 still
-# depends on, comes from an in-tree copy of its source instead of crates.io,
-# without its build script (vendor/bare-metal/README.bt2usb.md, ADR 0031).
-bare-metal = { path = "vendor/bare-metal" }
 
 [profile.release]
 codegen-units = 1

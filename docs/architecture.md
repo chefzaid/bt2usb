@@ -1559,7 +1559,6 @@ change.
 - [ADR 0028: Build Release Images Reproducibly And Hold Them To Size Budgets](adr/0028-reproducible-budgeted-release-images.md)
 - [ADR 0029: Build The Rev A Board On A Certified nRF52840 Module With The Firmware's Pin Map](adr/0029-rev-a-board-on-a-certified-module.md)
 - [ADR 0030: Drive The SSD1306 With A Small In-Tree Async Driver](adr/0030-in-tree-ssd1306-driver.md)
-- [ADR 0031: Keep The Archived bare-metal Crate As An In-Tree Copy Until cortex-m Drops It](adr/0031-vendored-bare-metal.md)
 
 ## Proposed ADRs
 

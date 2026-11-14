@@ -540,19 +540,13 @@ The device itself accepts any image written through SWD. See
   builds use `--locked`.
 - The `nrf-softdevice` patch is vendored and reviewed
   ([ADR 0007](adr/0007-vendored-softdevice-patch.md)).
-- The archived `bare-metal` 0.2.5, which `cortex-m` 0.7 still needs, is an
-  in-tree copy of the release's source without its build script, so no build
-  downloads or runs code from the archived crate
-  ([ADR 0031](adr/0031-vendored-bare-metal.md)).
 - CI actions are pinned to commit SHAs with the upstream tag in a comment, and
   the default workflow permission is read-only.
 - `cargo deny` runs in CI and weekly and fails on unmaintained, unsound, and
-  yanked crates as well as vulnerabilities, with no advisory ignored, and on
-  any license outside its allow list or crate source outside crates.io and
-  the pinned `nrf-softdevice` repository; Dependabot proposes Cargo and
-  Actions updates weekly. Advisories are matched to crates.io packages, so
-  the two crates under `vendor/` are outside that check: an advisory against
-  upstream `nrf-softdevice` or `bare-metal` would not fail CI.
+  yanked crates as well as vulnerabilities, apart from one advisory ignored
+  by ID in [deny.toml](../deny.toml) (`bare-metal`, through `cortex-m` 0.7), and on any license outside its allow
+  list or crate source outside crates.io and the pinned `nrf-softdevice`
+  repository; Dependabot proposes Cargo and Actions updates weekly.
 - SoftDevice is obtained from Nordic separately; record its archive hash with
   hardware evidence.
 
@@ -561,7 +555,6 @@ The device itself accepts any image written through SWD. See
 | Rust toolchain | `channel = "1.95.0"` in [rust-toolchain.toml](../rust-toolchain.toml) | rustup | — |
 | Crates | `Cargo.lock`, `--locked` | crates.io checksums in the lockfile; cargo-deny 0.20.2 advisories, licenses, and sources on every CI run and Mondays 07:23 UTC; each release lists every compiled crate with its checksum in its [SBOM](deployment.md#software-bill-of-materials) | No assigned owner reviews dependency alerts |
 | `nrf-softdevice` | Git revision `47d6121c…` in `Cargo.toml`, replaced by the vendored copy through `[patch]` | Source committed under `vendor/` | Upstream changes need a manual re-review |
-| `bare-metal` 0.2.5 | In-tree copy in `vendor/bare-metal`, selected by `[patch.crates-io]` | Source committed; its README records the SHA-256 of each file and of the crates.io release it was taken from | Not covered by the advisory check; upstream is archived, so nothing newer exists to take |
 | `nrf-softdevice-s140` (SoftDevice bindings) | Same Git revision, not vendored | Git commit identity in `Cargo.lock` | Not covered by the vendored review |
 | GitHub Actions | Commit SHAs in [ci.yml](../.github/workflows/ci.yml) | Git object identity | Dependabot bumps need review |
 | cargo-deny 0.20.2, `actionlint` 1.7.12, Ruff 0.16.9, ShellCheck 0.11.0 | Version and SHA-256 in CI | `sha256sum --check --strict` | ShellCheck publishes no checksum file; its digest was taken from the release archive on 2026-10-10 |
@@ -571,8 +564,8 @@ The device itself accepts any image written through SWD. See
 | Devcontainer | `mcr.microsoft.com/devcontainers/rust:1-bookworm`; `cargo install --locked` without versions | None | Tag not digest; `--privileged` container |
 
 Digest verification for the SoftDevice download and an owner for dependency
-alerts are open in [TODO.md](../TODO.md). How the two unmaintained-crate advisories of 2026-09-28
-were resolved is in
+alerts are open in [TODO.md](../TODO.md). The one ignored unmaintained-crate advisory,
+its dependency chain, and what would remove it are in
 [code quality](code-quality.md#auditing). Toolchain and task
 pinning is recorded in
 [ADR 0013](adr/0013-pinned-toolchain-and-mask-tasks.md).

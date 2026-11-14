@@ -159,9 +159,8 @@ Follow-up obligations, tracked in [TODO.md](../../TODO.md):
     cargo-llvm-cov 0.9.1, the report uploaded as an artifact, then the
     line-coverage floor ([ADR 0023](0023-host-coverage-floor.md)).
   - "Dependency security audit": `cargo deny --locked check` with cargo-deny
-    0.20.2 and [deny.toml](../../deny.toml): advisories (none ignored
-    since 2026-11-14, [ADR 0031](0031-vendored-bare-metal.md)), licenses, and
-    sources.
+    0.20.2 and [deny.toml](../../deny.toml): advisories with two
+    unmaintained-crate advisories ignored by ID, licenses, and sources.
   - "Embedded build & clippy": `cargo clippy --locked --features embedded
     --target thumbv7em-none-eabihf -- -D warnings`, rustdoc for the embedded
     library and both firmware binaries with warnings denied, the release

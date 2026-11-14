@@ -302,7 +302,7 @@ metadata` alone also lists crates that only a test's features pull in.
 | `metadata.properties` | `bt2usb:source_commit`, `bt2usb:target` (`thumbv7em-none-eabihf`), and `bt2usb:features` (`embedded`) |
 | crates.io crates | Name, version, a `pkg:cargo/<name>@<version>` package URL, and the SHA-256 that `Cargo.lock` records for the downloaded crate |
 | Git crates (`nrf-softdevice-s140`, `nrf-softdevice-macro`) | A package URL whose `vcs_url` names the repository and the full revision |
-| The vendored `nrf-softdevice` and `bare-metal` | Each one's path in this repository and a link to it at the build commit; they have no package URL, because the code is this repository's copy, not the crate a registry serves |
+| The vendored `nrf-softdevice` | Its path in this repository and a link to it at the build commit; it has no package URL, because the code is this repository's copy, not the upstream crate |
 | Licenses | The SPDX expression each crate's manifest declares, with the old `MIT/Apache-2.0` form written as `MIT OR Apache-2.0`; the [deny.toml](../deny.toml) clarification for `nrf-softdevice-s140`, which names only a license file |
 | `scope` | `required` for what the firmware links; `excluded` for what only runs while building, such as procedural macros and build scripts' dependencies. Development dependencies are not listed |
 | SoftDevice | `s140_nrf52` 7.3.0 as a `firmware` component supplied by Nordic Semiconductor ASA, which the application depends on but the package does not contain |
@@ -667,7 +667,6 @@ components under other licenses:
 | --- | --- | --- | --- |
 | bt2usb application | Source in this repository | `GPL-3.0-only`; text in `LICENSE` | Compiled into the ELF and HEX |
 | `nrf-softdevice` (vendored) | Copied from upstream commit `47d6121` into `vendor/nrf-softdevice` with a local patch ([vendor notes](../vendor/nrf-softdevice/README.bt2usb.md)) | `MIT OR Apache-2.0` in its `Cargo.toml`; [LICENSE-MIT](../vendor/nrf-softdevice/LICENSE-MIT) and [LICENSE-APACHE](../vendor/nrf-softdevice/LICENSE-APACHE) are kept beside it | Compiled into the ELF and HEX |
-| `bare-metal` 0.2.5 (vendored) | The crates.io release's source, unchanged, in `vendor/bare-metal`, without the release's build script ([vendor notes](../vendor/bare-metal/README.bt2usb.md), [ADR 0031](adr/0031-vendored-bare-metal.md)); `cortex-m` 0.7 re-exports three of its items | `MIT OR Apache-2.0` in its `Cargo.toml`; [LICENSE-MIT](../vendor/bare-metal/LICENSE-MIT) and [LICENSE-APACHE](../vendor/bare-metal/LICENSE-APACHE) are kept beside it | Compiled into the ELF and HEX (zero-size types; no code of its own) |
 | `nrf-softdevice-s140` | Git dependency at the same revision; Rust bindings to the S140 API | Its manifest at that revision declares `license-file = "LICENSE-NORDIC"` instead of an SPDX expression; that file is not copied into this repository | Compiled into the ELF and HEX |
 | Nordic SoftDevice S140 v7.3.0 | Binary HEX that `mask softdevice` downloads from Nordic and flashes separately | Nordic's own license, which ships with Nordic's archive; it is not in this repository | Not included |
 | crates.io dependencies | Resolved by [Cargo.lock](../Cargo.lock) | See below | Compiled into the ELF and HEX |

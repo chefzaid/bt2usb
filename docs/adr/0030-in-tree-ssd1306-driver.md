@@ -3,11 +3,6 @@
 - Status: Accepted
 - Date: 2026-11-14
 
-The `bare-metal` part of this decision, keeping its advisory ignore, was
-replaced later the same day by
-[ADR 0031](0031-vendored-bare-metal.md): the crate is now an in-tree copy
-and `deny.toml` ignores no advisory. The SSD1306 driver decision stands.
-
 ## Context
 
 Since the 2026-09-28 audit, two unmaintained crates have stayed in
@@ -51,7 +46,7 @@ following byte display data (section 8.1.5.2). The command set and its
 argument counts are in section 9, the addressing modes in section 10.1.
 
 `bare-metal` has no such route. `cortex-m` 0.7.10, the latest release
-(crates.io index, checked 2026-11-14), and the default branch of
+(crates.io index, checked 2026-11-14), and the `master` branch of
 `rust-embedded/cortex-m` (the `cortex-m` crate's manifest there, version
 0.7.10, read 2026-11-14) both still depend on `bare-metal` 0.2. No 0.8 is published.
 `cortex-m` declares `links = "cortex-m"`, so one image can hold only one

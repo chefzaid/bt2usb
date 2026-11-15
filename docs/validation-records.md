@@ -8,6 +8,29 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-11-15, Whole-Project Audit
+
+This record covers an audit of `b964c85` for coherence, engineering quality,
+fit for sale, firmware against the rev A board, and the board against its use
+cases, and the commit that records its findings. Rust 1.95.0 on Linux x86_64;
+no board, probe, or KiCad run.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Local CI | `mask ci` steps: format, the four Clippy runs, host tests, rustdoc, Markdown checks, release and simulation builds | Passed: 498 library tests and 13 integration tests |
+| Hosted CI | GitHub Actions run 43645016603 on `b964c85` | Passed |
+| Pins, firmware against board | `src/main.rs`, `src/selftest.rs` and `src/config.rs` against the module symbol's pin names in `bt2usb-board.kicad_sch` and the generator's netlist | Match: P0.11 pin 27, P0.12 pin 29, P0.24 pin 48, P0.26 pin 19, P0.27 pin 16, P0.18 pin 40 to SWD pin 10, D+ pin 35, D− pin 34, VBUS pin 32; VDD and VDDH on 3V3, DCCH open |
+| Supply and clocks | Firmware configuration against the rev A circuit | Normal-voltage mode, so `REGOUT0` has no effect on rev A; LDO regulators only; RC low-frequency clock with no 32.768 kHz crystal fitted; `embassy-nrf` 0.7.0 writes `PSELRESET` to P0.18 (source) |
+| Board placement | Footprint positions, edge cuts and zones in `bt2usb-board.kicad_pcb` | 74 × 32 mm; module body ends 0.25 mm from the right edge; antenna keep-out on both copper layers from x 170 mm to the edge, 12.4 mm tall; H1 and H2 both at x 39 mm |
+| Approvals and fees | Bluetooth SIG fee schedule (effective 1 March 2026); fcc.report listing for `SH6MDBT50Q`; LCSC listing for the module | Product qualification US$12,000 for an Adopter, dues US$0; the module's FCC ID is `SH6MDBT50Q`; LCSC lists the module from US$18.60, out of stock |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed after the changes |
+| Hardware | None | Not run: no board exists |
+
+Findings recorded in [TODO.md](../TODO.md): two fixed FIXME entries (a stale
+status-LED claim, no guide for selling), one open FIXME (release packages
+without license texts), the open items "Approvals for sale" and "Rev B board
+changes", and the "Go-to-market path" decision.
+
 ## Validation Record — 2026-11-14, In-Tree SSD1306 Driver
 
 This record covers the commit that checks off the P1 item "Replace

@@ -114,10 +114,10 @@ uses the same default configuration. This is source-derived from `embassy-nrf`
 0.7.0, not observed on a board; the UICR behavior and its security effect are
 in [security](security.md#physical-access-and-debug-port).
 
-`config.rs` names P0.06 as a status LED, but no firmware code drives it. On the
-nRF52840-DK the user LEDs are on P0.13–P0.16 and P0.06 is the UART TX line to
-the on-board debugger's virtual serial port; the simulation build uses the same
-pin for its UART log.
+No firmware drives an LED. On the nRF52840-DK the user LEDs are on
+P0.13–P0.16 and P0.06 is the UART TX line to the on-board debugger's virtual
+serial port; the simulation build uses the same pin for its UART log, and
+rev A brings it out on test pad TP1.
 
 The SoftDevice reserves interrupt priorities 0, 1 and 4. The bridge and the
 self-test set GPIOTE, the time driver, USBD and TWISPI0 to priority 2
@@ -724,7 +724,7 @@ per unit, and not in that file:
 | Buttons | Three actuators in a row by the display, marked UP, DOWN, SELECT (or ▲, ▼, ●) |
 | USB | Opening that fits common cable overmolds, at least 12.5 × 7 mm |
 | Debug access | SWD reachable through a cover, slot or screws, not glue or breaking snap-fits |
-| Mounting | Flat back for an adhesive pad; antenna end away from the mounting face |
+| Mounting | Flat back for an adhesive pad; antenna end away from the mounting face. Rev A's two M2 holes lie on one line across the board, so the case also supports both board ends, the USB end most, since a cable pulls on it |
 | Labels | Board revision on the silkscreen; button names on the case |
 | Environment | Indoor office use; no ingress rating |
 
@@ -765,6 +765,28 @@ Deliverables expected from the partner: manufacturability findings on rev A
 before building; the module revision used; the enclosure STEP model; the
 assembled units, cables and probe; and two or three spare bare PCBs.
 
+### Certification And Compliance
+
+Prototypes for the owner's own testing need none of this. Selling assembled
+boards or finished units does, and whoever places them on the market carries
+it, a seller of kits included; ask a test lab which rules cover the exact
+offer before selling anything. Nothing below is started (TODO item
+[Approvals for sale](../TODO.md#board-bring-up-and-hardware-acceptance)).
+Fees and identifiers were checked on 2026-11-15.
+
+| Approval | What the module already brings | What the product still needs |
+| --- | --- | --- |
+| United States (FCC) | Raytac's modular grant, FCC ID `SH6MDBT50Q`, covers the radio while the module is used as its grant requires: its own antenna, the keep-out as Raytac draws it, no other transmitter | A Part 15 subpart B (unintentional radiator) test of the whole product and a Supplier's Declaration of Conformity; "Contains FCC ID: SH6MDBT50Q" on the product, or in the manual if the product is too small |
+| Canada (ISED) | Raytac's IC certification of the module | ICES-003 for the product and a "Contains IC" label |
+| European Union (CE) | Raytac's radio test reports, which the product's technical file can cite for EN 300 328 | Radio Equipment Directive assessment of the product: EMC (EN 301 489-1 and -17), safety (EN 62368-1), RF exposure (EN 62479); technical file, EU declaration of conformity and CE mark; RoHS and REACH declarations; WEEE registration in each country sold to. The bridge does not connect to the internet, so the RED cybersecurity requirements (EN 18031) should not apply; the lab confirms it |
+| United Kingdom | As for the EU | UKCA or CE marking, whichever Great Britain accepts for radio equipment at the time of sale, with a UK declaration |
+| Bluetooth SIG | Nordic's qualified S140 and Raytac's qualified module design, which the product listing references | Free Adopter membership and one product qualification, US$12,000 for an Adopter under the fee schedule effective 1 March 2026, before the product is sold or the Bluetooth name or logo is used. "BT" in the name and in the USB product string reads as the Bluetooth name ([ADR 0018](adr/0018-production-usb-identity.md) proposes "BLE HID Bridge") |
+| USB | Nothing | A VID/PID the product may use ([ADR 0018](adr/0018-production-usb-identity.md)); USB-IF certification only if the USB logo is used |
+
+Changing the antenna area, the module, or the radio's transmit power beyond
+what the grants list (the firmware leaves the SoftDevice default, 0 dBm)
+means the module's approvals no longer carry over.
+
 ### Open Questions
 
 | # | Question | Recommendation |
@@ -780,8 +802,8 @@ assembled units, cables and probe; and two or three spare bare PCBs.
 
 Known gaps that do not block a prototype: current, range and coexistence are
 unmeasured; the production USB identity is not chosen
-([ADR 0018](adr/0018-production-usb-identity.md)); product-level EMC and USB
-compliance testing is not planned.
+([ADR 0018](adr/0018-production-usb-identity.md)); the approvals needed for
+sale are not started ([Certification And Compliance](#certification-and-compliance)).
 
 ### Where To Build It
 

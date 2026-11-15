@@ -111,11 +111,12 @@ pub const USB_PRODUCT: &str = "BT-to-USB HID Bridge";
 /// USB HID polling interval (ms). 1 ms = 1000 Hz for lowest latency.
 pub const USB_HID_POLL_MS: u8 = 1;
 
-// GPIO pin assignments (nRF52840-DK defaults)
+// GPIO pin assignments (the nRF52840-DK wiring and the rev A board alike)
 //
 // These are documentation only: `main.rs` passes the pins directly
 // (`p.P0_11`, `p.P0_26`, ...) when it spawns the button tasks and builds the
-// I²C bus.  Adjust them there for your custom PCB.
+// I²C bus, and `selftest.rs` does the same. A board with other pins changes
+// both, as docs/hardware.md "Porting To Another nRF52840 Board" says.
 //
 //   Button UP      → P0.11
 //   Button DOWN    → P0.12

@@ -24,7 +24,7 @@ probe, or USB host to close.
 
 | Section | Done | Open | Open P0 |
 | --- | ---: | ---: | ---: |
-| [FIXME](#fixme) | 63 | 0 | 0 |
+| [FIXME](#fixme) | 65 | 1 | 0 |
 | [BLE Central And Pairing](#ble-central-and-pairing) | 16 | 4 | 2 |
 | [HID Report Parsing And Translation](#hid-report-parsing-and-translation) | 4 | 2 | 0 |
 | [USB HID Device](#usb-hid-device) | 4 | 4 | 2 |
@@ -33,13 +33,13 @@ probe, or USB host to close.
 | [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
-| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 9 | 3 |
+| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 11 | 4 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 13 | 5 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **173** | **66** | **20** |
+| **Total** | **175** | **69** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -242,6 +242,26 @@ two what fixed it; its commit and validation record hold the details.
   `on_slot_quiesced` in `src/ble/coordinator_events.rs` returns it, with a
   reducer test and a coordinator loop test.
 
+- [x] **P3** **The hardware guide still called P0.06 a status LED.** `config.rs`
+  stopped naming it one, but the [pin notes](docs/hardware.md#pin-and-peripheral-usage)
+  kept the claim. They now say no firmware drives an LED and that rev A brings
+  P0.06 out on TP1; the `config.rs` pin comment says rev A uses the DK's pins.
+- [x] **P2** **No guide said what selling the bridge requires.** The only
+  mention was "product-level EMC and USB compliance testing is not planned".
+  [Certification And Compliance](docs/hardware.md#certification-and-compliance)
+  now lists what the module's approvals cover and what the product still
+  needs in each region, with the Bluetooth SIG fee; the work is the open
+  "Approvals for sale" item.
+- [ ] **P1** **Release packages carry no license texts.** A package holds the
+  firmware, build inputs, SBOM and provenance, but neither `LICENSE` nor the
+  notices of the MIT and Apache crates compiled into the firmware
+  ([licenses](docs/deployment.md#third-party-components-and-licenses)).
+  Handing anyone a binary, a sold unit included, needs them: GPL-3.0 section
+  6 for bt2usb, and each MIT crate's copyright and permission notice. Accept
+  when `release.py` adds `LICENSE` and a generated third-party notice file to
+  the package and its `SHA256SUMS`, with helper tests. Which notices it holds
+  follows the licensing answer in [Needs Your Input](#needs-your-input).
+
 ## Needs Your Input
 
 Decisions and actions only the project owner can take. The loop skips each
@@ -254,6 +274,7 @@ it becomes workable again.
 | [Hardware-evidence label and private reporting](#release-provenance-and-supply-chain) (P2) | Two repository settings no tool here can change: create the `hardware-evidence` label (Issues, Labels, New label) that the hardware-result template applies, and turn on private vulnerability reporting (Settings, Code security) | 1. Do both; the loop then updates SECURITY.md and checks a new hardware-result issue. 2. Create only the label and choose an email channel in the row above |
 | [Supply-chain and tooling maintenance](#release-provenance-and-supply-chain) (P1) | The SHA-256 of Nordic's `s140_nrf52_7.3.0.zip`. This environment's network policy refuses Nordic's download host, so the digest cannot be taken here, and a value copied from anywhere but the archive itself would be a guess | 1. Run `sha256sum s140_nrf52_7.3.0.zip` on a copy downloaded from nordicsemi.com and paste the digest; the loop then pins it in `mask softdevice`, which will refuse a mismatching archive. 2. Allow `nsscprodmedia.blob.core.windows.net` in the environment's network settings so the loop can take it |
 | [Nordic license of the SoftDevice bindings](docs/deployment.md#third-party-components-and-licenses) (P1) | `nrf-softdevice-s140`, compiled into the firmware, is under Nordic's 5-clause license, which allows use only with a Nordic chip and forbids reverse engineering binaries. GPL-3.0 does not let a combined work add such restrictions, so whether the `GPL-3.0-only` firmware may be distributed with those bindings linked in needs a legal call. The CI license check allows that one crate until then | 1. Add a GPL section 7 additional permission to `LICENSE` that allows linking Nordic's SoftDevice bindings and interface (the usual route for GPL firmware on vendor stacks). 2. Relicense bt2usb under a permissive license such as `MIT OR Apache-2.0`, as Embassy and nrf-softdevice are. 3. Keep things as they are and accept the risk while the firmware is not distributed |
+| [Go-to-market path](#board-bring-up-and-hardware-acceptance) (P0) | Whether bt2usb will be sold, and how. It decides which approvals are needed ([Certification And Compliance](docs/hardware.md#certification-and-compliance)), the license of the board files (today only the repository's GPL-3.0 covers them, a software license), whether a customer firmware update path must exist before the first sale, and whether the repository stays public. It is public now, so anyone may already build and sell the published design under the GPL | 1. Sell it as an open-hardware product: keep the repository public, license `hardware/` under CERN-OHL-S-2.0, use a pid.codes PID (ADR 0018), and sell a small first batch of certified, assembled units only after ADR 0017 (authenticated pairing) and a signed update path (raise "Signed USB/BLE DFU" to P1) land. Certification, support and the brand are the advantage over clones. 2. Make it a closed product: make the repository private and license future work commercially (possible while you are the only author), and buy a USB-IF vendor ID; everything already published stays GPL and may be copied. 3. Keep it a personal open project with no sales; none of the approvals is needed |
 | [ADR 0017: authenticated pairing](docs/adr/0017-authenticated-pairing-and-enrollment.md) (P0) | Four answers before the ADR can be Accepted and implemented: how Just Works-only devices (most mice) are treated, whether LE legacy pairing is allowed, what happens to bonds made under ADR 0011, and the pairing-window length | 1. Allow Just Works-only devices with mouse reports only, after a SELECT; reject legacy pairing; mark ADR 0011 bonds "pair again"; 60 s window (the ADR's recommendation). 2. Reject Just Works-only devices outright. 3. Allow legacy pairing in the Just Works tier. 4. Keep ADR 0011 bonds with full input until forgotten. 5. A 30 s or 120 s window |
 | [ADR 0018: USB identity](docs/adr/0018-production-usb-identity.md) (P0) | Where the production VID/PID comes from, what serial release builds report, whether the product string changes, and when to request the PID | 1. Request a pid.codes PID now; keep the FICR factory serial; rename the product to "BLE HID Bridge" (the recommendation). 2. Buy a USB-IF vendor ID instead. 3. Report no serial, or a resettable one. 4. Keep "BT-to-USB HID Bridge". 5. Request the PID after hardware acceptance |
 | [ADR 0019: power-loss-safe persistence](docs/adr/0019-power-loss-safe-persistence.md) (P0) | The commit protocol, the `sequential-storage` version, what a future layout-changing container release may do, and when old frames are rewritten | 1. Generation anchor under a second key; pin `sequential-storage` 8.0.2; hold any layout-changing release; rewrite old frames lazily on the next save (the recommendation). 2. Frame CRC and generation without the anchor. 3. Raw A/B pages without the crate. 4. Stay on 7.2.0. 5. Adopt a layout change with a confirmed Factory reset, or migrate in place. 6. Rewrite at the first boot of the new firmware |
@@ -1011,6 +1032,26 @@ Getting firmware onto real boards and recording what works. Context:
   flash updates. Accept when latency percentiles, reconnect time,
   dropped-input policy, reset count, and stack/flash margins meet published
   limits ([testing](docs/testing.md#known-verification-gaps)).
+
+- [ ] **P0** **Approvals for sale.** *(hardware)* Before any unit is sold:
+  an FCC Part 15 subpart B test and Supplier's Declaration of Conformity with
+  the "Contains FCC ID" label, ISED ICES-003, the EU Radio Equipment
+  Directive technical file, declaration and CE mark, the marking Great
+  Britain accepts, RoHS, REACH and WEEE, a Bluetooth SIG product
+  qualification, and a USB identity the product may use
+  ([certification and compliance](docs/hardware.md#certification-and-compliance)).
+  It needs the production board and enclosure and the go-to-market answer in
+  [Needs Your Input](#needs-your-input). Accept when the hardware guide lists
+  each approval with its report, declaration or listing number, and the label
+  and manual carry the required marks.
+- [ ] **P2** **Rev B board changes.** *(hardware)* Found in the 2026-11-15
+  audit; weigh them with what the rev A build shows. (1) An LED on a free
+  outer-row GPIO, so a unit whose OLED is missing, unplugged or on the wrong
+  jumper setting still shows it is alive, and a future bootloader can show its
+  mode. (2) A third mounting hole off the line through H1 and H2, which today
+  leave both board ends to the case. Accept when the rev B design, or a
+  decision recorded in the [hardware guide](docs/hardware.md#custom-board),
+  answers each.
 
 ## Verification And Code Quality
 

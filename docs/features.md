@@ -77,6 +77,11 @@ re-arms only when it still reads released 50 ms after release, so holding a
 button produces one press, not a repeat. A button already held at power-up
 still produces one press.
 
+A status LED beside the buttons shows the bridge runs even with the display
+dark or missing: it flashes once a second while no peripheral is linked, stays
+lit while at least one is, and is off while the PC has suspended the USB bus
+([status LED](hardware.md#status-led)).
+
 Three rules apply before any screen sees a press:
 
 - **A dark display only wakes.** When the OLED is off, the first press turns it

@@ -1,7 +1,7 @@
 # ADR 0029: Build The Rev A Board On A Certified nRF52840 Module With The Firmware's Pin Map
 
 - Status: Accepted
-- Date: 2026-11-09 (design review changes 2026-11-10)
+- Date: 2026-11-09 (design review changes 2026-11-10; status LED and mounting holes 2026-11-15)
 
 ## Context
 
@@ -50,10 +50,15 @@ Facts that constrain the design:
 - **User interface.** A 1×4 2.54 mm socket for a 0.96" SSD1306 I2C module,
   with two three-pad solder jumpers that set which of its first two pins is
   GND and which is VCC (GND first as delivered), 4.7 kΩ I2C pull-ups, and
-  three 6 × 6 mm SMD tactile switches.
+  three 6 × 6 mm SMD tactile switches. A status LED (D1, through R5 from
+  3V3) on P0.13, active low, which is LED1 on the nRF52840-DK, so the same
+  firmware drives both; it shows the firmware runs when the OLED is missing
+  or dark ([status LED](../hardware.md#status-led)).
 - **Debug.** A 2×5 1.27 mm ARM Cortex SWD header, plus test pads for P0.06,
   P0.08, 3V3, VBUS and GND.
-- **Board.** Two layers, 74 × 32 mm, ground poured on both sides and
+- **Board.** Two layers, 74 × 32 mm, four M2 holes (two at the board's
+  middle, one by the USB connector, one by the SWD header) so both ends
+  are screwed down, ground poured on both sides and
   stitched with vias, rules any common prototype fab meets (0.15 mm track
   and clearance, 0.3 mm drill).
 - **Production files in the repository.** The KiCad project, a schematic PDF,
@@ -116,6 +121,11 @@ quote the same design.
   decision ([ADR 0018](0018-production-usb-identity.md),
   [ADR 0021](0021-provisioning-debug-access-and-readout-protection.md)).
 
+- The status LED draws about 1 mA while lit. The firmware turns it off
+  during USB suspend.
+- H4 sits 5.8 mm below the antenna keep-out; it takes a nylon screw or
+  standoff.
+
 ## Implementation
 
 `hardware/bt2usb-board` holds the project and its exports. Verification Status:
@@ -129,6 +139,9 @@ quote the same design.
   compared with their datasheets; the circuit compared with Raytac's
   reference circuit for supplies under 3.6 V. The earlier KiCad 7.0.11 DRC
   was clean too.
+- **Software-verified, 2026-11-15:** the status LED and holes H3 and H4,
+  with ERC, DRC with schematic parity, and the netlist check run again and
+  clean ([record](../validation-records.md#validation-record--2026-11-15-rev-a-status-led-and-mounting-holes)).
 - **Not verified:** the module's pad sizes against Raytac's land-pattern
   drawing (only an image was available), a review by anyone other than the
   designer, and any built board.

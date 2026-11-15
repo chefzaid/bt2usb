@@ -33,13 +33,13 @@ probe, or USB host to close.
 | [UI, Display And Power](#ui-display-and-power) | 10 | 2 | 1 |
 | [Platform, Memory And Recovery](#platform-memory-and-recovery) | 9 | 3 | 3 |
 | [Device Security And Provisioning](#device-security-and-provisioning) | 2 | 2 | 2 |
-| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 5 | 11 | 4 |
+| [Board Bring-Up And Hardware Acceptance](#board-bring-up-and-hardware-acceptance) | 6 | 10 | 4 |
 | [Verification And Code Quality](#verification-and-code-quality) | 18 | 0 | 0 |
 | [Release, Provenance And Supply Chain](#release-provenance-and-supply-chain) | 13 | 5 | 2 |
 | [Developer Experience](#developer-experience) | 8 | 1 | 0 |
 | [Documentation](#documentation) | 9 | 0 | 0 |
 | [Product Extensions](#product-extensions) | 4 | 28 | 0 |
-| **Total** | **175** | **69** | **21** |
+| **Total** | **176** | **68** | **21** |
 
 **Most important next step:** the
 [first board bring-up](#board-bring-up-and-hardware-acceptance). Install
@@ -1044,14 +1044,18 @@ Getting firmware onto real boards and recording what works. Context:
   [Needs Your Input](#needs-your-input). Accept when the hardware guide lists
   each approval with its report, declaration or listing number, and the label
   and manual carry the required marks.
-- [ ] **P2** **Rev B board changes.** *(hardware)* Found in the 2026-11-15
-  audit; weigh them with what the rev A build shows. (1) An LED on a free
-  outer-row GPIO, so a unit whose OLED is missing, unplugged or on the wrong
-  jumper setting still shows it is alive, and a future bootloader can show its
-  mode. (2) A third mounting hole off the line through H1 and H2, which today
-  leave both board ends to the case. Accept when the rev B design, or a
-  decision recorded in the [hardware guide](docs/hardware.md#custom-board),
-  answers each.
+- [x] **P2** **Rev A board gaps from the 2026-11-15 audit.** A unit whose
+  OLED was missing, unplugged or on the wrong jumper setting showed no sign
+  of life, and H1 and H2 lay on one line, leaving both board ends to the
+  case. Before any board was built, rev A gained a status LED (D1 and R5 on
+  P0.13, active low, as LED1 on the DK) that `src/ui/status_led.rs` drives
+  with the pattern from `src/ui/status_led_logic.rs` (flash without a link,
+  on with one, off in USB suspend) and the self-test lights, and holes H3 and
+  H4 at the USB and SWD ends. ERC and DRC with parity are clean
+  ([status LED](docs/hardware.md#status-led),
+  [KiCad project](docs/hardware.md#kicad-project-rev-a),
+  [record](docs/validation-records.md#validation-record--2026-11-15-rev-a-status-led-and-mounting-holes))
+  *(hardware evidence pending)*.
 
 ## Verification And Code Quality
 

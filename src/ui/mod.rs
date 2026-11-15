@@ -12,6 +12,8 @@
 //!   lines `layout` gives each screen through the in-tree `ssd1306` driver,
 //!   with the retry policy in `display_logic`)
 //! - **Buttons**: 3 tactile switches with debouncing (UP, DOWN, SELECT)
+//! - **Status LED**: P0.13, active low (`status_led`, with the pattern policy
+//!   in `status_led_logic`)
 
 pub mod buttons;
 pub mod controller;
@@ -20,6 +22,8 @@ pub mod display_logic;
 pub mod input_logic;
 pub mod layout;
 pub mod ssd1306;
+pub mod status_led;
+pub mod status_led_logic;
 pub mod ui_logic;
 
 /// `ButtonEvent` lives in the pure `ui_logic` core (shared with the

@@ -29,6 +29,7 @@ first-flash run covers them.
 | SoftDevice | 1 image | Nordic S140 v7.3.0 (`s140_nrf52_7.3.0_softdevice.hex`) | Flashed once per board with `mask softdevice`; the memory map assumes this version |
 | Display | 1 | SSD1306 128×64 I2C module at address `0x3C` | A module strapped to `0x3D` needs a code change; see [OLED Display](#oled-display) |
 | Buttons | 3 | DK buttons 1–3, or normally open momentary switches | Active-low to GND; no external resistors needed |
+| Status LED | 1 | The DK's LED1 | Already on P0.13; another board needs an LED and resistor from 3.3 V to P0.13 |
 | USB cables | 2 | Data-capable cables | One for the debugger port, one for the nRF USB port (J3) that the PC sees; a charge-only cable fails enumeration |
 | Jumper wires | As needed | Female-to-female or to the DK headers | OLED SDA, SCL, VDD, GND; external buttons if used |
 | BLE peripherals | Up to 2 active, 4 stored | BLE HID-over-GATT keyboard and mouse | Bluetooth Classic devices are not supported |
@@ -44,6 +45,7 @@ first-flash run covers them.
 | SELECT | P0.24 | Switch to GND, internal pull-up |
 | OLED SDA | P0.26 | SSD1306 SDA |
 | OLED SCL | P0.27 | SSD1306 SCL |
+| Status LED | P0.13 | LED cathode; anode through about 1 kΩ to VDD (active low). LED1 on the DK |
 | OLED power | VDD / GND | The board's I/O supply rail and common ground; not a 5 V rail |
 | USB D+/D− | Native USB connector | Routed on the DK; no jumper wiring |
 
@@ -67,11 +69,11 @@ first-flash run covers them.
 The firmware's pin assignments are instantiated in [main.rs](../src/main.rs),
 [selftest.rs](../src/selftest.rs), and [sim.rs](../src/sim.rs). The comments in
 [config.rs](../src/config.rs) document the defaults; changing comments alone does
-not reroute peripherals. The `config.rs` comment also lists P0.06 as a status
-LED, which no code drives (see below).
+not reroute peripherals.
 
 On the DK, P0.11, P0.12 and P0.24 are also wired to on-board buttons 1, 2 and
-3, so those work as UP, DOWN and SELECT without extra switches. P0.26 and P0.27
+3, so those work as UP, DOWN and SELECT without extra switches, and P0.13 is
+LED1, which the bridge uses as its status LED. P0.26 and P0.27
 are free GPIOs on the DK. Power the OLED from VDD so any pull-ups on the module
 pull SDA and SCL to the nRF52840's I/O voltage; nRF52840 GPIOs are not 5 V
 tolerant.
@@ -86,6 +88,7 @@ extension or USB-C/USB-A adapter may make the controls easier to reach.
 | --- | --- | --- | --- |
 | P0.11, P0.12, P0.24 | Buttons, GPIO input with pull-up | Same, with an idle-level check | Same, driven by Renode |
 | P0.26, P0.27 | TWIM0 SDA, SCL | Same | Not used |
+| P0.13 | Status LED, active low ([Status LED](#status-led)) | Lit for the whole run | Not used |
 | P0.06, P0.08 | Not used | Not used | UARTE0 TX and RX for the log |
 | P0.18 | Pin reset, set in UICR by `embassy_nrf::init` | Same | Same `init` code; Renode's UICR handling not checked |
 | P0.09, P0.10 | NFC antenna pins; UICR `NFCPINS` left in NFC mode | Same | Same `init` code; not used |
@@ -114,8 +117,8 @@ uses the same default configuration. This is source-derived from `embassy-nrf`
 0.7.0, not observed on a board; the UICR behavior and its security effect are
 in [security](security.md#physical-access-and-debug-port).
 
-No firmware drives an LED. On the nRF52840-DK the user LEDs are on
-P0.13–P0.16 and P0.06 is the UART TX line to the on-board debugger's virtual
+On the nRF52840-DK, P0.13 is LED1 (the other user LEDs, on P0.14–P0.16, are
+not used) and P0.06 is the UART TX line to the on-board debugger's virtual
 serial port; the simulation build uses the same pin for its UART log, and
 rev A brings it out on test pad TP1.
 
@@ -154,6 +157,23 @@ chain that raises the GPIOTE PORT event
 ([ADR 0014](adr/0014-renode-gpio-models.md), [testing](testing.md#renode-simulation)).
 The self-test checks each pin reads high at rest, then waits up to 20 s for a
 press.
+
+## Status LED
+
+The status LED on P0.13 (active low: LED1 on the DK, D1 on rev A) shows that
+the firmware runs even when the OLED is missing or dark. `ui::status_led`
+drives it from the pattern the pure `ui::status_led_logic` picks:
+
+| Bridge state | LED |
+| --- | --- |
+| USB bus suspended by the host | Off |
+| At least one BLE link up | On |
+| No BLE link (scanning, reconnecting, or nothing paired) | A 100 ms flash every second |
+
+The task starts with the flash, so a board shows it runs before the main loop
+has run. Lit, the rev A LED draws about 1 mA; it is dark during USB suspend.
+The self-test lights it for its whole run. The simulation build does not
+drive it.
 
 ## OLED Display
 
@@ -374,6 +394,7 @@ These are compile-time settings from [config.rs](../src/config.rs).
 | `USB_MANUFACTURER` / `USB_PRODUCT` | `bt2usb` / `BT-to-USB HID Bridge` | USB string descriptors |
 | `USB_HID_POLL_MS` | 1 | USB interrupt endpoint polling interval |
 | `BUTTON_DEBOUNCE_MS` | 50 | Button debounce interval |
+| `STATUS_LED_PERIOD_MS` / `STATUS_LED_FLASH_MS` | 1000 / 100 | The [status LED](#status-led) flash while no BLE link is up: lit for the first 100 ms of every second |
 | `SCREEN_AUTO_OFF_ENABLED` | `true` | Enable OLED inactivity power-off |
 | `SCREEN_AUTO_OFF_TIMEOUT_SECS` | 120 | OLED inactivity timeout |
 | `UI_MANAGEMENT_TIMEOUT_SECS` | 30 | How long the UI waits for a saved-device list, Forget, or reset reply before showing **No reply** |
@@ -519,6 +540,7 @@ flowchart LR
         MOD[nRF52840 module<br/>BLE 5 radio + antenna<br/>native USB, 1 MB flash, 256 KB RAM]
         OLED[SSD1306 128x64 OLED<br/>I2C 0x3C]
         BTN[3 tactile buttons<br/>UP DOWN SELECT]
+        LED[Status LED<br/>active low]
         SWD[SWD header<br/>flashing and debug]
     end
     KB[BLE keyboard]
@@ -532,6 +554,7 @@ flowchart LR
     LDO -->|3V3| OLED
     MOD <-->|I2C SDA P0.26, SCL P0.27| OLED
     BTN -->|P0.11, P0.12, P0.24 to GND| MOD
+    MOD -->|P0.13| LED
     SWD <-->|SWDIO, SWDCLK, RESET P0.18| MOD
     KB -.->|2.4 GHz BLE| MOD
     MS -.->|2.4 GHz BLE| MOD
@@ -549,6 +572,7 @@ flowchart LR
 | USB | Native nRF52840 USB 2.0 full speed; VBUS to the nRF52840 VBUS pin | [USB Connection](#usb-connection), [Board Power And USB](#board-power-and-usb) |
 | Display | SSD1306 128×64 I2C module at `0x3C`, powered from VDD | [OLED Display](#oled-display) |
 | Buttons | Three normally open switches, each from its GPIO to GND, no other parts | [Buttons](#buttons) |
+| Status LED | One LED from 3.3 V through about 1 kΩ to P0.13 | [Status LED](#status-led) |
 | Debug | SWD reachable without desoldering; no bootloader | [Debug And Flash Access](#debug-and-flash-access) |
 | Enclosure | Plastic, OLED window, three actuators, USB-C opening | [Enclosure](#enclosure) |
 
@@ -589,10 +613,10 @@ The button and display pins are in the [wiring table](#wiring). The board adds:
 | TP1, TP2 | P0.06, P0.08 | Test pads | Unused by the bridge; useful for a debug UART |
 | TP3, TP4, TP5 | — | Test pads | 3V3, VBUS and GND, for the [delivery checks](#acceptance-on-delivery) |
 | OLED_P1, OLED_P2 | — | J3 pins 1 and 2, through JP1 and JP2 | GND and 3V3 as delivered; swapped by cutting the jumpers' bridges and closing pads 2–3 |
+| STATUS_LED | P0.13 (module pin 37, outer row) | D1 cathode; D1 anode through R5 (1 kΩ) to 3V3 | The [status LED](#status-led), active low as LED1 on the DK |
 
 Leave P0.00 and P0.01 (32.768 kHz crystal), P0.09 and P0.10 (NFC) and P0.18
-free of anything that drives them. No LED is driven by the firmware; a power
-LED on VDD is optional at 1 mA or less.
+free of anything that drives them.
 
 ### KiCad Project (Rev A)
 
@@ -618,10 +642,12 @@ KiCad 7 format, which KiCad 9 reads and upgrades on save.
 | --- | --- |
 | Size | 74 × 32 mm, two layers, 1.6 mm FR-4 recommended |
 | Rules | Track 0.2 mm signals and 0.3 mm power, 0.15 mm minimum; clearance 0.15 mm; vias 0.6 mm on 0.3 mm drill; copper to edge 0.3 mm; copper to hole 0.18 mm, which the USB connector's own footprint needs |
-| Layout | USB-C on the left edge, the OLED socket along the top with the display module over the supply parts, buttons in a column right of the display, the module on the right with its antenna at the board edge and a keep-out on both layers to the edge, SWD header below the module, two M2 holes |
+| Layout | USB-C on the left edge, the OLED socket along the top with the display module over the supply parts, buttons in a column right of the display, the module on the right with its antenna at the board edge and a keep-out on both layers to the edge, SWD header below the module, the status LED D1 between SELECT and the SWD header, four M2 holes (below) |
 | Ground | A ground pour on both layers, tied by a via at every SMD ground pad and by stitching vias on a 3 mm grid; the bottom is an almost unbroken plane under the USB pair |
 | USB pair | D+ and D− run side by side on the top layer: 55.6 and 58.9 mm long, 81 % of D− within 0.6 mm of D+, four vias on D− where the Type-C pin rows cross |
 | Supply | Normal-voltage mode ([Supply Mode](#supply-mode)): U3 makes 3.3 V, VDDH tied to VDD; C2 decouples the module's VBUS pin and C7 the ESD array's |
+| Status LED | D1, a 0603 LED, from 3V3 through R5 (1 kΩ) into P0.13, active low as LED1 on the DK ([Status LED](#status-led)) |
+| Mounting | Four M2 holes: H1 and H2 at x 39 mm, H3 by the USB connector (x 4, y 28 mm), H4 right of the SWD header (x 69.5, y 28 mm, 5.8 mm below the antenna keep-out), measured from the top-left corner. Use a nylon screw or standoff at H4, near the antenna |
 | OLED | J3 is a 1×4 2.54 mm socket the module plugs into. JP1 and JP2 set its supply order: as delivered (pads 1–2 bridged) J3 is GND, VCC, SCL, SDA from pin 1; for a VCC, GND, SCL, SDA module cut both bridges and solder pads 2–3 |
 
 The design was reviewed on 2026-11-10
@@ -640,7 +666,11 @@ The design was reviewed on 2026-11-10
 
 The review changed the design: C2 moved next to the module's VBUS pin, C7
 was added at the ESD array, J3 became a socket with JP1 and JP2, the USB pair
-was rerouted side by side, and ground stitching was added. Still open
+was rerouted side by side, and ground stitching was added. On 2026-11-15,
+before any board was built, the whole-project audit added the status LED
+(D1, R5) and holes H3 and H4, so a unit with a dark OLED still shows it runs
+and both board ends are screwed down; ERC and DRC were run again
+([record](validation-records.md#validation-record--2026-11-15-rev-a-status-led-and-mounting-holes)). Still open
 before ordering, each an item in
 [TODO.md](../TODO.md#board-bring-up-and-hardware-acceptance):
 
@@ -724,7 +754,8 @@ per unit, and not in that file:
 | Buttons | Three actuators in a row by the display, marked UP, DOWN, SELECT (or ▲, ▼, ●) |
 | USB | Opening that fits common cable overmolds, at least 12.5 × 7 mm |
 | Debug access | SWD reachable through a cover, slot or screws, not glue or breaking snap-fits |
-| Mounting | Flat back for an adhesive pad; antenna end away from the mounting face. Rev A's two M2 holes lie on one line across the board, so the case also supports both board ends, the USB end most, since a cable pulls on it |
+| Mounting | Flat back for an adhesive pad; antenna end away from the mounting face. Four M2 bosses for H1 to H4 ([KiCad project](#kicad-project-rev-a)); a nylon screw at H4, which is near the antenna |
+| Status LED | A light pipe or clear window over D1, beside the SELECT actuator |
 | Labels | Board revision on the silkscreen; button names on the case |
 | Environment | Indoor office use; no ingress rating |
 
@@ -736,6 +767,7 @@ OLED module's own sizes vary between makers, so measure the one bought:
 | Passives, U2, U3 | 1.45 mm at most (SOT-23 package limit) | All under the display |
 | Module U1 | 2.2 mm at most (Raytac's specification) | Antenna end at the right edge |
 | Tactile switches | 4.3 mm (PTS645 "43" height code) | The case needs plungers from its top surface down to them |
+| Status LED D1 | About 0.8 mm (0603) | The light pipe reaches down to it |
 | OLED module board | About 11 mm: the 8.5 mm socket plus the 2.5 mm spacer of the module's own header | Clears every part under it by about 9 mm |
 | OLED display face | About 13 to 14 mm | Its window sets the case height |
 
@@ -746,7 +778,7 @@ socket. The display then sits about 9 mm above the switch tops, so the case
 needs button plungers of about that length, or taller 6 × 6 mm switches
 on the same footprint. The module covers roughly x 10–37 mm and
 y 1–29 mm from the board's top-left corner (a 27 × 28 mm module centred on
-J3); the M2 holes at x 39 mm stay just outside it. Allow about 2 mm under the
+J3); H1 and H2 at x 39 mm stay just outside it. Allow about 2 mm under the
 board for the socket's and the USB connector's through-hole leads; the
 inside of the case then needs about 76 × 34 mm and 18 mm of height.
 
@@ -756,7 +788,7 @@ The partner checks every unit: VDD within 3.2–3.4 V on USB power; an SWD
 probe connects (for example `probe-rs info`); JP1 and JP2 match the OLED
 module's pin order; SDA, SCL, VCC and GND of the OLED reach P0.26, P0.27,
 VDD and GND; each button shorts its GPIO to GND only
-while pressed; and the antenna keep-out and USB solder joints pass visual
+while pressed; D1 lights when P0.13 is pulled to GND; and the antenna keep-out and USB solder joints pass visual
 inspection. The firmware owner then runs `mask selftest` and the
 [first-flash checklist](first-flash.md) and files a
 [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-result.md).

@@ -8,6 +8,27 @@ results go in a [hardware-result issue](../.github/ISSUE_TEMPLATE/hardware-resul
 The documentation checker skips these records' values, since they describe
 the tree as it was.
 
+## Validation Record — 2026-11-15, Rev A Status LED And Mounting Holes
+
+This record covers the commit that adds the status LED and mounting holes H3
+and H4 to rev A, on top of `5fb378a`, and the firmware that drives the LED.
+The board was regenerated with the generator scripts kept outside the
+repository, in KiCad 9.0.9 from the `kicad/kicad:9.0` image; Rust 1.95.0 on
+Linux x86_64.
+
+| Check | Environment | Result |
+| --- | --- | --- |
+| Generator baseline | The unchanged scripts, before the change | Reproduced the committed schematic byte for byte, and a board with the same 194 tracks, 165 vias and 13 filled zones |
+| ERC | `kicad-cli sch erc --severity-all` | 0 errors, 0 warnings |
+| DRC | `kicad-cli pcb drc --severity-all --schematic-parity` | 0 violations, 0 unconnected pads, 0 parity issues; a first placement put the R5 and J2 references over each other and was moved |
+| Netlist | The generator's check of every pin against `design.py` | 146 nodes, 21 nets, 0 problems; U1 pin 37 (P0.13) on `STATUS_LED` to D1 pin 1 (cathode); D1 pin 2 and R5 pin 2 on `LED_A`; R5 pin 1 on 3V3 |
+| USB pair | The generator's pair statistics | Unchanged: D+ 55.6 mm, D− 58.9 mm, 81 % of D− within 0.6 mm of D+ |
+| Host tests | `cargo test --locked --lib --tests` | Passed: 502 library tests (4 new in `ui/status_led_logic.rs`) and 13 integration tests |
+| Formatting, lints, rustdoc, builds | `mask ci` steps | Passed: Clippy `-D warnings` for the host, the firmware with and without `log-sensitive-data`, and the simulation; rustdoc; release and simulation builds |
+| Documentation checks | `python3 scripts/check_docs.py` | Passed |
+| Renode | Not run | The simulation does not drive the LED, and no simulated path changed |
+| Hardware | None | Not run: the LED and holes need a built board |
+
 ## Validation Record — 2026-11-15, Whole-Project Audit
 
 This record covers an audit of `b964c85` for coherence, engineering quality,

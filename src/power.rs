@@ -91,6 +91,16 @@ impl PowerManager {
         }
     }
 
+    /// Whether the USB bus is suspended.
+    pub fn usb_suspended(&self) -> bool {
+        self.usb_suspended
+    }
+
+    /// Whether at least one BLE link is up.
+    pub fn ble_connected(&self) -> bool {
+        self.ble_connected
+    }
+
     /// Check if display should be on.
     pub fn display_on(&self) -> bool {
         let base_display_on = matches!(self.state, PowerState::Active | PowerState::Idle);

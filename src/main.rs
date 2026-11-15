@@ -242,6 +242,7 @@ async fn main(spawner: Spawner) {
     spawner.spawn(unwrap!(button_up_task(p.P0_11.into())));
     spawner.spawn(unwrap!(button_down_task(p.P0_12.into())));
     spawner.spawn(unwrap!(button_select_task(p.P0_24.into())));
+    spawner.spawn(unwrap!(ui::status_led::task(p.P0_13.into())));
     info!("UI and isolated OLED tasks started");
 
     let mut ui = UiController::<nrf_softdevice::ble::Address>::new();
@@ -304,5 +305,9 @@ async fn main(spawner: Spawner) {
             }
         }
         ui::display::publish(&ui.state, power.display_on());
+        ui::status_led::publish(ui::status_led_logic::pattern(
+            power.usb_suspended(),
+            power.ble_connected(),
+        ));
     }
 }

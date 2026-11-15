@@ -139,6 +139,9 @@ USB enumeration (up to 10 s), each button prompt (up to 20 s), and the BLE scan
       memory-budget task in [TODO.md](../TODO.md); do not shrink the
       reservation on this one measurement alone.
 - [ ] Self-test: 0 failed.
+- [ ] The status LED (LED1 on the DK, D1 on rev A) is lit for the whole
+      self-test, which logs `status LED (P0.13) lit for the whole self-test: check it by eye`.
+      A dark LED: check its orientation and R5 on rev A.
 - [ ] Optional: deliberate overflow. Run `mask selftest` again and hold
       SELECT when it offers the overflow, which it does only when the SELECT
       and stack guard stages passed. The log ends with
@@ -203,6 +206,9 @@ The storage load reports `No paired devices in flash` or
       power-ups.
 - [ ] `stack guard: 4096 bytes at 0x<base>..0x<top>` follows the boot line, not
       `stack guard off: …`.
+- [ ] The status LED flashes once a second while no peripheral is linked,
+      stays lit once one is, and goes dark while the PC sleeps
+      ([status LED](hardware.md#status-led)).
 - [ ] `stack high-water: X of Y bytes` lines appear; the firmware logs a new one
       whenever the high-water mark grows.
 

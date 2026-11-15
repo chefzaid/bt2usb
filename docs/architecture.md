@@ -236,6 +236,7 @@ flowchart TD
     UI -->|Commands| BLE
     BLE -->|Events| UI
     UI -->|Latest display state| DISPLAY[OLED task]
+    UI -->|LED pattern| LED[Status LED task]
     USB -->|Latest keyboard LED state| SLOT
     SD -->|USB power events| USB
 ```
@@ -314,8 +315,9 @@ appear in the code and reach the host through RTT; see
    then both connection workers and `ble_task` (`"BLE task started"`).
 7. Creates TWIM0 on P0.26/P0.27 with internal pull-ups and a 64-byte RAM
    transmit buffer (`ui::display::new_twim`, which the self-test and the
-   simulation also use), spawns the display task (`ui::display::task`) and the
-   three button tasks, and logs `"UI and isolated OLED tasks started"`.
+   simulation also use), spawns the display task (`ui::display::task`), the
+   three button tasks, and the status LED task on P0.13 (`ui::status_led::task`),
+   and logs `"UI and isolated OLED tasks started"`.
 8. Creates the `UiController` (which holds the `UiState`, the management
    request tracker, and the saved-device addresses), the `PowerManager`, and a
    1-second housekeeping ticker, publishes the first frame, and enters the UI

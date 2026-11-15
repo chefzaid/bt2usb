@@ -123,6 +123,7 @@ pub const USB_HID_POLL_MS: u8 = 1;
 //   Button SELECT  → P0.24
 //   I²C SDA        → P0.26
 //   I²C SCL        → P0.27
+//   Status LED     → P0.13, active low (LED1 on the DK, D1 on rev A)
 //
 // P0.06 is not used by the bridge firmware.  The Renode simulation build
 // (`sim.rs`) uses it as the UARTE0 TX pin, as on the DK's VCOM UART.
@@ -141,6 +142,12 @@ pub const SCREEN_AUTO_OFF_TIMEOUT_SECS: u64 = 120;
 /// The buttons are ignored while it waits. A reply normally arrives within a
 /// few seconds: the affected links close, then the store is written to flash.
 pub const UI_MANAGEMENT_TIMEOUT_SECS: u64 = 30;
+
+/// Status LED heartbeat, shown while no BLE link is up: lit for
+/// `STATUS_LED_FLASH_MS` at the start of every `STATUS_LED_PERIOD_MS`
+/// (`ui::status_led_logic`).
+pub const STATUS_LED_PERIOD_MS: u64 = 1_000;
+pub const STATUS_LED_FLASH_MS: u64 = 100;
 
 // Diagnostics
 

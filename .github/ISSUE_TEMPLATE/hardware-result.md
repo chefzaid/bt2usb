@@ -76,6 +76,7 @@ measurement that supports each result in Notes.
 | Boot line reports the commit under test, without `-dirty` for a clean checkout | | |
 | `reset reason:` matches how the board was started (`soft reset` after `mask run`, `power-on or brown-out` after plugging it in) | | Cause: |
 | Boot log shows `SoftDevice started`, `USB HID device started`, `UI and isolated OLED tasks started`, `OLED initialized/recovered`, and no panic | | |
+| Status LED flashes once a second with no link, stays lit with one, and is dark while the PC sleeps | | |
 | `USB configured by host: true`; the PC lists keyboard, mouse, and consumer-control interfaces | | |
 | OLED shows the Home screen | | |
 | `stack guard: 4096 bytes at ...` follows the boot line | | Guard range: |

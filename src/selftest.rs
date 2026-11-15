@@ -52,7 +52,7 @@ use defmt_rtt as _;
 use panic_probe as _;
 
 use embassy_executor::Spawner;
-use embassy_nrf::gpio::{AnyPin, Input, Pull};
+use embassy_nrf::gpio::{AnyPin, Input, Level, Output, OutputDrive, Pull};
 use embassy_nrf::interrupt::{InterruptExt, Priority};
 use embassy_nrf::usb::vbus_detect::SoftwareVbusDetect;
 use embassy_nrf::{bind_interrupts, interrupt, peripherals, twim, Peri};
@@ -144,6 +144,10 @@ async fn main(spawner: Spawner) {
     // it once and resets. Boards in normal-voltage mode ignore the register.
     nrf_config.dcdc.reg0_voltage = Some(embassy_nrf::config::Reg0Voltage::_3V3);
     let p = embassy_nrf::init(nrf_config);
+    // The status LED (P0.13, active low) stays lit for the whole run, so a
+    // look at the board checks it (docs/first-flash.md).
+    let _status_led = Output::new(p.P0_13, Level::Low, OutputDrive::Standard);
+    info!("status LED (P0.13) lit for the whole self-test: check it by eye");
     interrupt::USBD.set_priority(Priority::P2);
     interrupt::TWISPI0.set_priority(Priority::P2);
 
